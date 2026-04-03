@@ -7,24 +7,102 @@ from sqlalchemy.orm import selectinload
 
 from ..models import Protocol, ProtocolVersion, PortDefinition, FieldDefinition, ParserProfile
 
-DEVICE_FAMILY_RULES = [
-    (["IRS", "惯性基准", "惯导"], "irs"),
-    (["应答机", "XPDR", "JZXPDR"], "xpdr"),
-    (["RTK", "GPS", "地基接收"], "rtk"),
-    (["FCC", "飞控"], "fcc"),
-    (["ATG", "CPE"], "atg"),
-    (["显控计算机-飞管", "飞管软件"], "fms"),
-    (["ADC", "ADRU", "大气数据", "大气系统"], "adc"),
-]
+# ── 端口 → 协议族 写死映射表 ──
+# 来源：《飞管VA08TSN端口及用途统计表-补充协议文件.xlsx》
+# 每个端口对应一个 protocol_family，即平台中已注册的解析器族
+PORT_FAMILY_MAP: Dict[int, str] = {
+    # ── 800V 动力电池 BMS (bms800v) ──
+    # 上行（BMS → 飞管）
+    7028: "bms800v", 7029: "bms800v", 7030: "bms800v", 7031: "bms800v",
+    7032: "bms800v", 7033: "bms800v", 7058: "bms800v", 7059: "bms800v",
+    7060: "bms800v", 7061: "bms800v", 7062: "bms800v", 7063: "bms800v",
+    7064: "bms800v", 7065: "bms800v", 7066: "bms800v", 7067: "bms800v",
+    7068: "bms800v", 7069: "bms800v", 7070: "bms800v",
+    # 下行（飞管 → BMS）
+    8001: "bms800v", 8009: "bms800v",
+
+    # ── 270V&28V 动力电池 BMS (bms270v) ──
+    # 上行
+    7034: "bms270v", 7035: "bms270v", 7036: "bms270v", 7037: "bms270v",
+    7038: "bms270v", 7039: "bms270v", 7040: "bms270v", 7042: "bms270v",
+    7043: "bms270v", 7044: "bms270v",
+    # 下行
+    8002: "bms270v", 8010: "bms270v",
+
+    # ── ADC 大气数据系统 (adc) ──
+    7001: "adc", 7002: "adc", 7003: "adc",
+    7022: "adc", 7023: "adc", 7024: "adc", 7025: "adc", 7026: "adc", 7027: "adc",
+    8003: "adc", 8004: "adc", 8005: "adc", 8006: "adc", 8007: "adc", 8008: "adc",
+
+    # ── IRS 惯导 (irs) ──
+    7004: "irs", 7005: "irs", 7006: "irs",
+
+    # ── 飞管给惯导转发 (fms_irs_fwd) ──
+    8025: "fms_irs_fwd", 8026: "fms_irs_fwd", 8027: "fms_irs_fwd",
+    8039: "fms_irs_fwd", 8040: "fms_irs_fwd", 8041: "fms_irs_fwd",
+
+    # ── RTK (rtk) ──
+    7017: "rtk", 7018: "rtk",
+
+    # ── S模式应答机 XPDR (xpdr) ──
+    8016: "xpdr", 8030: "xpdr", 8031: "xpdr",
+    8036: "xpdr", 8037: "xpdr", 8038: "xpdr",
+
+    # ── ATG / CPE (atg) ──
+    8050: "atg", 8051: "atg", 8052: "atg", 8053: "atg",
+
+    # ── FCC 飞控发出数据 (fcc) ──
+    7091: "fcc", 7092: "fcc",
+    9001: "fcc", 9002: "fcc", 9003: "fcc", 9004: "fcc",
+    9011: "fcc", 9012: "fcc", 9013: "fcc", 9014: "fcc",
+    9021: "fcc", 9022: "fcc", 9023: "fcc",
+    9031: "fcc", 9032: "fcc", 9033: "fcc",
+    9041: "fcc", 9042: "fcc", 9043: "fcc",
+    9051: "fcc", 9052: "fcc", 9053: "fcc",
+    9061: "fcc", 9062: "fcc", 9063: "fcc",
+    9071: "fcc", 9072: "fcc", 9073: "fcc",
+    9091: "fcc", 9092: "fcc", 9093: "fcc",
+    9101: "fcc", 9102: "fcc", 9103: "fcc",
+    9111: "fcc", 9112: "fcc", 9113: "fcc",
+    9121: "fcc", 9122: "fcc", 9123: "fcc",
+    9131: "fcc", 9132: "fcc", 9133: "fcc",
+    9141: "fcc", 9142: "fcc", 9143: "fcc",
+    9151: "fcc", 9152: "fcc", 9153: "fcc",
+    9201: "fcc", 9202: "fcc", 9203: "fcc",
+    9211: "fcc", 9212: "fcc", 9213: "fcc",
+    9221: "fcc", 9222: "fcc", 9223: "fcc",
+    9231: "fcc", 9232: "fcc", 9233: "fcc",
+    9241: "fcc", 9242: "fcc", 9243: "fcc",
+    9251: "fcc", 9252: "fcc", 9253: "fcc",
+
+    # ── S模式应答机上行（应答机 → 飞管）(xpdr) ──
+    7081: "xpdr", 7082: "xpdr",
+
+    # ── FMS 飞管与飞控交互 (fms) ──
+    9408: "fms", 9409: "fms", 9410: "fms", 9411: "fms",
+    9508: "fms", 9509: "fms", 9510: "fms", 9511: "fms",
+    9608: "fms", 9609: "fms", 9610: "fms", 9611: "fms",
+    9708: "fms", 9709: "fms", 9710: "fms", 9711: "fms",
+    9801: "fms", 9802: "fms", 9803: "fms", 9804: "fms",
+    9805: "fms", 9806: "fms", 9807: "fms",
+    9808: "fms", 9809: "fms", 9810: "fms", 9811: "fms",
+    9901: "fms", 9902: "fms", 9903: "fms", 9904: "fms",
+    9905: "fms", 9906: "fms", 9907: "fms",
+    9908: "fms", 9909: "fms", 9910: "fms", 9911: "fms",
+}
 
 
-def resolve_device_family(device_name: str) -> Optional[str]:
-    """根据设备名推断其所属的协议族"""
-    upper = device_name.upper()
-    for keywords, family in DEVICE_FAMILY_RULES:
-        for kw in keywords:
-            if kw.upper() in upper or kw in device_name:
-                return family
+def resolve_port_family(port: int) -> Optional[str]:
+    """根据端口号返回写死的协议族"""
+    return PORT_FAMILY_MAP.get(port)
+
+
+def resolve_device_family(device_name: str, ports: List[int] = None) -> Optional[str]:
+    """根据设备下属端口列表确定协议族（取第一个命中的端口）。"""
+    for p in (ports or []):
+        f = resolve_port_family(p)
+        if f:
+            return f
     return None
 
 
@@ -242,14 +320,20 @@ class ProtocolService:
         return result.scalars().all()
 
     async def get_devices_with_family(self, version_id: int) -> List[dict]:
-        """获取设备列表，并附带推断的 protocol_family 及其可选解析器版本"""
+        """获取设备列表，并附带推断的 protocol_family 及其可选解析器版本。
+
+        使用 PORT_FAMILY_MAP 按端口写死映射确定每个设备的协议族。
+        """
         devices = await self.get_devices_by_version(version_id)
-        
+
         families_cache: Dict[str, List[dict]] = {}
         for dev in devices:
-            family = resolve_device_family(dev["device_name"])
+            family = resolve_device_family(
+                dev["device_name"],
+                ports=dev.get("ports", []),
+            )
             dev["protocol_family"] = family
-            
+
             if family and family not in families_cache:
                 parsers = await self.get_parsers_by_family(family)
                 families_cache[family] = [
@@ -261,9 +345,9 @@ class ProtocolService:
                     }
                     for p in parsers
                 ]
-            
+
             dev["available_parsers"] = families_cache.get(family, [])
-        
+
         return devices
 
     async def get_device_port_mapping(self, version_id: int) -> dict:

@@ -632,8 +632,7 @@ class ParserService:
                 await self.update_task_status(task_id, "failed", error_message="未能解析出任何数据，请确认数据文件和解析器选择是否正确")
                 return False
             
-            await self.update_task_status(task_id, "processing", progress=99)
-
+            await self.update_task_status(task_id, "processing", progress=95)
 
             # FCC 后处理：为每行 FCC 记录回填当前主飞控，同时构建 ATG 核对所需的事件列表
             fcc_pid = None
@@ -721,36 +720,45 @@ class ParserService:
                         )
                 print(f"[Parser] ATG 核对列计算完成")
 
-            # 保存结果
-            for pid, parsed_data in all_parsed_data.items():
+            # 保存结果（进度 96% → 99%）
+            save_items = [
+                (pid, port_number, records)
+                for pid, parsed_data in all_parsed_data.items()
+                for port_number, records in parsed_data.items()
+                if records
+            ]
+            save_total = len(save_items) or 1
+
+            for save_idx, (pid, port_number, records) in enumerate(save_items):
                 profile = await self.get_parser_profile(pid)
                 profile_name = profile.name if profile else f"Parser-{pid}"
-                
-                for port_number, records in parsed_data.items():
-                    if not records:
-                        continue
-                    
-                    result_file = await self._save_results(
-                        task_id, port_number, records, parser_id=pid
-                    )
-                    
-                    source_device = port_device_map.get(port_number)
-                    
-                    parse_result = ParseResult(
-                        task_id=task_id,
-                        port_number=port_number,
-                        message_name=f"{profile_name} - Port {port_number}",
-                        parser_profile_id=pid,
-                        parser_profile_name=profile_name,
-                        source_device=source_device,
-                        record_count=len(records),
-                        result_file=result_file,
-                        time_start=datetime.fromtimestamp(records[0].get('timestamp', 0)) if records else None,
-                        time_end=datetime.fromtimestamp(records[-1].get('timestamp', 0)) if records else None,
-                    )
-                    self.db.add(parse_result)
-                    total_records += len(records)
-            
+                parser_inst = merged_plan[pid][0] if pid in merged_plan else None
+
+                result_file = await self._save_results(
+                    task_id, port_number, records,
+                    parser_id=pid, parser=parser_inst,
+                )
+
+                source_device = port_device_map.get(port_number)
+
+                parse_result = ParseResult(
+                    task_id=task_id,
+                    port_number=port_number,
+                    message_name=f"{profile_name} - Port {port_number}",
+                    parser_profile_id=pid,
+                    parser_profile_name=profile_name,
+                    source_device=source_device,
+                    record_count=len(records),
+                    result_file=result_file,
+                    time_start=datetime.fromtimestamp(records[0].get('timestamp', 0)) if records else None,
+                    time_end=datetime.fromtimestamp(records[-1].get('timestamp', 0)) if records else None,
+                )
+                self.db.add(parse_result)
+                total_records += len(records)
+
+                save_pct = 96 + int((save_idx + 1) / save_total * 3)
+                await self.update_task_status(task_id, "processing", progress=min(save_pct, 99))
+
             await self.db.commit()
             await self.update_task_status(task_id, "completed", parsed_packets=total_records)
             print(f"[Parser] 解析完成，共 {total_records} 条记录")
@@ -868,8 +876,15 @@ class ParserService:
                                             if record:
                                                 if dst_port not in parsed_data:
                                                     parsed_data[dst_port] = []
-                                                parsed_data[dst_port].append(record)
-                                                matched_count += 1
+                                                multi = record.pop("_multi_rows", None)
+                                                if multi:
+                                                    for r in multi:
+                                                        r.pop("_multi_rows", None)
+                                                        parsed_data[dst_port].append(r)
+                                                        matched_count += 1
+                                                else:
+                                                    parsed_data[dst_port].append(record)
+                                                    matched_count += 1
                     except Exception:
                         continue
                 
@@ -1036,8 +1051,15 @@ class ParserService:
                         else:
                             record = parser.parse_packet(payload, dst_port, timestamp, layout)
                             if record:
-                                all_parsed_data[pid][dst_port].append(record)
-                                matched_count += 1
+                                multi = record.pop("_multi_rows", None)
+                                if multi:
+                                    for r in multi:
+                                        r.pop("_multi_rows", None)
+                                        all_parsed_data[pid][dst_port].append(r)
+                                        matched_count += 1
+                                else:
+                                    all_parsed_data[pid][dst_port].append(record)
+                                    matched_count += 1
                     except Exception:
                         continue
                 
@@ -1079,28 +1101,41 @@ class ParserService:
         task_id: int,
         port_number: int,
         records: List[Dict],
-        parser_id: int = None
+        parser_id: int = None,
+        parser: Any = None,
     ) -> str:
-        """保存解析结果为Parquet文件
-        
-        Args:
-            task_id: 任务ID
-            port_number: 端口号
-            records: 解析记录列表
-            parser_id: 解析器ID (多解析器时用于区分文件)
+        """保存解析结果为Parquet文件，按端口裁剪列。
+
+        如果 parser 提供了 get_output_columns(port)，则只保留该端口
+        对应的列，去除其它 CAN 帧/消息类型产生的多余列。
+        使用 pyarrow 直接写入以减少大表场景的内存和 CPU 开销。
         """
         result_dir = DATA_DIR / "results" / str(task_id)
         result_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 如果有多个解析器，在文件名中加入解析器ID
+
         if parser_id:
             result_file = result_dir / f"port_{port_number}_parser_{parser_id}.parquet"
         else:
             result_file = result_dir / f"port_{port_number}.parquet"
-        
-        df = pd.DataFrame(records)
-        df.to_parquet(result_file, index=False)
-        
+
+        # 确定需要保留的列
+        target_cols = None
+        if parser is not None and hasattr(parser, "get_output_columns"):
+            try:
+                target_cols = parser.get_output_columns(port_number)
+            except Exception:
+                target_cols = None
+
+        if target_cols:
+            trimmed = [{k: r.get(k) for k in target_cols} for r in records]
+        else:
+            trimmed = records
+
+        print(f"[Parser] 保存端口 {port_number}: {len(trimmed)} 行"
+              + (f", {len(target_cols)} 列" if target_cols else ""))
+        table = pa.Table.from_pylist(trimmed)
+        pq.write_table(table, str(result_file))
+
         return str(result_file)
     
     def _find_parquet_file(self, result_dir: Path, port_number: int, parser_id: int = None) -> Optional[Path]:

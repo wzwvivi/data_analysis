@@ -8,6 +8,9 @@ from .atg_cpe_parser import ATGCPEParser
 from .fcc_parser import FCCParser
 from .fms_fcc_parser import FMSFCCParser
 from .adc_parser import ADCParser
+from .bms800v_parser import BMS800VParser
+from .bms270v_parser import BMS270VParser
+from .fms_irs_fwd_parser import FMSIRSForwardParser
 from .base import BaseParser, ParserRegistry, FieldLayout
 
 __all__ = [
@@ -20,6 +23,9 @@ __all__ = [
     "FCCParser",
     "FMSFCCParser",
     "ADCParser",
+    "BMS800VParser",
+    "BMS270VParser",
+    "FMSIRSForwardParser",
     "BaseParser",
     "ParserRegistry",
     "FieldLayout",

@@ -140,3 +140,4 @@ tsn-log-analyzer/
 1. 解析大文件可能需要较长时间，请耐心等待
 2. 建议使用Chrome或Edge浏览器
 3. 导出大量数据时建议使用Parquet格式
+4. 仓库中包含 `backend/data/tsn_analyzer.db` 部署用 SQLite 快照（协议库、解析器配置等）；新环境可直接使用或启动后由程序初始化。大体积上传文件、解析结果目录默认不纳入版本库（见 `.gitignore`）。

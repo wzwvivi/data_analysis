@@ -47,6 +47,12 @@ async def init_parser_profiles(db: AsyncSession):
     )
     atg_exists = result.scalar_one_or_none()
 
+    # 检查飞管给惯导转发是否已存在
+    result = await db.execute(
+        select(ParserProfile).where(ParserProfile.parser_key == "fms_irs_fwd_v0.4")
+    )
+    fms_irs_fwd_exists = result.scalar_one_or_none()
+
     # 检查FCC是否已存在
     result = await db.execute(
         select(ParserProfile).where(ParserProfile.parser_key == "fcc_v13")
@@ -205,6 +211,79 @@ async def init_parser_profiles(db: AsyncSession):
             adc_exists.output_fields = ADC_OUTPUT_FIELDS
             print("[Init] 已更新 ADC output_fields 到最新版本")
         print("[Init] 大气数据系统 解析版本已存在，跳过创建")
+
+    # 800V BMS 动力电池解析器
+    result = await db.execute(
+        select(ParserProfile).where(ParserProfile.parser_key == "bms_800v_v2.5")
+    )
+    bms800v_exists = result.scalar_one_or_none()
+
+    if not bms800v_exists:
+        profiles_to_create.append(
+            ParserProfile(
+                name="800V动力电池BMS",
+                version="V2.5.1",
+                device_model="800V_BMS",
+                protocol_family="bms800v",
+                parser_key="bms_800v_v2.5",
+                is_active=True,
+                description="800V动力电池BMS CAN协议V2.5.1解析器。覆盖21个TSN端口（上行19+下行2），解码CAN扩展帧中电池包状态、测量数据、能量/充电信息、单电芯电压/温度极值、故障信息、序列号、监控状态及维护级单电芯数据。通用列名+pack_id区分电池包。",
+                supported_ports="",
+                output_fields='["timestamp","source_port","can_id_hex","msg_type","pack_id"]',
+            )
+        )
+        print("[Init] 将创建 800V动力电池BMS 解析器配置")
+    else:
+        if not bms800v_exists.protocol_family:
+            bms800v_exists.protocol_family = "bms800v"
+            print("[Init] 已更新 BMS800V protocol_family = bms800v")
+        print("[Init] 800V动力电池BMS 解析版本已存在，跳过创建")
+
+    # 270V&28V BMS 动力电池解析器
+    result = await db.execute(
+        select(ParserProfile).where(ParserProfile.parser_key == "bms_270v_v2.5")
+    )
+    bms270v_exists = result.scalar_one_or_none()
+
+    if not bms270v_exists:
+        profiles_to_create.append(
+            ParserProfile(
+                name="270V&28V动力电池BMS",
+                version="V2.5.2",
+                device_model="270V_28V_BMS",
+                protocol_family="bms270v",
+                parser_key="bms_270v_v2.5",
+                is_active=True,
+                description="270V&28V动力电池BMS CAN协议V2.5.2解析器。覆盖12个TSN端口（上行10+下行2），解码CAN扩展帧中电池包P28(28V)/PE/PL/PR(270V)的状态、测量数据、充电信息、单电芯数据及故障信息。通用列名+pack_id区分电池包。",
+                supported_ports="",
+                output_fields='["timestamp","source_port","can_id_hex","msg_type","pack_id"]',
+            )
+        )
+        print("[Init] 将创建 270V&28V动力电池BMS 解析器配置")
+    else:
+        if not bms270v_exists.protocol_family:
+            bms270v_exists.protocol_family = "bms270v"
+            print("[Init] 已更新 BMS270V protocol_family = bms270v")
+        print("[Init] 270V&28V动力电池BMS 解析版本已存在，跳过创建")
+
+    # 飞管给惯导转发数据解析器
+    if not fms_irs_fwd_exists:
+        profiles_to_create.append(
+            ParserProfile(
+                name="飞管给惯导转发数据",
+                version="V0.4",
+                device_model="FMS_IRS",
+                protocol_family="fms_irs_fwd",
+                parser_key="fms_irs_fwd_v0.4",
+                is_active=True,
+                description="飞管给惯导转发数据及初始化数据协议V0.4解析器。FMS1/FMS2向IRS1/2/3发送手动对准指令及大气数据转发，端口8025-8027/8039-8041。",
+                supported_ports="8025,8026,8027,8039,8040,8041",
+                output_fields='["timestamp","source_port","fms_id","target_irs","align_cmd","align_cmd_cn","manual_longitude_deg","manual_latitude_deg","manual_altitude_m","atm_baro_altitude_ft","atm_indicated_airspeed_kn","atm_true_airspeed_kn","atm_static_pressure_hpa","atm_dynamic_pressure_hpa","validity_raw"]',
+            )
+        )
+        print("[Init] 将创建 飞管给惯导转发数据 解析器配置")
+    else:
+        print("[Init] 飞管给惯导转发数据 解析版本已存在，跳过创建")
 
     # FCC 飞控解析器
     if not fcc_exists:

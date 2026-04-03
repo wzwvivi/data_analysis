@@ -17,6 +17,10 @@ const FAMILY_LABELS = {
   rtk: 'RTK 协议',
   fcc: 'FCC 飞控协议',
   atg: 'ATG 协议',
+  fms: '飞管 FMS 协议',
+  adc: '大气数据 ADC 协议',
+  bms800v: '800V 动力电池 BMS',
+  bms270v: '270V&28V 动力电池 BMS',
 }
 
 const ATG_DEPENDENCY_SLOTS = [
