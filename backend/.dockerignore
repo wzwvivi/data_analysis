@@ -1,0 +1,12 @@
+__pycache__
+*.pyc
+.env
+data/
+uploads/
+*.db
+scripts/
+*.bat
+compare_with_excel.py
+read_excel.py
+validate_with_260324.py
+fix_db_names.py

@@ -1,0 +1,25 @@
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Keep database file, ignore generated analysis artifacts
+backend/data/results/
+backend/data/exports/
+backend/data/*.db-journal
+backend/data/*.db-wal
+backend/data/*.db-shm
+
+# Uploaded files can be huge; keep directories local
+backend/uploads/pcap/
+backend/uploads/protocols/
+backend/uploads/*/
+
+# IDE/local
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
