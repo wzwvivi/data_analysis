@@ -1,6 +1,6 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Menu, Typography } from 'antd'
+import { Layout, Menu, Typography, Dropdown, Button } from 'antd'
 import {
   CloudUploadOutlined,
   UnorderedListOutlined,
@@ -8,47 +8,61 @@ import {
   ApiOutlined,
   SwapOutlined,
   FileSearchOutlined,
+  UserOutlined,
+  LogoutOutlined,
 } from '@ant-design/icons'
+import { useAuth } from '../context/AuthContext'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
 
-const menuItems = [
-  {
-    type: 'group',
-    label: '网络数据分析',
-    children: [
-      { key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' },
-      { key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' },
-    ],
-  },
-  {
-    type: 'group',
-    label: '飞机行为事件分析',
-    children: [
-      { key: '/event-analysis', icon: <FileSearchOutlined />, label: '事件分析' },
-    ],
-  },
-  {
-    type: 'group',
-    label: 'TSN数据异常检查',
-    children: [
-      { key: '/compare', icon: <SwapOutlined />, label: '异常检查' },
-    ],
-  },
-  { type: 'divider' },
-  {
-    type: 'group',
-    label: '系统配置',
-    children: [
-      { key: '/network-config', icon: <ApiOutlined />, label: '网络配置' },
-    ],
-  },
-]
-
 function MainLayout() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user, logout, isAdmin } = useAuth()
+
+  const menuItems = useMemo(() => {
+    const sysChildren = [
+      { key: '/network-config', icon: <ApiOutlined />, label: '网络配置' },
+    ]
+    if (isAdmin) {
+      sysChildren.push({
+        key: '/admin/platform-data',
+        icon: <CloudUploadOutlined />,
+        label: '平台共享数据',
+      })
+    }
+    return [
+      {
+        type: 'group',
+        label: '网络数据分析',
+        children: [
+          { key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' },
+          { key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' },
+        ],
+      },
+      {
+        type: 'group',
+        label: '飞机行为事件分析',
+        children: [
+          { key: '/event-analysis', icon: <FileSearchOutlined />, label: '事件分析' },
+        ],
+      },
+      {
+        type: 'group',
+        label: 'TSN数据异常检查',
+        children: [
+          { key: '/compare', icon: <SwapOutlined />, label: '异常检查' },
+        ],
+      },
+      { type: 'divider' },
+      {
+        type: 'group',
+        label: '系统配置',
+        children: sysChildren,
+      },
+    ]
+  }, [isAdmin])
 
   const handleMenuClick = ({ key }) => {
     navigate(key)
@@ -60,7 +74,13 @@ function MainLayout() {
     if (path.startsWith('/tasks/')) return '/tasks'
     if (path.startsWith('/compare')) return '/compare'
     if (path.startsWith('/event-analysis')) return '/event-analysis'
+    if (path.startsWith('/admin/platform-data')) return '/admin/platform-data'
     return path
+  }
+
+  const onLogout = () => {
+    logout()
+    navigate('/login')
   }
 
   return (
@@ -116,7 +136,24 @@ function MainLayout() {
             {location.pathname.includes('/analysis') && !location.pathname.includes('/event-analysis') && '网络数据分析 / 时序数据分析与可视化'}
             {location.pathname.startsWith('/tasks/') && !location.pathname.includes('/analysis') && '网络数据分析 / 解析结果查看'}
             {location.pathname === '/network-config' && '系统配置 / 网络配置'}
+            {location.pathname.startsWith('/admin/platform-data') && '系统配置 / 平台共享数据'}
           </div>
+          <Dropdown
+            menu={{
+              items: [{ key: 'logout', label: '退出登录', icon: <LogoutOutlined /> }],
+              onClick: ({ key }) => {
+                if (key === 'logout') onLogout()
+              },
+            }}
+            placement="bottomRight"
+          >
+            <Button type="text" style={{ color: '#c9d1d9' }}>
+              <UserOutlined /> {user?.username || '—'}
+              <span style={{ marginLeft: 8, color: '#8b949e', fontSize: 12 }}>
+                {user?.role === 'admin' ? '管理员' : '用户'}
+              </span>
+            </Button>
+          </Dropdown>
         </Header>
         <Content style={{
           margin: '24px',

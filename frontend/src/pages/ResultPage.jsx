@@ -2,15 +2,19 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Card, Table, Tabs, Tag, Button, Space, message, Statistic, Row, Col,
-  Spin, Empty, Select, Radio, Checkbox, Alert, Progress, InputNumber, Divider,
+  Spin, Empty, Select, Radio, Checkbox, Alert, Progress, InputNumber, Divider, Segmented,
+  Modal, Collapse, Tooltip, Popover,
 } from 'antd'
 import {
   DownloadOutlined, LineChartOutlined, ReloadOutlined,
   DatabaseOutlined, ApiOutlined, RocketOutlined,
   DesktopOutlined, FilterOutlined,
   BarChartOutlined, SwapOutlined, WarningOutlined,
+  SettingOutlined, PushpinOutlined, AppstoreOutlined,
+  PlusOutlined, DeleteOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
+import * as echarts from 'echarts'
 import { parseApi } from '../services/api'
 import dayjs from 'dayjs'
 
@@ -41,7 +45,7 @@ function binarySearchNearest(data, targetTime) {
     else hi = mid
   }
   if (lo > 0 && Math.abs(data[lo - 1][0] - targetTime) < Math.abs(data[lo][0] - targetTime)) lo--
-  return data[lo][1]
+  return data[lo]
 }
 
 function getResultKey(result) {
@@ -66,6 +70,7 @@ function ResultPage() {
   const [activeResult, setActiveResult] = useState(null)
   const [portData, setPortData] = useState([])
   const [portColumns, setPortColumns] = useState([])
+  const [allColumnNames, setAllColumnNames] = useState([])
   const [dataLoading, setDataLoading] = useState(false)
   const [pagination, setPagination] = useState({
     current: 1, pageSize: 100, total: 0,
@@ -74,6 +79,17 @@ function ResultPage() {
   const [selectedParser, setSelectedParser] = useState(null)
 
   const [mainTab, setMainTab] = useState('table')
+
+  // ---- Column manager ----
+  const [colManagerOpen, setColManagerOpen] = useState(false)
+  const [hiddenColumns, setHiddenColumns] = useState(new Set())
+  const [pinnedColumns, setPinnedColumns] = useState(new Set(['timestamp', 'BeijingDateTime']))
+
+  // ---- Batch export ----
+  const [batchExportOpen, setBatchExportOpen] = useState(false)
+  const [batchExportFormat, setBatchExportFormat] = useState('csv')
+  const [batchExportSelected, setBatchExportSelected] = useState([])
+  const [batchExporting, setBatchExporting] = useState(false)
 
   // ---- Port anomaly analysis ----
   const [anomalyDefaultsLoading, setAnomalyDefaultsLoading] = useState(false)
@@ -94,6 +110,10 @@ function ResultPage() {
   const [spAvailableFields, setSpAvailableFields] = useState([])
   const [spSelectedFields, setSpSelectedFields] = useState([])
   const [spChartData, setSpChartData] = useState({})
+  const [spPrimaryYField, setSpPrimaryYField] = useState(null)
+  const [spChartLayout, setSpChartLayout] = useState('overlay')
+  const [spGridCols, setSpGridCols] = useState(2)
+  const [spGridPanels, setSpGridPanels] = useState([])
   // cross_port mode
   const [cpSelectedResults, setCpSelectedResults] = useState([])
   const [cpCommonFields, setCpCommonFields] = useState([])
@@ -102,6 +122,9 @@ function ResultPage() {
   const [cpChartData, setCpChartData] = useState({})
   const [cpFieldsPerResult, setCpFieldsPerResult] = useState({})
   const [cpSkippedSeries, setCpSkippedSeries] = useState([])
+  const [cpPrimaryYSeries, setCpPrimaryYSeries] = useState(null)
+  const [cpChartLayout, setCpChartLayout] = useState('overlay')
+  const [cpGridCols, setCpGridCols] = useState(2)
   // shared
   const [chartLoading, setChartLoading] = useState(false)
 
@@ -144,6 +167,14 @@ function ResultPage() {
     if (activeResult) loadPortData()
   }, [activeResult, pagination.current, pagination.pageSize])
 
+  useEffect(() => {
+    if (allColumnNames.length === 0) return
+    const visibleCols = allColumnNames.filter(c => !hiddenColumns.has(c))
+    const pinned = visibleCols.filter(c => pinnedColumns.has(c))
+    const unpinned = visibleCols.filter(c => !pinnedColumns.has(c))
+    setPortColumns([...pinned, ...unpinned].map(buildColumnDef))
+  }, [hiddenColumns, pinnedColumns, allColumnNames])
+
   // ======== Data loading ========
 
   const loadTask = useCallback(async (silent = false) => {
@@ -173,6 +204,32 @@ function ResultPage() {
     return () => clearInterval(id)
   }, [task?.status, loadTask])
 
+  const buildColumnDef = (col) => ({
+    title: col, dataIndex: col, key: col,
+    width: col === 'timestamp' ? 160 : col === '核对' ? 560 : 120,
+    fixed: pinnedColumns.has(col) ? 'left' : undefined,
+    sorter: (a, b) => {
+      const va = a[col], vb = b[col]
+      if (va == null && vb == null) return 0
+      if (va == null) return -1
+      if (vb == null) return 1
+      if (typeof va === 'number' && typeof vb === 'number') return va - vb
+      return String(va).localeCompare(String(vb))
+    },
+    render: (value) => {
+      if (col === 'timestamp') return <span className="mono">{value}</span>
+      if (col === '核对') {
+        return (
+          <span className="mono" style={{ whiteSpace: 'normal', wordBreak: 'break-word', display: 'block', maxWidth: 540, lineHeight: 1.45 }}>
+            {value != null ? String(value) : ''}
+          </span>
+        )
+      }
+      if (typeof value === 'number') return <span className="mono">{value.toFixed(6)}</span>
+      return <span className="mono">{value}</span>
+    },
+  })
+
   const loadPortData = async () => {
     if (!activeResult) return
     setDataLoading(true)
@@ -183,32 +240,12 @@ function ResultPage() {
       const res = await parseApi.getData(taskId, activeResult.port_number, params)
       setPortData(res.data.data || [])
       setPagination(prev => ({ ...prev, total: res.data.total_records }))
-      const cols = (res.data.columns || []).map(col => ({
-        title: col, dataIndex: col, key: col,
-        width: col === 'timestamp' ? 180 : col === '核对' ? 560 : 120,
-        render: (value) => {
-          if (col === 'timestamp') return dayjs(value * 1000).format('YYYY-MM-DD HH:mm:ss.SSS')
-          if (col === '核对') {
-            return (
-              <span
-                className="mono"
-                style={{
-                  whiteSpace: 'normal',
-                  wordBreak: 'break-word',
-                  display: 'block',
-                  maxWidth: 540,
-                  lineHeight: 1.45,
-                }}
-              >
-                {value != null ? String(value) : ''}
-              </span>
-            )
-          }
-          if (typeof value === 'number') return <span className="mono">{value.toFixed(6)}</span>
-          return <span className="mono">{value}</span>
-        },
-      }))
-      setPortColumns(cols)
+      const rawCols = res.data.columns || []
+      setAllColumnNames(rawCols)
+      const visibleCols = rawCols.filter(c => !hiddenColumns.has(c))
+      const pinned = visibleCols.filter(c => pinnedColumns.has(c))
+      const unpinned = visibleCols.filter(c => !pinnedColumns.has(c))
+      setPortColumns([...pinned, ...unpinned].map(buildColumnDef))
     } catch (err) {
       message.error('加载数据失败')
     } finally {
@@ -263,26 +300,64 @@ function ResultPage() {
     }
   }
 
-  const handleBatchExport = async () => {
-    if (!results || results.length === 0) return
+  const handleBatchExportSubmit = async () => {
+    if (batchExportSelected.length === 0) {
+      message.warning('请至少选择一个端口')
+      return
+    }
+    setBatchExporting(true)
     const hide = message.loading('正在批量导出，请稍候...', 0)
     try {
-      const ports = results.map(r => r.port_number)
-      const parserIds = results.map(r => r.parser_profile_id ? String(r.parser_profile_id) : '')
-      const res = await parseApi.exportBatch(taskId, ports, parserIds)
-      const url = window.URL.createObjectURL(new Blob([res.data]))
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `task_${taskId}_all_ports.xlsx`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(url)
-      hide()
-      message.success(`已导出 ${ports.length} 个端口的数据`)
+      if (batchExportFormat === 'csv') {
+        let completed = 0
+        for (const key of batchExportSelected) {
+          const r = results.find(res => getResultKey(res) === key)
+          if (!r) continue
+          const params = {}
+          if (r.parser_profile_id) params.parser_id = r.parser_profile_id
+          const res2 = await parseApi.exportData(taskId, r.port_number, 'csv', params)
+          const blob = new Blob([res2.data])
+          if (blob.size > 0) {
+            const url = window.URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            const suffix = r.parser_profile_name ? `_${r.parser_profile_name}` : ''
+            link.setAttribute('download', `port_${r.port_number}${suffix}.csv`)
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            window.URL.revokeObjectURL(url)
+          }
+          completed++
+        }
+        hide()
+        message.success(`已导出 ${completed} 个端口的 CSV 文件`)
+      } else {
+        const selectedResults = batchExportSelected.map(key => results.find(res => getResultKey(res) === key)).filter(Boolean)
+        const ports = selectedResults.map(r => r.port_number)
+        const parserIds = selectedResults.map(r => r.parser_profile_id ? String(r.parser_profile_id) : '')
+        const res = await parseApi.exportBatch(taskId, ports, parserIds)
+        const url = window.URL.createObjectURL(new Blob([res.data]))
+        const link = document.createElement('a')
+        link.href = url
+        link.setAttribute('download', `task_${taskId}_batch.xlsx`)
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        window.URL.revokeObjectURL(url)
+        hide()
+        message.success(`已导出 ${ports.length} 个端口到 Excel`)
+      }
+      setBatchExportOpen(false)
     } catch (err) {
       hide()
-      message.error('批量导出失败: ' + (err.response?.data?.detail || err.message))
+      let detail = err.message || '未知错误'
+      if (err.response?.data instanceof Blob) {
+        try { const text = await err.response.data.text(); const json = JSON.parse(text); detail = json.detail || text } catch (_) { detail = `HTTP ${err.response?.status}` }
+      } else if (err.response?.data?.detail) { detail = err.response.data.detail }
+      message.error(`批量导出失败: ${detail}`)
+    } finally {
+      setBatchExporting(false)
     }
   }
 
@@ -430,7 +505,7 @@ function ResultPage() {
       const params = { page: 1, page_size: 1 }
       if (result.parser_profile_id) params.parser_id = result.parser_profile_id
       const res = await parseApi.getData(taskId, result.port_number, params)
-      const cols = (res.data.columns || []).filter(c => !SKIP_FIELDS.has(c))
+      const cols = (res.data.columns || []).filter(c => !SKIP_FIELDS.has(c) && !c.endsWith('_enum'))
       setSpAvailableFields(cols)
     } catch {
       setSpAvailableFields([])
@@ -446,11 +521,14 @@ function ResultPage() {
   }, [spActiveResult, compareMode, loadSpFields])
 
   const loadSpChartData = useCallback(async () => {
-    if (!spActiveResult || spSelectedFields.length === 0) return
+    if (!spActiveResult) return
+    const panelFields = spGridPanels.flat()
+    const allFields = [...new Set([...spSelectedFields, ...panelFields])]
+    if (allFields.length === 0) return
     setChartLoading(true)
     try {
       const newData = {}
-      await Promise.all(spSelectedFields.map(async (field) => {
+      await Promise.all(allFields.map(async (field) => {
         if (spChartData[field]) {
           newData[field] = spChartData[field]
           return
@@ -458,7 +536,11 @@ function ResultPage() {
         const params = { max_points: 2000 }
         if (spActiveResult.parser_profile_id) params.parser_id = spActiveResult.parser_profile_id
         const res = await parseApi.getTimeSeries(taskId, spActiveResult.port_number, field, params)
-        newData[field] = { timestamps: res.data.timestamps, values: res.data.values }
+        newData[field] = {
+          timestamps: res.data.timestamps,
+          values: res.data.values,
+          enumLabels: res.data.enum_labels || null,
+        }
       }))
       setSpChartData(newData)
     } catch {
@@ -466,7 +548,7 @@ function ResultPage() {
     } finally {
       setChartLoading(false)
     }
-  }, [taskId, spActiveResult, spSelectedFields, spChartData])
+  }, [taskId, spActiveResult, spSelectedFields, spGridPanels, spChartData])
 
   useEffect(() => {
     if (compareMode === 'single_port' && spSelectedFields.length > 0) {
@@ -474,36 +556,126 @@ function ResultPage() {
     }
   }, [spSelectedFields])
 
+  useEffect(() => {
+    if (spPrimaryYField && !spSelectedFields.includes(spPrimaryYField)) {
+      setSpPrimaryYField(null)
+    }
+  }, [spSelectedFields, spPrimaryYField])
+
+  useEffect(() => {
+    if (spChartLayout === 'grid' && spGridPanels.length === 0 && spSelectedFields.length > 0) {
+      setSpGridPanels(spSelectedFields.map(f => [f]))
+    }
+  }, [spChartLayout, spSelectedFields, spGridPanels.length])
+
+  useEffect(() => {
+    if (compareMode !== 'single_port' || spChartLayout !== 'grid' || !spActiveResult) return
+    const panelFields = spGridPanels.flat()
+    const missing = panelFields.filter(f => f && !spChartData[f])
+    if (missing.length > 0) {
+      loadSpChartData()
+    }
+  }, [spGridPanels])
+
+  const formatValueWithEnum = (val, enumLabel) => {
+    if (val == null) return '-'
+    if (enumLabel) return `${val} - ${enumLabel}`
+    return typeof val === 'number' ? val.toFixed(6) : String(val)
+  }
+
+  const formatYAxisTick = (value) => {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return String(value ?? '')
+    const v3 = n.toFixed(3)
+    return v3.endsWith('0') ? n.toFixed(2) : v3
+  }
+
+  const computeYRange = (seriesMap, targetKeys = null) => {
+    const keys = targetKeys && targetKeys.length > 0 ? targetKeys : Object.keys(seriesMap)
+    const vals = []
+    keys.forEach((k) => {
+      const points = seriesMap[k] || []
+      points.forEach((p) => {
+        const v = p?.[1]
+        if (v != null && Number.isFinite(v)) vals.push(v)
+      })
+    })
+    if (vals.length === 0) return { min: undefined, max: undefined }
+    const lo = Math.min(...vals)
+    const hi = Math.max(...vals)
+    const span = hi - lo
+    const pad = span > 0 ? span * 0.05 : Math.max(Math.abs(lo) * 0.05, 1)
+    return { min: lo - pad, max: hi + pad }
+  }
+
+  const getSpFieldColor = useCallback((field) => {
+    const idx = spAvailableFields.indexOf(field)
+    return CHART_COLORS[(idx >= 0 ? idx : 0) % CHART_COLORS.length]
+  }, [spAvailableFields])
+
   const getSpChartOption = () => {
     if (spSelectedFields.length === 0 || Object.keys(spChartData).length === 0) return {}
     const allSeriesData = {}
-    const series = spSelectedFields.map((field, index) => {
+    const series = spSelectedFields.map((field) => {
       const data = spChartData[field]
       if (!data) return null
-      const points = data.timestamps.map((t, i) => [t * 1000, data.values[i]])
+      const el = data.enumLabels
+      const points = data.timestamps.map((t, i) => [t * 1000, data.values[i], el ? el[i] : null])
       allSeriesData[field] = points
+      const color = getSpFieldColor(field)
       return {
         name: field, type: 'line', data: points,
         smooth: true, symbol: 'circle', symbolSize: 4, showSymbol: false,
-        lineStyle: { width: 1.5 },
+        lineStyle: { width: 1.5, color }, itemStyle: { color },
         emphasis: { focus: 'series', lineStyle: { width: 3 }, itemStyle: { borderWidth: 2 } },
-        yAxisIndex: index < 2 ? index : 0,
       }
     }).filter(Boolean)
 
     const seriesNames = series.map(s => s.name)
 
-    const yAxis = spSelectedFields.length > 1 ? [
-      { type: 'value', name: spSelectedFields[0],
-        axisLabel: { color: '#8b949e' }, axisLine: { lineStyle: { color: '#30363d' } },
-        splitLine: { lineStyle: { color: '#30363d' } } },
-      { type: 'value', name: spSelectedFields[1] || '',
-        axisLabel: { color: '#8b949e' }, axisLine: { lineStyle: { color: '#30363d' } },
-        splitLine: { show: false } }
-    ] : {
-      type: 'value', axisLabel: { color: '#8b949e' },
-      axisLine: { lineStyle: { color: '#30363d' } },
-      splitLine: { lineStyle: { color: '#30363d' } }
+    const spDualAxis = seriesNames.length === 2
+    let yAxis
+    let chartSeries = series
+    if (spDualAxis) {
+      const leftName = seriesNames[0]
+      const rightName = seriesNames[1]
+      const leftRange = computeYRange(allSeriesData, [leftName])
+      const rightRange = computeYRange(allSeriesData, [rightName])
+      yAxis = [
+        {
+          type: 'value',
+          name: leftName,
+          min: leftRange.min,
+          max: leftRange.max,
+          position: 'left',
+          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#30363d' } },
+          splitLine: { lineStyle: { color: '#30363d' } },
+        },
+        {
+          type: 'value',
+          name: rightName,
+          min: rightRange.min,
+          max: rightRange.max,
+          position: 'right',
+          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#30363d' } },
+          splitLine: { show: false },
+        },
+      ]
+      chartSeries = series.map((s, idx) => ({ ...s, yAxisIndex: idx }))
+    } else {
+      const spUsePrimary = !!spPrimaryYField && seriesNames.includes(spPrimaryYField)
+      const spRange = computeYRange(allSeriesData, spUsePrimary ? [spPrimaryYField] : null)
+      yAxis = {
+        type: 'value',
+        name: spSelectedFields.length > 1 ? (spUsePrimary ? spPrimaryYField : '自动(全部字段)') : '',
+        min: spRange.min,
+        max: spRange.max,
+        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+        axisLine: { lineStyle: { color: '#30363d' } },
+        splitLine: { lineStyle: { color: '#30363d' } },
+      }
     }
 
     return {
@@ -523,32 +695,34 @@ function ResultPage() {
           let html = `<div style="font-weight:600;margin-bottom:8px">${dayjs(time).format('HH:mm:ss.SSS')}</div>`
           const matched = new Set(params.map(p => p.seriesName))
           params.forEach(p => {
+            const display = formatValueWithEnum(p.value[1], p.value[2])
             html += `<div style="display:flex;justify-content:space-between;gap:20px">
               <span>${p.marker} ${p.seriesName}</span>
-              <span style="font-family:JetBrains Mono">${p.value[1]?.toFixed(6) ?? '-'}</span>
+              <span style="font-family:JetBrains Mono">${display}</span>
             </div>`
           })
-          seriesNames.forEach((name, idx) => {
+          seriesNames.forEach((name) => {
             if (matched.has(name)) return
-            const val = binarySearchNearest(allSeriesData[name], time)
-            const color = CHART_COLORS[idx % CHART_COLORS.length]
+            const entry = binarySearchNearest(allSeriesData[name], time)
+            const display = entry ? formatValueWithEnum(entry[1], entry[2]) : '-'
+            const color = getSpFieldColor(name)
             html += `<div style="display:flex;justify-content:space-between;gap:20px">
               <span><span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:${color}"></span> ${name}</span>
-              <span style="font-family:JetBrains Mono">${val?.toFixed(6) ?? '-'}</span>
+              <span style="font-family:JetBrains Mono">${display}</span>
             </div>`
           })
           return html
         }
       },
       legend: { data: spSelectedFields, textStyle: { color: '#8b949e' }, top: 10 },
-      grid: { left: 60, right: spSelectedFields.length > 1 ? 60 : 40, top: 60, bottom: 60 },
+      grid: { left: 60, right: 40, top: 60, bottom: 60 },
       xAxis: {
         type: 'time',
         axisPointer: { snap: true },
         axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
         axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false }
       },
-      yAxis, series,
+      yAxis, series: chartSeries,
       dataZoom: [
         { type: 'inside', start: 0, end: 100 },
         { type: 'slider', start: 0, end: 100, height: 20, bottom: 10,
@@ -560,7 +734,164 @@ function ResultPage() {
     }
   }
 
+  const getSpSingleChartOption = (fieldName) => {
+    const data = spChartData[fieldName]
+    if (!data) return {}
+    const el = data.enumLabels
+    const points = data.timestamps.map((t, i) => [t * 1000, data.values[i], el ? el[i] : null])
+    const range = computeYRange({ [fieldName]: points }, [fieldName])
+    const color = getSpFieldColor(fieldName)
+    return {
+      backgroundColor: 'transparent',
+      title: { text: fieldName, left: 'center', top: 6, textStyle: { color: '#c9d1d9', fontSize: 13, fontFamily: 'JetBrains Mono' } },
+      tooltip: {
+        trigger: 'axis', backgroundColor: '#161b22', borderColor: '#30363d',
+        textStyle: { color: '#c9d1d9' },
+        formatter: (params) => {
+          if (!params || params.length === 0) return ''
+          const p = params[0]
+          const display = formatValueWithEnum(p.value[1], p.value[2])
+          return `<div style="font-weight:600;margin-bottom:4px">${dayjs(p.value[0]).format('HH:mm:ss.SSS')}</div>
+            <div style="display:flex;justify-content:space-between;gap:16px"><span>${p.marker} ${fieldName}</span><span style="font-family:JetBrains Mono">${display}</span></div>`
+        },
+      },
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      grid: { left: 56, right: 16, top: 36, bottom: 46 },
+      xAxis: {
+        type: 'time',
+        axisPointer: { snap: true, label: { show: false } },
+        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
+        axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false },
+      },
+      yAxis: {
+        type: 'value', name: '', min: range.min, max: range.max,
+        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+        axisLine: { lineStyle: { color: '#30363d' } },
+        splitLine: { lineStyle: { color: '#30363d' } },
+      },
+      series: [{
+        name: fieldName, type: 'line', data: points,
+        smooth: true, symbol: 'circle', symbolSize: 4, showSymbol: false,
+        lineStyle: { width: 1.5, color }, itemStyle: { color },
+        emphasis: { lineStyle: { width: 3 }, itemStyle: { borderWidth: 2 } },
+      }],
+      dataZoom: [
+        { type: 'inside', start: 0, end: 100 },
+        { type: 'slider', start: 0, end: 100, height: 16, bottom: 4,
+          borderColor: '#30363d', backgroundColor: '#161b22',
+          fillerColor: 'rgba(88, 166, 255, 0.2)',
+          handleStyle: { color: '#58a6ff' }, textStyle: { color: '#8b949e' } }
+      ],
+    }
+  }
+
+  const getSpPanelChartOption = (panelFields) => {
+    const validFields = panelFields.filter(f => spChartData[f])
+    if (validFields.length === 0) return {}
+
+    const allSeriesData = {}
+    const series = validFields.map((field) => {
+      const data = spChartData[field]
+      const el = data.enumLabels
+      const points = data.timestamps.map((t, i) => [t * 1000, data.values[i], el ? el[i] : null])
+      allSeriesData[field] = points
+      const color = getSpFieldColor(field)
+      return {
+        name: field, type: 'line', data: points,
+        smooth: true, symbol: 'circle', symbolSize: 4, showSymbol: false,
+        lineStyle: { width: 1.5, color }, itemStyle: { color },
+        emphasis: { lineStyle: { width: 3 }, itemStyle: { borderWidth: 2 } },
+      }
+    })
+
+    const titleText = validFields.join(', ')
+
+    let yAxis
+    let chartSeries = series
+    if (validFields.length === 2) {
+      const leftRange = computeYRange(allSeriesData, [validFields[0]])
+      const rightRange = computeYRange(allSeriesData, [validFields[1]])
+      yAxis = [
+        {
+          type: 'value', name: validFields[0], min: leftRange.min, max: leftRange.max, position: 'left',
+          nameTextStyle: { color: '#8b949e', fontSize: 10 },
+          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#30363d' } },
+          splitLine: { lineStyle: { color: '#30363d' } },
+        },
+        {
+          type: 'value', name: validFields[1], min: rightRange.min, max: rightRange.max, position: 'right',
+          nameTextStyle: { color: '#8b949e', fontSize: 10 },
+          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#30363d' } },
+          splitLine: { show: false },
+        },
+      ]
+      chartSeries = series.map((s, idx) => ({ ...s, yAxisIndex: idx }))
+    } else {
+      const range = computeYRange(allSeriesData, null)
+      yAxis = {
+        type: 'value', min: range.min, max: range.max,
+        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+        axisLine: { lineStyle: { color: '#30363d' } },
+        splitLine: { lineStyle: { color: '#30363d' } },
+      }
+    }
+
+    return {
+      backgroundColor: 'transparent',
+      title: { text: titleText, left: 'center', top: 4, textStyle: { color: '#c9d1d9', fontSize: 12, fontFamily: 'JetBrains Mono' } },
+      tooltip: {
+        trigger: 'axis', backgroundColor: '#161b22', borderColor: '#30363d',
+        textStyle: { color: '#c9d1d9' },
+        formatter: (params) => {
+          if (!params || params.length === 0) return ''
+          const time = params[0].value[0]
+          let html = `<div style="font-weight:600;margin-bottom:4px">${dayjs(time).format('HH:mm:ss.SSS')}</div>`
+          const matched = new Set(params.map(p => p.seriesName))
+          params.forEach(p => {
+            const display = formatValueWithEnum(p.value[1], p.value[2])
+            html += `<div style="display:flex;justify-content:space-between;gap:16px"><span>${p.marker} ${p.seriesName}</span><span style="font-family:JetBrains Mono">${display}</span></div>`
+          })
+          validFields.forEach((name) => {
+            if (matched.has(name)) return
+            const entry = binarySearchNearest(allSeriesData[name], time)
+            const display = entry ? formatValueWithEnum(entry[1], entry[2]) : '-'
+            const color = getSpFieldColor(name)
+            html += `<div style="display:flex;justify-content:space-between;gap:16px"><span><span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:${color}"></span> ${name}</span><span style="font-family:JetBrains Mono">${display}</span></div>`
+          })
+          return html
+        },
+      },
+      legend: validFields.length > 1 ? { data: validFields, textStyle: { color: '#8b949e', fontSize: 11 }, top: 20, itemWidth: 14, itemHeight: 8 } : undefined,
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      grid: { left: 56, right: validFields.length === 2 ? 56 : 16, top: validFields.length > 1 ? 44 : 32, bottom: 46 },
+      xAxis: {
+        type: 'time',
+        axisPointer: { snap: true, label: { show: false } },
+        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
+        axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false },
+      },
+      yAxis,
+      series: chartSeries,
+      dataZoom: [
+        { type: 'inside', start: 0, end: 100 },
+        { type: 'slider', start: 0, end: 100, height: 16, bottom: 4,
+          borderColor: '#30363d', backgroundColor: '#161b22',
+          fillerColor: 'rgba(88, 166, 255, 0.2)',
+          handleStyle: { color: '#58a6ff' }, textStyle: { color: '#8b949e' } }
+      ],
+      color: CHART_COLORS,
+    }
+  }
+
   // ======== Cross-port multi-field analysis ========
+
+  const getCpSeriesColor = useCallback((seriesName) => {
+    let hash = 0
+    for (let i = 0; i < seriesName.length; i++) hash = seriesName.charCodeAt(i) + ((hash << 5) - hash)
+    return CHART_COLORS[Math.abs(hash) % CHART_COLORS.length]
+  }, [])
 
   const loadCpFieldsForResults = useCallback(async (selectedKeys) => {
     const fieldsMap = {}
@@ -571,7 +902,7 @@ function ResultPage() {
         const params = { page: 1, page_size: 1 }
         if (result.parser_profile_id) params.parser_id = result.parser_profile_id
         const res = await parseApi.getData(taskId, result.port_number, params)
-        const cols = (res.data.columns || []).filter(c => !SKIP_FIELDS.has(c))
+        const cols = (res.data.columns || []).filter(c => !SKIP_FIELDS.has(c) && !c.endsWith('_enum'))
         fieldsMap[key] = cols
       } catch {
         fieldsMap[key] = []
@@ -651,6 +982,7 @@ function ResultPage() {
             label: `${shortLabel} - ${field}`,
             timestamps: res.data.timestamps,
             values: res.data.values,
+            enumLabels: res.data.enum_labels || null,
             fieldName: field,
             resultKey: key,
           }
@@ -674,17 +1006,64 @@ function ResultPage() {
     const allSeriesData = {}
     const series = keys.map((key) => {
       const d = cpChartData[key]
-      const points = d.timestamps.map((t, i) => [t * 1000, d.values[i]])
+      const el = d.enumLabels
+      const points = d.timestamps.map((t, i) => [t * 1000, d.values[i], el ? el[i] : null])
       allSeriesData[d.label] = points
+      const color = getCpSeriesColor(d.label)
       return {
         name: d.label, type: 'line', data: points,
         smooth: true, symbol: 'circle', symbolSize: 4, showSymbol: false,
-        lineStyle: { width: 1.5 },
+        lineStyle: { width: 1.5, color }, itemStyle: { color },
         emphasis: { focus: 'series', lineStyle: { width: 3 }, itemStyle: { borderWidth: 2 } },
       }
     })
 
     const seriesNames = series.map(s => s.name)
+
+    const cpDualAxis = seriesNames.length === 2
+    let yAxis
+    let chartSeries = series
+    if (cpDualAxis) {
+      const leftName = seriesNames[0]
+      const rightName = seriesNames[1]
+      const leftRange = computeYRange(allSeriesData, [leftName])
+      const rightRange = computeYRange(allSeriesData, [rightName])
+      yAxis = [
+        {
+          type: 'value',
+          name: leftName,
+          min: leftRange.min,
+          max: leftRange.max,
+          position: 'left',
+          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#30363d' } },
+          splitLine: { lineStyle: { color: '#30363d' } },
+        },
+        {
+          type: 'value',
+          name: rightName,
+          min: rightRange.min,
+          max: rightRange.max,
+          position: 'right',
+          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#30363d' } },
+          splitLine: { show: false },
+        },
+      ]
+      chartSeries = series.map((s, idx) => ({ ...s, yAxisIndex: idx }))
+    } else {
+      const cpUsePrimary = !!cpPrimaryYSeries && seriesNames.includes(cpPrimaryYSeries)
+      const cpRange = computeYRange(allSeriesData, cpUsePrimary ? [cpPrimaryYSeries] : null)
+      yAxis = {
+        type: 'value',
+        name: seriesNames.length > 1 ? (cpUsePrimary ? cpPrimaryYSeries : '自动(全部系列)') : '',
+        min: cpRange.min,
+        max: cpRange.max,
+        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+        axisLine: { lineStyle: { color: '#30363d' } },
+        splitLine: { lineStyle: { color: '#30363d' } },
+      }
+    }
 
     return {
       backgroundColor: 'transparent',
@@ -703,18 +1082,20 @@ function ResultPage() {
           let html = `<div style="font-weight:600;margin-bottom:8px">${dayjs(time).format('HH:mm:ss.SSS')}</div>`
           const matched = new Set(params.map(p => p.seriesName))
           params.forEach(p => {
+            const display = formatValueWithEnum(p.value[1], p.value[2])
             html += `<div style="display:flex;justify-content:space-between;gap:20px">
               <span>${p.marker} ${p.seriesName}</span>
-              <span style="font-family:JetBrains Mono">${p.value[1]?.toFixed(6) ?? '-'}</span>
+              <span style="font-family:JetBrains Mono">${display}</span>
             </div>`
           })
-          seriesNames.forEach((name, idx) => {
+          seriesNames.forEach((name) => {
             if (matched.has(name)) return
-            const val = binarySearchNearest(allSeriesData[name], time)
-            const color = CHART_COLORS[idx % CHART_COLORS.length]
+            const entry = binarySearchNearest(allSeriesData[name], time)
+            const display = entry ? formatValueWithEnum(entry[1], entry[2]) : '-'
+            const color = getCpSeriesColor(name)
             html += `<div style="display:flex;justify-content:space-between;gap:20px">
               <span><span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:${color}"></span> ${name}</span>
-              <span style="font-family:JetBrains Mono">${val?.toFixed(6) ?? '-'}</span>
+              <span style="font-family:JetBrains Mono">${display}</span>
             </div>`
           })
           return html
@@ -732,13 +1113,8 @@ function ResultPage() {
         axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
         axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false }
       },
-      yAxis: {
-        type: 'value',
-        axisLabel: { color: '#8b949e' },
-        axisLine: { lineStyle: { color: '#30363d' } },
-        splitLine: { lineStyle: { color: '#30363d' } }
-      },
-      series,
+      yAxis,
+      series: chartSeries,
       dataZoom: [
         { type: 'inside', start: 0, end: 100 },
         { type: 'slider', start: 0, end: 100, height: 20, bottom: 10,
@@ -750,13 +1126,77 @@ function ResultPage() {
     }
   }
 
+  const getCpSingleChartOption = (seriesKey) => {
+    const d = cpChartData[seriesKey]
+    if (!d) return {}
+    const el = d.enumLabels
+    const points = d.timestamps.map((t, i) => [t * 1000, d.values[i], el ? el[i] : null])
+    const range = computeYRange({ [d.label]: points }, [d.label])
+    const color = getCpSeriesColor(d.label)
+    return {
+      backgroundColor: 'transparent',
+      title: { text: d.label, left: 'center', top: 6, textStyle: { color: '#c9d1d9', fontSize: 12, fontFamily: 'JetBrains Mono' } },
+      tooltip: {
+        trigger: 'axis', backgroundColor: '#161b22', borderColor: '#30363d',
+        textStyle: { color: '#c9d1d9' },
+        formatter: (params) => {
+          if (!params || params.length === 0) return ''
+          const p = params[0]
+          const display = formatValueWithEnum(p.value[1], p.value[2])
+          return `<div style="font-weight:600;margin-bottom:4px">${dayjs(p.value[0]).format('HH:mm:ss.SSS')}</div>
+            <div style="display:flex;justify-content:space-between;gap:16px"><span>${p.marker} ${d.label}</span><span style="font-family:JetBrains Mono">${display}</span></div>`
+        },
+      },
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      grid: { left: 56, right: 16, top: 36, bottom: 46 },
+      xAxis: {
+        type: 'time',
+        axisPointer: { snap: true, label: { show: false } },
+        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
+        axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false },
+      },
+      yAxis: {
+        type: 'value', name: '', min: range.min, max: range.max,
+        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
+        axisLine: { lineStyle: { color: '#30363d' } },
+        splitLine: { lineStyle: { color: '#30363d' } },
+      },
+      series: [{
+        name: d.label, type: 'line', data: points,
+        smooth: true, symbol: 'circle', symbolSize: 4, showSymbol: false,
+        lineStyle: { width: 1.5, color }, itemStyle: { color },
+        emphasis: { lineStyle: { width: 3 }, itemStyle: { borderWidth: 2 } },
+      }],
+      dataZoom: [
+        { type: 'inside', start: 0, end: 100 },
+        { type: 'slider', start: 0, end: 100, height: 16, bottom: 4,
+          borderColor: '#30363d', backgroundColor: '#161b22',
+          fillerColor: 'rgba(88, 166, 255, 0.2)',
+          handleStyle: { color: '#58a6ff' }, textStyle: { color: '#8b949e' } }
+      ],
+    }
+  }
+
   // ======== Render helpers ========
 
   const renderComparePanel = () => {
+    const renderSegmentedOption = (text) => (
+      <Tooltip title={text} placement="right">
+        <div style={{ maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {text}
+        </div>
+      </Tooltip>
+    )
+
     if (compareMode === 'single_port') {
+      const spCanMulti = spSelectedFields.length >= 2
+      const showSpYBaseline = spCanMulti && spChartLayout === 'overlay' && spSelectedFields.length >= 3
       return (
         <>
-          <Row gutter={16} align="bottom" style={{ marginBottom: 24 }}>
+          {/* 改善 2: 模式说明 */}
+          <div style={{ color: '#8b949e', fontSize: 12, marginBottom: 16 }}>在同一设备的数据中，对比不同字段的变化趋势</div>
+
+          <Row gutter={16} align="bottom" style={{ marginBottom: 16 }}>
             <Col flex="240px">
               <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>选择端口</div>
               <Select
@@ -776,7 +1216,7 @@ function ResultPage() {
               </Select>
             </Col>
             <Col flex="auto">
-              <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>选择字段（可多选）</div>
+              <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>预加载要分析的字段（可多选）</div>
               <Select
                 mode="multiple"
                 value={spSelectedFields}
@@ -803,28 +1243,145 @@ function ResultPage() {
             </Col>
           </Row>
 
+          {/* 改善 3: 快速选择字段面板上移 + 可折叠 */}
+          {spAvailableFields.length > 0 && (
+            <Collapse
+              size="small"
+              style={{ marginBottom: 16, backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: 8 }}
+              items={[{
+                key: 'quick-fields',
+                label: <span style={{ color: '#8b949e', fontSize: 13 }}>快速选择字段（点击展开）</span>,
+                children: (
+                  <Checkbox.Group value={spSelectedFields} onChange={setSpSelectedFields} style={{ width: '100%' }}>
+                    <Row gutter={[16, 12]}>
+                      {spAvailableFields.map(f => (
+                        <Col span={6} key={f}>
+                          <Checkbox value={f}><span className="mono" style={{ fontSize: 13, color: '#c9d1d9' }}>{f}</span></Checkbox>
+                        </Col>
+                      ))}
+                    </Row>
+                  </Checkbox.Group>
+                ),
+              }]}
+            />
+          )}
+
+          {/* 叠加图/并列图（居中） */}
+          {spSelectedFields.length >= 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, margin: '0 0 8px', flexWrap: 'wrap' }}>
+              <Tooltip title={!spCanMulti ? '选择 2 个以上字段可启用对比模式' : undefined}>
+                <Radio.Group
+                  value={spChartLayout}
+                  onChange={e => {
+                    const v = e.target.value
+                    setSpChartLayout(v)
+                    if (v === 'grid' && spGridPanels.length === 0 && spSelectedFields.length > 0) {
+                      setSpGridPanels(spSelectedFields.map(f => [f]))
+                    }
+                  }}
+                  size="small" optionType="button" buttonStyle="solid"
+                  disabled={!spCanMulti}
+                >
+                  <Radio.Button value="overlay"><Space size={4}><LineChartOutlined />叠加图</Space></Radio.Button>
+                  <Radio.Button value="grid"><Space size={4}><AppstoreOutlined />并列图</Space></Radio.Button>
+                </Radio.Group>
+              </Tooltip>
+              {spCanMulti && spChartLayout === 'grid' && (
+                <>
+                  <Segmented value={spGridCols} onChange={setSpGridCols} options={[
+                    { label: '1列', value: 1 }, { label: '2列', value: 2 }, { label: '3列', value: 3 },
+                  ]} size="small" />
+                  <Button
+                    size="small" icon={<PlusOutlined />}
+                    onClick={() => setSpGridPanels(prev => [...prev, []])}
+                  >
+                    新建子图
+                  </Button>
+                </>
+              )}
+              {!spCanMulti ? (
+                <span style={{ color: '#8b949e', fontSize: 12 }}>提示：选择多个字段可使用叠加对比或并列对比模式</span>
+              ) : spChartLayout === 'grid' ? (
+                <span style={{ color: '#8b949e', fontSize: 12 }}>提示：可在各个子图的下拉框中选择多个字段进行叠加对比</span>
+              ) : null}
+            </div>
+          )}
+
           {spSelectedFields.length === 0 ? (
             <Empty description="请选择端口和字段" style={{ padding: '60px 0' }} />
           ) : chartLoading ? (
             <div style={{ textAlign: 'center', padding: 100 }}><Spin size="large" /></div>
           ) : Object.keys(spChartData).length > 0 ? (
-            <ReactECharts option={getSpChartOption()} style={{ height: 500 }} notMerge />
-          ) : null}
-
-          {spAvailableFields.length > 0 && (
-            <div style={{ marginTop: 24, padding: '16px', backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px' }}>
-              <div style={{ color: '#8b949e', marginBottom: 12, fontSize: 13, fontWeight: 500 }}>快速选择字段</div>
-              <Checkbox.Group value={spSelectedFields} onChange={setSpSelectedFields} style={{ width: '100%' }}>
-                <Row gutter={[16, 12]}>
-                  {spAvailableFields.map(f => (
-                    <Col span={6} key={f}>
-                      <Checkbox value={f}><span className="mono" style={{ fontSize: 13, color: '#c9d1d9' }}>{f}</span></Checkbox>
+            spChartLayout === 'grid' && spCanMulti ? (
+              <Row gutter={[16, 16]}>
+                {spGridPanels.map((panelFields, panelIdx) => {
+                  const opt = panelFields.length > 0 ? getSpPanelChartOption(panelFields) : {}
+                  const hasSeries = opt && opt.series && opt.series.length > 0
+                  return (
+                    <Col span={24 / spGridCols} key={panelIdx}>
+                      <div style={{ border: '1px solid #30363d', borderRadius: 8, backgroundColor: '#0d1117', overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderBottom: '1px solid #30363d', backgroundColor: '#161b22' }}>
+                          <Select
+                            mode="multiple"
+                            size="small"
+                            value={panelFields}
+                            onChange={(vals) => {
+                              setSpGridPanels(prev => {
+                                const next = [...prev]
+                                next[panelIdx] = vals
+                                return next
+                              })
+                            }}
+                            style={{ flex: 1, minWidth: 0 }}
+                            placeholder="选择要叠加显示的字段"
+                            maxTagCount={2}
+                          >
+                            {spAvailableFields.map(f => <Option key={f} value={f}>{f}</Option>)}
+                          </Select>
+                          <Button
+                            type="text" size="small" danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => setSpGridPanels(prev => prev.filter((_, i) => i !== panelIdx))}
+                          />
+                        </div>
+                        <div style={{ padding: 4 }}>
+                          {hasSeries ? (
+                            <ReactECharts
+                              option={opt}
+                              style={{ height: 280 }}
+                              notMerge
+                              onChartReady={(instance) => { instance.group = 'sp-grid'; echarts.connect('sp-grid') }}
+                            />
+                          ) : (
+                            <Empty description="请在上方下拉框选择字段（可多选）" style={{ padding: '40px 0' }} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                          )}
+                        </div>
+                      </div>
                     </Col>
-                  ))}
-                </Row>
-              </Checkbox.Group>
-            </div>
-          )}
+                  )
+                })}
+              </Row>
+            ) : showSpYBaseline ? (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 0 }}>
+                <div style={{ flex: '0 0 auto', paddingTop: 48 }}>
+                  <div style={{ color: '#8b949e', fontSize: 11, marginBottom: 6, lineHeight: 1.2 }}>Y轴基准</div>
+                  <Segmented
+                    vertical
+                    value={spPrimaryYField || '__auto__'}
+                    onChange={(v) => setSpPrimaryYField(v === '__auto__' ? null : v)}
+                    options={[{ label: renderSegmentedOption('自动(全部)'), value: '__auto__' }, ...spSelectedFields.map(f => ({ label: renderSegmentedOption(f), value: f }))]}
+                    size="small"
+                    style={{ fontSize: 11 }}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <ReactECharts option={getSpChartOption()} style={{ height: 500 }} notMerge />
+                </div>
+              </div>
+            ) : (
+              <ReactECharts option={getSpChartOption()} style={{ height: 500 }} notMerge />
+            )
+          ) : null}
         </>
       )
     }
@@ -832,6 +1389,9 @@ function ResultPage() {
     // cross_port mode
     return (
       <>
+        {/* 改善 2: 模式说明 */}
+        <div style={{ color: '#8b949e', fontSize: 12, marginBottom: 16 }}>选择多个设备/端口，对比相同或不同字段</div>
+
         <Row gutter={16} align="bottom" style={{ marginBottom: 24 }}>
           <Col flex="auto">
             <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>选择端口/设备（至少两个）</div>
@@ -977,13 +1537,87 @@ function ResultPage() {
           />
         )}
 
-        {cpHasSelection && cpSelectedResults.length >= 2 ? (
-          chartLoading ? (
-            <div style={{ textAlign: 'center', padding: 100 }}><Spin size="large" /></div>
-          ) : Object.keys(cpChartData).length > 0 ? (
-            <ReactECharts option={getCpChartOption()} style={{ height: 500 }} notMerge />
-          ) : null
-        ) : null}
+        {(() => {
+          const cpKeys = Object.keys(cpChartData)
+          const cpSeriesLabels = Object.values(cpChartData).map(d => d.label)
+          const hasCpData = cpKeys.length > 0
+          const cpCanMulti = cpKeys.length >= 2
+          const showCpYBaseline = cpCanMulti && cpChartLayout === 'overlay' && cpSeriesLabels.length >= 3
+          return (
+            <>
+              {/* 叠加图/并列图（居中） */}
+              {cpHasSelection && cpSelectedResults.length >= 2 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, margin: '6px 0 8px', flexWrap: 'wrap' }}>
+                  <Tooltip title={!cpCanMulti ? '加载数据后可启用对比模式' : undefined}>
+                    <Radio.Group
+                      value={cpChartLayout}
+                      onChange={e => setCpChartLayout(e.target.value)}
+                      size="small" optionType="button" buttonStyle="solid"
+                      disabled={!cpCanMulti}
+                    >
+                      <Radio.Button value="overlay"><Space size={4}><LineChartOutlined />叠加图</Space></Radio.Button>
+                      <Radio.Button value="grid"><Space size={4}><AppstoreOutlined />并列图</Space></Radio.Button>
+                    </Radio.Group>
+                  </Tooltip>
+                  {cpCanMulti && cpChartLayout === 'grid' && (
+                    <Segmented value={cpGridCols} onChange={setCpGridCols} options={[
+                      { label: '1列', value: 1 }, { label: '2列', value: 2 }, { label: '3列', value: 3 },
+                    ]} size="small" />
+                  )}
+                  {!cpCanMulti && (
+                    <span style={{ color: '#8b949e', fontSize: 12 }}>提示：点击"开始分析"加载数据后可使用叠加或并列模式</span>
+                  )}
+                </div>
+              )}
+
+              {cpHasSelection && cpSelectedResults.length >= 2 ? (
+                chartLoading ? (
+                  <div style={{ textAlign: 'center', padding: 100 }}><Spin size="large" /></div>
+                ) : hasCpData ? (
+                  cpChartLayout === 'grid' && cpCanMulti ? (
+                    <Row gutter={[16, 16]}>
+                      {cpKeys.map((key) => {
+                        const opt = getCpSingleChartOption(key)
+                        if (!opt || !opt.series) return null
+                        return (
+                          <Col span={24 / cpGridCols} key={key}>
+                            <div style={{ border: '1px solid #30363d', borderRadius: 8, padding: 4, backgroundColor: '#0d1117' }}>
+                              <ReactECharts
+                                option={opt}
+                                style={{ height: 280 }}
+                                notMerge
+                                onChartReady={(instance) => { instance.group = 'cp-grid'; echarts.connect('cp-grid') }}
+                              />
+                            </div>
+                          </Col>
+                        )
+                      })}
+                    </Row>
+                  ) : showCpYBaseline ? (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 0 }}>
+                      <div style={{ flex: '0 0 auto', paddingTop: 48 }}>
+                        <div style={{ color: '#8b949e', fontSize: 11, marginBottom: 6, lineHeight: 1.2 }}>Y轴基准</div>
+                        <Segmented
+                          vertical
+                          value={cpPrimaryYSeries || '__auto__'}
+                          onChange={(v) => setCpPrimaryYSeries(v === '__auto__' ? null : v)}
+                          options={[{ label: renderSegmentedOption('自动(全部)'), value: '__auto__' }, ...cpSeriesLabels.map(s => ({ label: renderSegmentedOption(s), value: s }))]}
+                          size="small"
+                          style={{ fontSize: 11 }}
+                        />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <ReactECharts option={getCpChartOption()} style={{ height: 500 }} notMerge />
+                      </div>
+                    </div>
+                  ) : (
+                    <ReactECharts option={getCpChartOption()} style={{ height: 500 }} notMerge />
+                  )
+                ) : null
+              ) : null}
+            </>
+          )
+        })()}
       </>
     )
   }
@@ -1414,15 +2048,22 @@ function ResultPage() {
             <Space>
                     {activeResult && (
                       <>
-                        <Button icon={<DownloadOutlined />} onClick={() => handleExport('csv')}>导出CSV</Button>
-                        <Button icon={<DownloadOutlined />} onClick={() => handleExport('excel')}>导出Excel</Button>
-                        <Button icon={<DownloadOutlined />} onClick={() => handleExport('parquet')}>导出Parquet</Button>
+                        <Button icon={<DownloadOutlined />} onClick={() => handleExport('csv')}>导出 CSV</Button>
+                        <Button icon={<DownloadOutlined />} onClick={() => handleExport('parquet')}>导出 Parquet</Button>
                       </>
                     )}
                     {results.length > 0 && (
-                      <Button type="primary" icon={<DownloadOutlined />} onClick={handleBatchExport}>
-                        批量导出全部Excel
-              </Button>
+                      <Button type="primary" icon={<DownloadOutlined />} onClick={() => {
+                        setBatchExportSelected(results.map(r => getResultKey(r)))
+                        setBatchExportOpen(true)
+                      }}>
+                        批量导出
+                      </Button>
+                    )}
+                    {allColumnNames.length > 0 && (
+                      <Button icon={<SettingOutlined />} onClick={() => setColManagerOpen(true)}>
+                        列管理
+                      </Button>
                     )}
             </Space>
                 </div>
@@ -1443,7 +2084,7 @@ function ResultPage() {
             <Table
                       columns={portColumns} dataSource={portData}
                       rowKey={(_, index) => index} loading={dataLoading}
-                      scroll={{ x: 'max-content' }} size="small"
+                      scroll={{ x: 'max-content', y: 585 }} size="small"
               pagination={{
                         ...pagination, showSizeChanger: true, showQuickJumper: true,
                 showTotal: (total) => `共 ${total} 条`,
@@ -1503,6 +2144,113 @@ function ResultPage() {
           },
         ]}
       />
+
+      {/* Column Manager Modal */}
+      <Modal
+        title="列管理"
+        open={colManagerOpen}
+        onCancel={() => setColManagerOpen(false)}
+        footer={null}
+        width={520}
+        styles={{ body: { maxHeight: 480, overflowY: 'auto' } }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Space>
+            <Button size="small" type="link" onClick={() => setHiddenColumns(new Set())}>显示全部</Button>
+            <Button size="small" type="link" onClick={() => {
+              const toHide = allColumnNames.filter(c => !pinnedColumns.has(c))
+              setHiddenColumns(new Set(toHide))
+            }}>仅显示固定列</Button>
+          </Space>
+        </div>
+        <div style={{ marginBottom: 8, color: '#8b949e', fontSize: 12 }}>
+          <PushpinOutlined /> 固定列会锁定在表格左侧。点击图钉切换固定状态，取消勾选可隐藏列。
+        </div>
+        {allColumnNames.map(col => {
+          const isHidden = hiddenColumns.has(col)
+          const isPinned = pinnedColumns.has(col)
+          return (
+            <div key={col} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '6px 8px', borderBottom: '1px solid #21262d',
+              opacity: isHidden ? 0.5 : 1,
+            }}>
+              <Checkbox
+                checked={!isHidden}
+                onChange={(e) => {
+                  setHiddenColumns(prev => {
+                    const next = new Set(prev)
+                    if (e.target.checked) next.delete(col)
+                    else next.add(col)
+                    return next
+                  })
+                }}
+              >
+                <span className="mono" style={{ fontSize: 13 }}>{col}</span>
+              </Checkbox>
+              <Button
+                type="text" size="small"
+                icon={<PushpinOutlined style={{ color: isPinned ? '#58a6ff' : '#8b949e' }} />}
+                onClick={() => {
+                  setPinnedColumns(prev => {
+                    const next = new Set(prev)
+                    if (next.has(col)) next.delete(col)
+                    else next.add(col)
+                    return next
+                  })
+                }}
+              />
+            </div>
+          )
+        })}
+      </Modal>
+
+      {/* Batch Export Modal */}
+      <Modal
+        title="批量导出"
+        open={batchExportOpen}
+        onCancel={() => setBatchExportOpen(false)}
+        onOk={handleBatchExportSubmit}
+        confirmLoading={batchExporting}
+        okText="开始导出"
+        cancelText="取消"
+        width={560}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>导出格式</div>
+          <Radio.Group value={batchExportFormat} onChange={e => setBatchExportFormat(e.target.value)}>
+            <Radio.Button value="csv">CSV（多个文件）</Radio.Button>
+            <Radio.Button value="excel">Excel（多 Sheet）</Radio.Button>
+          </Radio.Group>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>选择要导出的端口</div>
+          <Space style={{ marginBottom: 8 }}>
+            <Button size="small" type="link" onClick={() => setBatchExportSelected(results.map(r => getResultKey(r)))}>全选</Button>
+            <Button size="small" type="link" onClick={() => setBatchExportSelected([])}>清空</Button>
+          </Space>
+          <Checkbox.Group
+            value={batchExportSelected}
+            onChange={setBatchExportSelected}
+            style={{ width: '100%' }}
+          >
+            <Row gutter={[8, 8]}>
+              {results.map(r => (
+                <Col span={24} key={getResultKey(r)}>
+                  <Checkbox value={getResultKey(r)}>
+                    <Space>
+                      <span className="mono">{r.port_number}</span>
+                      {r.source_device && <Tag color="orange" style={{ margin: 0, background: 'rgba(210, 153, 34, 0.15)', borderColor: '#d29922', color: '#d29922' }}>{r.source_device}</Tag>}
+                      {r.parser_profile_name && <Tag color="green" style={{ margin: 0, background: 'rgba(63, 185, 80, 0.15)', borderColor: '#3fb950', color: '#3fb950' }}>{r.parser_profile_name}</Tag>}
+                      <span style={{ color: '#8b949e', fontSize: 12 }}>{r.record_count.toLocaleString()} 条</span>
+                    </Space>
+                  </Checkbox>
+                </Col>
+              ))}
+            </Row>
+          </Checkbox.Group>
+        </div>
+      </Modal>
     </div>
   )
 }

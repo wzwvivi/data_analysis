@@ -8,14 +8,20 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, B
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from datetime import datetime
 
 from ..database import get_db
+from ..deps import get_current_user
 from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS
 from ..services import CompareService
+from ..services import shared_tsn_service as shared_tsn_svc
 
-router = APIRouter(prefix="/api/compare", tags=["数据比对"])
+router = APIRouter(
+    prefix="/api/compare",
+    tags=["数据比对"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 # ========== Pydantic Schemas ==========
@@ -156,72 +162,95 @@ class ComparePortTimingListResponse(BaseModel):
 
 # ========== API Endpoints ==========
 
+async def _resolve_compare_slot(
+    db: AsyncSession,
+    upload_path: Path,
+    timestamp: int,
+    slot: int,
+    file: Optional[UploadFile],
+    shared_id: Optional[int],
+) -> Tuple[str, str]:
+    """返回 (展示文件名, 磁盘绝对路径字符串)。二选一：上传文件或平台共享 ID。"""
+    label = f"交换机{slot}"
+    has_file = file is not None and bool((getattr(file, "filename", None) or "").strip())
+    has_shared = shared_id is not None
+    if has_file == has_shared:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label}：请二选一——上传本地文件，或填写平台共享数据 ID",
+        )
+    if has_shared:
+        row = await shared_tsn_svc.get_shared_by_id(db, shared_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"{label}：平台共享数据不存在或已过期")
+        ext = Path(row.original_filename).suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"{label}：共享文件类型不支持")
+        try:
+            dest, display = shared_tsn_svc.copy_shared_to_workdir(
+                row, upload_path, f"cmp{slot}_shared"
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return display, str(dest)
+
+    raw_name = Path(file.filename or "").name
+    if raw_name in {"", ".", ".."}:
+        raise HTTPException(status_code=400, detail=f"{label}：文件名无效")
+    file_ext = Path(file.filename or "").suffix.lower()
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label}不支持的文件类型，只支持: {', '.join(ALLOWED_EXTENSIONS)}",
+        )
+    safe_fn = f"{timestamp}_switch{slot}_{raw_name}"
+    dest = upload_path / safe_fn
+    with open(dest, "wb") as out:
+        shutil.copyfileobj(file.file, out, length=1024 * 1024)
+    return raw_name, str(dest)
+
+
 @router.post("/upload")
 async def upload_and_compare(
     background_tasks: BackgroundTasks,
-    file_1: UploadFile = File(..., description="交换机1的pcap/pcapng文件"),
-    file_2: UploadFile = File(..., description="交换机2的pcap/pcapng文件"),
+    file_1: Optional[UploadFile] = File(None),
+    file_2: Optional[UploadFile] = File(None),
+    shared_id_1: Optional[int] = Form(None),
+    shared_id_2: Optional[int] = Form(None),
     protocol_version_id: int = Form(..., description="网络配置版本ID"),
     jitter_threshold_pct: float = Form(10.0, description="抖动阈值百分比，默认10%"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """上传两个文件并创建比对任务"""
-    
-    # 先做文件名清洗，防止路径注入
-    safe_name_1 = Path(file_1.filename or "").name
-    safe_name_2 = Path(file_2.filename or "").name
-    if safe_name_1 in {"", ".", ".."} or safe_name_2 in {"", ".", ".."}:
-        raise HTTPException(status_code=400, detail="文件名无效")
-
-    # 验证文件类型
-    for file, label in [(file_1, "文件1"), (file_2, "文件2")]:
-        file_ext = Path(file.filename or "").suffix.lower()
-        if file_ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{label}不支持的文件类型，只支持: {', '.join(ALLOWED_EXTENSIONS)}"
-            )
-    
-    # 验证网络配置版本
+    """上传两个文件或从平台共享选取，创建比对任务。"""
     service = CompareService(db)
     version = await service.protocol_service.get_version(protocol_version_id)
     if not version:
         raise HTTPException(status_code=400, detail="网络配置版本不存在")
-    
-    # 保存文件
+
     upload_path = UPLOAD_DIR / "compare"
     upload_path.mkdir(parents=True, exist_ok=True)
-    
     timestamp = int(time.time() * 1000)
-    safe_filename_1 = f"{timestamp}_switch1_{safe_name_1}"
-    safe_filename_2 = f"{timestamp}_switch2_{safe_name_2}"
-    
-    file_path_1 = upload_path / safe_filename_1
-    file_path_2 = upload_path / safe_filename_2
-    
-    with open(file_path_1, "wb") as f:
-        shutil.copyfileobj(file_1.file, f, length=1024*1024)
-    
-    with open(file_path_2, "wb") as f:
-        shutil.copyfileobj(file_2.file, f, length=1024*1024)
-    
-    # 创建比对任务
-    task = await service.create_task(
-        filename_1=safe_name_1,
-        filename_2=safe_name_2,
-        file_path_1=str(file_path_1),
-        file_path_2=str(file_path_2),
-        protocol_version_id=protocol_version_id,
-        jitter_threshold_pct=jitter_threshold_pct
+
+    name_1, path_1 = await _resolve_compare_slot(
+        db, upload_path, timestamp, 1, file_1, shared_id_1
     )
-    
-    # 后台执行比对
+    name_2, path_2 = await _resolve_compare_slot(
+        db, upload_path, timestamp, 2, file_2, shared_id_2
+    )
+
+    task = await service.create_task(
+        filename_1=name_1,
+        filename_2=name_2,
+        file_path_1=path_1,
+        file_path_2=path_2,
+        protocol_version_id=protocol_version_id,
+        jitter_threshold_pct=jitter_threshold_pct,
+    )
     background_tasks.add_task(run_compare_task, task.id)
-    
     return {
         "success": True,
         "task_id": task.id,
-        "message": "文件上传成功，比对任务已创建"
+        "message": "比对任务已创建",
     }
 
 

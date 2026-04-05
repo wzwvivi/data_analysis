@@ -23,8 +23,11 @@ IRS 80字节帧可能跨越多个网络包，需要将有效数据拼接后
 - 解析时通过包头验证数据格式
 """
 import struct
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional
 from .base import BaseParser, ParserRegistry, FieldLayout
+
+_BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 HEADER_BYTE1 = 0xEB
@@ -53,45 +56,56 @@ class IRSParser(BaseParser):
     
     OUTPUT_COLUMNS = [
         'timestamp',
-        'device_id',
-        'device_name',
-        'heading',
-        'pitch',
-        'roll',
-        'east_velocity',
-        'north_velocity',
-        'vertical_velocity',
-        'latitude',
-        'longitude',
-        'altitude',
-        'angular_rate_x',
-        'angular_rate_y',
-        'angular_rate_z',
-        'accel_x',
-        'accel_y',
-        'accel_z',
-        'work_mode',
-        'nav_mode',
-        'equip_align_done',
-        'sat_source',
-        'align_status',
-        'align_mode',
-        'align_pos_source',
-        'fault_status',
-        'data_validity',
-        'rtk1_hpl',
-        'rtk2_hpl',
-        'rtk1_vpl',
-        'rtk2_vpl',
-        'rtk1_sat_count',
-        'rtk2_sat_count',
-        'rtk1_fix_type',
-        'rtk2_fix_type',
-        'rtk1_pos_valid',
-        'rtk2_pos_valid',
-        'sw_version',
-        'hw_version',
+        'BeijingDateTime',
+        'device_id', 'device_name_enum',
         'frame_count',
+        'heading', 'pitch', 'roll',
+        'east_velocity', 'north_velocity', 'vertical_velocity',
+        'latitude', 'longitude', 'altitude',
+        'angular_rate_x', 'angular_rate_y', 'angular_rate_z',
+        'accel_x', 'accel_y', 'accel_z',
+        # 枚举状态（原始值 + _enum 含义）
+        'work_mode', 'work_mode_enum',
+        'nav_mode', 'nav_mode_enum',
+        'p_align_status', 'p_align_status_enum',
+        'sat_source', 'sat_source_enum',
+        'align_status', 'align_status_enum',
+        'align_mode', 'align_mode_enum',
+        'align_pos_source', 'align_pos_source_enum',
+        # 故障状态（每个子项独立列，0=正常 1=故障）
+        'cycle_self_check_status', 'cycle_self_check_status_enum',
+        'poweron_self_check_status', 'poweron_self_check_status_enum',
+        'x_gyro_status', 'x_gyro_status_enum',
+        'y_gyro_status', 'y_gyro_status_enum',
+        'z_gyro_status', 'z_gyro_status_enum',
+        'x_accelerometer_status', 'x_accelerometer_status_enum',
+        'y_accelerometer_status', 'y_accelerometer_status_enum',
+        'z_accelerometer_status', 'z_accelerometer_status_enum',
+        # 数据有效性（协议原始bit：0=正常 1=故障）
+        'attitude_status', 'attitude_status_enum',
+        'heading_status', 'heading_status_enum',
+        'position_status', 'position_status_enum',
+        'altitude_status', 'altitude_status_enum',
+        'velocity_ud_status', 'velocity_ud_status_enum',
+        'velocity_ew_status', 'velocity_ew_status_enum',
+        'velocity_ns_status', 'velocity_ns_status_enum',
+        'x_axis_angular_velocity_status', 'x_axis_angular_velocity_status_enum',
+        'y_axis_angular_velocity_status', 'y_axis_angular_velocity_status_enum',
+        'z_axis_angular_velocity_status', 'z_axis_angular_velocity_status_enum',
+        'x_axis_acceleration_status', 'x_axis_acceleration_status_enum',
+        'y_axis_acceleration_status', 'y_axis_acceleration_status_enum',
+        'z_axis_acceleration_status', 'z_axis_acceleration_status_enum',
+        # RTK
+        'rtk1_hpl', 'rtk2_hpl', 'rtk1_vpl', 'rtk2_vpl',
+        'rtk1_sat_count', 'rtk2_sat_count',
+        'rtk1_fix_type', 'rtk1_fix_type_enum',
+        'rtk2_fix_type', 'rtk2_fix_type_enum',
+        'rtk1_pos_valid', 'rtk1_pos_valid_enum',
+        'rtk1_dop_valid', 'rtk1_dop_valid_enum',
+        'rtk2_pos_valid', 'rtk2_pos_valid_enum',
+        'rtk2_dop_valid', 'rtk2_dop_valid_enum',
+        # 版本
+        'sw_version', 'hw_version',
         'crc_valid',
     ]
     
@@ -283,198 +297,163 @@ class IRSParser(BaseParser):
         
         return None
     
+    # ---- 枚举映射表 ----
+    _WORK_MODE_MAP = {0: "准备", 1: "对准", 2: "导航"}
+    _NAV_MODE_MAP = {0: "无导航", 1: "纯惯性", 2: "组合导航"}
+    _P_ALIGN_MAP = {0: "未补偿", 1: "补偿成功"}
+    _SAT_SOURCE_MAP = {0: "卫星源1", 1: "卫星源2"}
+    _ALIGN_STATUS_MAP = {0: "未对准", 1: "对准进行中", 2: "对准失败", 3: "对准成功"}
+    _ALIGN_MODE_MAP = {0: "静基座对准", 1: "动基座对准"}
+    _ALIGN_POS_SRC_MAP = {0: "无位置数据", 1: "卫星导航接收机数据", 2: "飞管经纬高数据"}
+    _FAULT_ENUM = {0: "正常", 1: "故障"}
+    _VALID_ENUM = {0: "正常", 1: "故障"}
+
     def _parse_payload(self, payload: bytes, timestamp: float) -> Dict[str, Any]:
         """解析数据包内容"""
-        record = {
-            'timestamp': timestamp,
-        }
-        
-        # Byte 3: 设备ID (D0-D1位)
-        device_id_byte = payload[3]
-        device_id = device_id_byte & 0x03
+        record: Dict[str, Any] = {'timestamp': timestamp}
+
+        # BeijingDateTime
+        try:
+            dt_utc = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            dt_bj = dt_utc.astimezone(_BEIJING_TZ)
+            record['BeijingDateTime'] = dt_bj.strftime('%Y-%m-%d %H:%M:%S.') + f"{dt_bj.microsecond // 1000:03d}"
+        except Exception:
+            record['BeijingDateTime'] = ''
+
+        # Byte 3: 设备ID (D0-D1)
+        device_id = payload[3] & 0x03
         record['device_id'] = device_id
-        record['device_name'] = self.DEVICE_ID_MAP.get(device_id, f"未知({device_id})")
-        
+        record['device_name_enum'] = self.DEVICE_ID_MAP.get(device_id, f"未知({device_id})")
+
         # Byte 5: 帧计数
         record['frame_count'] = payload[5]
-        
-        # Byte 6-7: 航向 (unsigned short, LSB=0.01°, 范围0-360°)
-        heading_raw = struct.unpack('<H', payload[6:8])[0]
-        record['heading'] = heading_raw * 0.01
-        
-        # Byte 8-9: 俯仰 (signed short, LSB=0.01°, 范围-90~90°)
-        pitch_raw = struct.unpack('<h', payload[8:10])[0]
-        record['pitch'] = pitch_raw * 0.01
-        
-        # Byte 10-11: 滚动 (signed short, LSB=0.01°, 范围-180~180°)
-        roll_raw = struct.unpack('<h', payload[10:12])[0]
-        record['roll'] = roll_raw * 0.01
-        
-        # Byte 12-13: 东速 (signed short, LSB=0.01 m/s)
-        east_vel_raw = struct.unpack('<h', payload[12:14])[0]
-        record['east_velocity'] = east_vel_raw * 0.01
-        
-        # Byte 14-15: 北速 (signed short, LSB=0.01 m/s)
-        north_vel_raw = struct.unpack('<h', payload[14:16])[0]
-        record['north_velocity'] = north_vel_raw * 0.01
-        
-        # Byte 16-17: 天速/垂直速度 (signed short, LSB=0.01 m/s)
-        vert_vel_raw = struct.unpack('<h', payload[16:18])[0]
-        record['vertical_velocity'] = vert_vel_raw * 0.01
-        
-        # Byte 18-21: 纬度 (signed int, LSB=0.0000001°)
-        lat_raw = struct.unpack('<i', payload[18:22])[0]
-        record['latitude'] = lat_raw * 0.0000001
-        
-        # Byte 22-25: 经度 (signed int, LSB=0.0000001°)
-        lon_raw = struct.unpack('<i', payload[22:26])[0]
-        record['longitude'] = lon_raw * 0.0000001
-        
-        # Byte 26-29: 高度 (signed int, LSB=0.01m)
-        alt_raw = struct.unpack('<i', payload[26:30])[0]
-        record['altitude'] = alt_raw * 0.01
-        
-        # Byte 30-31: X轴角速度 (signed short, LSB=0.01°/s)
-        angular_x_raw = struct.unpack('<h', payload[30:32])[0]
-        record['angular_rate_x'] = angular_x_raw * 0.01
-        
-        # Byte 32-33: Y轴角速度 (signed short, LSB=0.01°/s)
-        angular_y_raw = struct.unpack('<h', payload[32:34])[0]
-        record['angular_rate_y'] = angular_y_raw * 0.01
-        
-        # Byte 34-35: Z轴角速度 (signed short, LSB=0.01°/s)
-        angular_z_raw = struct.unpack('<h', payload[34:36])[0]
-        record['angular_rate_z'] = angular_z_raw * 0.01
-        
-        # Byte 36-37: X轴加速度 (signed short, LSB=0.01 m/s²)
-        accel_x_raw = struct.unpack('<h', payload[36:38])[0]
-        record['accel_x'] = accel_x_raw * 0.01
-        
-        # Byte 38-39: Y轴加速度 (signed short, LSB=0.01 m/s²)
-        accel_y_raw = struct.unpack('<h', payload[38:40])[0]
-        record['accel_y'] = accel_y_raw * 0.01
-        
-        # Byte 40-41: Z轴加速度 (signed short, LSB=0.01 m/s²)
-        accel_z_raw = struct.unpack('<h', payload[40:42])[0]
-        record['accel_z'] = accel_z_raw * 0.01
-        
-        # Byte 42: 工作状态字1 低字节
+
+        # Byte 6-7: 航向
+        record['heading'] = struct.unpack('<H', payload[6:8])[0] * 0.01
+        # Byte 8-9: 俯仰
+        record['pitch'] = struct.unpack('<h', payload[8:10])[0] * 0.01
+        # Byte 10-11: 滚动
+        record['roll'] = struct.unpack('<h', payload[10:12])[0] * 0.01
+        # Byte 12-13: 东速
+        record['east_velocity'] = struct.unpack('<h', payload[12:14])[0] * 0.01
+        # Byte 14-15: 北速
+        record['north_velocity'] = struct.unpack('<h', payload[14:16])[0] * 0.01
+        # Byte 16-17: 天速
+        record['vertical_velocity'] = struct.unpack('<h', payload[16:18])[0] * 0.01
+        # Byte 18-21: 纬度
+        record['latitude'] = struct.unpack('<i', payload[18:22])[0] * 0.0000001
+        # Byte 22-25: 经度
+        record['longitude'] = struct.unpack('<i', payload[22:26])[0] * 0.0000001
+        # Byte 26-29: 高度
+        record['altitude'] = struct.unpack('<i', payload[26:30])[0] * 0.01
+        # Byte 30-35: 角速度 X/Y/Z
+        record['angular_rate_x'] = struct.unpack('<h', payload[30:32])[0] * 0.01
+        record['angular_rate_y'] = struct.unpack('<h', payload[32:34])[0] * 0.01
+        record['angular_rate_z'] = struct.unpack('<h', payload[34:36])[0] * 0.01
+        # Byte 36-41: 加速度 X/Y/Z
+        record['accel_x'] = struct.unpack('<h', payload[36:38])[0] * 0.01
+        record['accel_y'] = struct.unpack('<h', payload[38:40])[0] * 0.01
+        record['accel_z'] = struct.unpack('<h', payload[40:42])[0] * 0.01
+
+        # ---- Byte 42: 工作状态字1 低字节 ----
         byte42 = payload[42]
-        record['work_mode'] = self._decode_work_mode(byte42)
-        record['nav_mode'] = self._decode_nav_mode(byte42)
-        record['equip_align_done'] = "补偿成功" if (byte42 >> 5) & 1 else "未补偿"
-        sat_src = (byte42 >> 6) & 0x03
-        record['sat_source'] = {0: "N/A", 1: "卫星源1", 2: "卫星源2"}.get(sat_src, f"未知({sat_src})")
+        wm = byte42 & 0x03
+        record['work_mode'] = wm
+        record['work_mode_enum'] = self._WORK_MODE_MAP.get(wm, f"未知({wm})")
 
-        # Byte 43: 工作状态字1 高字节
+        nm = (byte42 >> 3) & 0x03
+        record['nav_mode'] = nm
+        record['nav_mode_enum'] = self._NAV_MODE_MAP.get(nm, f"未知({nm})")
+
+        pa_val = (byte42 >> 5) & 0x01
+        record['p_align_status'] = pa_val
+        record['p_align_status_enum'] = self._P_ALIGN_MAP.get(pa_val, f"未知({pa_val})")
+
+        ss = (byte42 >> 6) & 0x01
+        record['sat_source'] = ss
+        record['sat_source_enum'] = self._SAT_SOURCE_MAP.get(ss, f"未知({ss})")
+
+        # ---- Byte 43: 工作状态字1 高字节 ----
         byte43 = payload[43]
-        record['align_status'] = self._decode_align_status(byte43)
-        record['align_mode'] = "动基座对准" if (byte43 >> 2) & 1 else "静基座对准"
-        align_pos = (byte43 >> 3) & 0x03
-        record['align_pos_source'] = {0: "无位置数据", 1: "卫星导航接收机数据", 2: "飞管经纬高数据"}.get(align_pos, f"未知({align_pos})")
+        als = byte43 & 0x03
+        record['align_status'] = als
+        record['align_status_enum'] = self._ALIGN_STATUS_MAP.get(als, f"未知({als})")
 
-        # Byte 44-45: 故障字1和故障字2
+        alm = (byte43 >> 2) & 0x01
+        record['align_mode'] = alm
+        record['align_mode_enum'] = self._ALIGN_MODE_MAP.get(alm, f"未知({alm})")
+
+        aps = (byte43 >> 3) & 0x03
+        record['align_pos_source'] = aps
+        record['align_pos_source_enum'] = self._ALIGN_POS_SRC_MAP.get(aps, f"未知({aps})")
+
+        # ---- Byte 44-45: 故障字1 & 故障字2（每个子状态独立列，0=正常 1=故障）----
         fault1 = payload[44]
         fault2 = payload[45]
-        record['fault_status'] = self._decode_fault_status(fault1, fault2)
+        self._decode_fault_fields(record, fault1, fault2)
 
-        # Byte 46-47: 故障字3（数据有效性）
-        record['data_validity'] = self._decode_data_validity(payload[46], payload[47])
+        # ---- Byte 46-47: 数据有效性（协议bit取反：0→1=有效，1→0=无效）----
+        self._decode_validity_fields(record, payload[46], payload[47])
 
-        # Byte 48-63: 转换器输出数据 - RTK定位精度
-        # 协议: int(4字节), 但有效数据在 D0-D15(低16位), BNR无符号, LSB=0.03125, 高位全零
+        # ---- RTK 精度 ----
         record['rtk1_hpl'] = struct.unpack('<H', payload[48:50])[0] * 0.03125
         record['rtk2_hpl'] = struct.unpack('<H', payload[52:54])[0] * 0.03125
         record['rtk1_vpl'] = struct.unpack('<H', payload[56:58])[0] * 0.03125
         record['rtk2_vpl'] = struct.unpack('<H', payload[60:62])[0] * 0.03125
 
-        # Byte 64-65: 天线定位星数 (BNR无符号, D0-D4, 其余位置0)
         record['rtk1_sat_count'] = payload[64] & 0x1F
         record['rtk2_sat_count'] = payload[65] & 0x1F
 
-        # Byte 66-69: 解算信息
         rtk1_fix = struct.unpack('<H', payload[66:68])[0] & 0x1F
-        record['rtk1_fix_type'] = self._decode_rtk_fix_type(rtk1_fix)
+        record['rtk1_fix_type'] = rtk1_fix
+        record['rtk1_fix_type_enum'] = self._decode_rtk_fix_type(rtk1_fix)
         rtk2_fix = struct.unpack('<H', payload[68:70])[0] & 0x1F
-        record['rtk2_fix_type'] = self._decode_rtk_fix_type(rtk2_fix)
+        record['rtk2_fix_type'] = rtk2_fix
+        record['rtk2_fix_type_enum'] = self._decode_rtk_fix_type(rtk2_fix)
 
-        # Byte 70-71: 定位有效字
-        record['rtk1_pos_valid'] = self._decode_rtk_validity(payload[70])
-        record['rtk2_pos_valid'] = self._decode_rtk_validity(payload[71])
+        self._decode_rtk_validity_fields(record, 'rtk1', payload[70])
+        self._decode_rtk_validity_fields(record, 'rtk2', payload[71])
 
-        # Byte 72-73: 软件版本
-        sw_raw = struct.unpack('<H', payload[72:74])[0]
-        record['sw_version'] = self._decode_irs_version(sw_raw)
+        # 版本
+        record['sw_version'] = self._decode_irs_version(struct.unpack('<H', payload[72:74])[0])
+        record['hw_version'] = self._decode_irs_version(struct.unpack('<H', payload[74:76])[0])
 
-        # Byte 74-75: 硬件版本
-        hw_raw = struct.unpack('<H', payload[74:76])[0]
-        record['hw_version'] = self._decode_irs_version(hw_raw)
-
-        # Byte 78-79: CRC校验 (从字节2-77计算, 16位)
+        # CRC
         crc_received = struct.unpack('<H', payload[78:80])[0]
         crc_computed = self._compute_crc16(payload[2:78])
         record['crc_valid'] = "通过" if crc_received == crc_computed else f"失败(收={crc_received:#06x},算={crc_computed:#06x})"
 
         return record
     
-    def _decode_work_mode(self, byte42: int) -> str:
-        """解码工作方式 (Byte 42: D0-D1)"""
-        mode = byte42 & 0x03
-        mode_map = {
-            0: "准备",
-            1: "对准",
-            2: "导航",
-        }
-        return mode_map.get(mode, f"未知({mode})")
-    
-    def _decode_nav_mode(self, byte42: int) -> str:
-        """解码导航模式 (Byte 42: D3-D4)"""
-        mode = (byte42 >> 3) & 0x03
-        mode_map = {
-            0: "无导航",
-            1: "纯惯性",
-            2: "组合导航",
-        }
-        return mode_map.get(mode, f"未知({mode})")
-    
-    def _decode_align_status(self, byte43: int) -> str:
-        """解码对准状态 (Byte 43: D0-D1)"""
-        status = byte43 & 0x03
-        status_map = {
-            0: "未对准",
-            1: "对准进行中",
-            2: "对准失败",
-            3: "对准成功",
-        }
-        return status_map.get(status, f"未知({status})")
-    
-    def _decode_fault_status(self, fault1: int, fault2: int) -> str:
-        """解码故障状态"""
-        faults = []
-        
+    def _decode_fault_fields(self, record: Dict[str, Any], fault1: int, fault2: int) -> None:
+        """将故障字1/2拆分为独立列（原始值 0=正常 1=故障 + _enum 含义）"""
+        fe = self._FAULT_ENUM
         # 故障字1
-        if fault1 & 0x01:
-            faults.append("周期自检故障")
-        if fault1 & 0x02:
-            faults.append("开机初始化故障")
-        
+        v = fault1 & 0x01
+        record['cycle_self_check_status'] = v
+        record['cycle_self_check_status_enum'] = fe[v]
+        v = (fault1 >> 1) & 0x01
+        record['poweron_self_check_status'] = v
+        record['poweron_self_check_status_enum'] = fe[v]
         # 故障字2
-        if fault2 & 0x01:
-            faults.append("X陀螺故障")
-        if fault2 & 0x02:
-            faults.append("Y陀螺故障")
-        if fault2 & 0x04:
-            faults.append("Z陀螺故障")
-        if fault2 & 0x08:
-            faults.append("X加表故障")
-        if fault2 & 0x10:
-            faults.append("Y加表故障")
-        if fault2 & 0x20:
-            faults.append("Z加表故障")
-        
-        if faults:
-            return ",".join(faults)
-        return "正常"
+        v = fault2 & 0x01
+        record['x_gyro_status'] = v
+        record['x_gyro_status_enum'] = fe[v]
+        v = (fault2 >> 1) & 0x01
+        record['y_gyro_status'] = v
+        record['y_gyro_status_enum'] = fe[v]
+        v = (fault2 >> 2) & 0x01
+        record['z_gyro_status'] = v
+        record['z_gyro_status_enum'] = fe[v]
+        v = (fault2 >> 3) & 0x01
+        record['x_accelerometer_status'] = v
+        record['x_accelerometer_status_enum'] = fe[v]
+        v = (fault2 >> 4) & 0x01
+        record['y_accelerometer_status'] = v
+        record['y_accelerometer_status_enum'] = fe[v]
+        v = (fault2 >> 5) & 0x01
+        record['z_accelerometer_status'] = v
+        record['z_accelerometer_status_enum'] = fe[v]
 
     @staticmethod
     def _compute_crc16(data: bytes) -> int:
@@ -490,24 +469,31 @@ class IRSParser(BaseParser):
                 crc &= 0xFFFF
         return crc
 
-    @staticmethod
-    def _decode_data_validity(byte46: int, byte47: int) -> str:
-        """解码故障字3 - 数据有效性 (Byte 46-47)
-        byte46 = 协议47B(低字节), byte47 = 协议48B(高字节)
+    def _decode_validity_fields(self, record: Dict[str, Any], byte46: int, byte47: int) -> None:
+        """将数据有效性拆分为独立列。
+
+        直接输出协议原始 bit：0=正常，1=故障。
         """
+        ve = self._VALID_ENUM
         fields = [
-            (byte46, 0, "姿态"), (byte46, 1, "航向角"),
-            (byte46, 2, "经纬度"), (byte46, 3, "高度"),
-            (byte46, 4, "升降速度"), (byte46, 5, "东向速度"),
-            (byte46, 6, "北向速度"), (byte46, 7, "X轴角速度"),
-            (byte47, 0, "Y轴角速度"), (byte47, 1, "Z轴角速度"),
-            (byte47, 2, "X轴加速度"), (byte47, 3, "Y轴加速度"),
-            (byte47, 4, "Z轴加速度"),
+            (byte46, 0, 'attitude_status'),
+            (byte46, 1, 'heading_status'),
+            (byte46, 2, 'position_status'),
+            (byte46, 3, 'altitude_status'),
+            (byte46, 4, 'velocity_ud_status'),
+            (byte46, 5, 'velocity_ew_status'),
+            (byte46, 6, 'velocity_ns_status'),
+            (byte46, 7, 'x_axis_angular_velocity_status'),
+            (byte47, 0, 'y_axis_angular_velocity_status'),
+            (byte47, 1, 'z_axis_angular_velocity_status'),
+            (byte47, 2, 'x_axis_acceleration_status'),
+            (byte47, 3, 'y_axis_acceleration_status'),
+            (byte47, 4, 'z_axis_acceleration_status'),
         ]
-        invalid = [name for b, bit, name in fields if (b >> bit) & 1]
-        if invalid:
-            return ",".join(invalid) + " 故障"
-        return "全部有效"
+        for b, bit, col in fields:
+            v = (b >> bit) & 0x01
+            record[col] = v
+            record[col + '_enum'] = ve[v]
 
     @staticmethod
     def _decode_rtk_fix_type(val: int) -> str:
@@ -518,17 +504,21 @@ class IRSParser(BaseParser):
         }
         return fix_map.get(val, f"其他({val:#x})")
 
+    _RTK_VALID_MAP = {0x03: "有效", 0x01: "无效"}
+
     @staticmethod
-    def _decode_rtk_validity(byte_val: int) -> str:
-        """解码RTK卫导有效字
-        协议: 卫导信息状态 D0(LSB)-D1(MSB): 01=无效, 11=有效
-               DOP值信息状态 D2(LSB)-D3(MSB): 01=无效, 11=有效
+    def _decode_rtk_validity_fields(record: Dict[str, Any], prefix: str, byte_val: int) -> None:
+        """拆分 RTK 卫导有效字为独立列（原始值 + _enum）。
+        D0-D1: 定位有效性 (01=无效, 11=有效)
+        D2-D3: DOP有效性  (01=无效, 11=有效)
         """
-        pos_status = byte_val & 0x03
-        dop_status = (byte_val >> 2) & 0x03
-        pos_str = "有效" if pos_status == 0x03 else ("无效" if pos_status == 0x01 else f"未知({pos_status})")
-        dop_str = "有效" if dop_status == 0x03 else ("无效" if dop_status == 0x01 else f"未知({dop_status})")
-        return f"定位{pos_str},DOP{dop_str}"
+        vm = IRSParser._RTK_VALID_MAP
+        pos = byte_val & 0x03
+        dop = (byte_val >> 2) & 0x03
+        record[f'{prefix}_pos_valid'] = pos
+        record[f'{prefix}_pos_valid_enum'] = vm.get(pos, f"未知({pos})")
+        record[f'{prefix}_dop_valid'] = dop
+        record[f'{prefix}_dop_valid_enum'] = vm.get(dop, f"未知({dop})")
 
     @staticmethod
     def _decode_irs_version(raw16: int) -> str:

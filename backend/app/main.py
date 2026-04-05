@@ -6,7 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .database import init_db, async_session
-from .routers import protocol_router, parse_router, event_analysis_router, compare_router
+from .routers import (
+    protocol_router,
+    parse_router,
+    event_analysis_router,
+    compare_router,
+    auth_router,
+    shared_tsn_router,
+)
 from .config import UPLOAD_DIR, DATA_DIR
 from .init_data import init_all_data
 
@@ -17,13 +24,16 @@ async def lifespan(app: FastAPI):
     # 启动时初始化数据库
     await init_db()
     
-    # 初始化内置数据（解析版本配置等）
+    # 初始化内置数据（用户、解析版本配置等）并清理过期平台共享 TSN
     async with async_session() as db:
         await init_all_data(db)
+        from .services.shared_tsn_service import purge_expired_shared_files
+        await purge_expired_shared_files(db)
     
     # 确保目录存在
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     (UPLOAD_DIR / "standalone_events").mkdir(parents=True, exist_ok=True)
+    (UPLOAD_DIR / "shared_tsn").mkdir(parents=True, exist_ok=True)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "results").mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "exports").mkdir(parents=True, exist_ok=True)
@@ -49,6 +59,8 @@ app.add_middleware(
 )
 
 # 注册路由
+app.include_router(auth_router)
+app.include_router(shared_tsn_router)
 app.include_router(protocol_router)
 app.include_router(parse_router)
 app.include_router(event_analysis_router)

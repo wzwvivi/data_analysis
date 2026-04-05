@@ -1,9 +1,62 @@
 import axios from 'axios'
 
+export const TOKEN_KEY = 'tsn_access_token'
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 60000,
 })
+
+api.interceptors.request.use((config) => {
+  const t = localStorage.getItem(TOKEN_KEY)
+  if (t) {
+    config.headers.Authorization = `Bearer ${t}`
+  }
+  return config
+})
+
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem(TOKEN_KEY)
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(err)
+  }
+)
+
+export const authApi = {
+  /** 支持 login(u, p) 或 login({ username, password })，避免旧代码或缓存导致错误请求体 */
+  login: (usernameOrCreds, password) => {
+    const payload =
+      usernameOrCreds != null &&
+      typeof usernameOrCreds === 'object' &&
+      !Array.isArray(usernameOrCreds) &&
+      'username' in usernameOrCreds
+        ? {
+            username: usernameOrCreds.username,
+            password: usernameOrCreds.password,
+          }
+        : { username: usernameOrCreds, password }
+    return api.post('/auth/login', payload)
+  },
+  me: () => api.get('/auth/me'),
+}
+
+/** 平台共享 TSN（管理员上传，全员可选用） */
+export const sharedTsnApi = {
+  list: () => api.get('/shared-tsn'),
+  upload: (formData) =>
+    api.post('/shared-tsn/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    }),
+  update: (id, body) => api.patch(`/shared-tsn/${id}`, body),
+  remove: (id) => api.delete(`/shared-tsn/${id}`),
+}
 
 // 协议（网络配置）相关API
 export const protocolApi = {
@@ -49,6 +102,14 @@ export const parseApi = {
     timeout: 300000,
     onUploadProgress
   }),
+
+  /** 使用平台共享 TSN 创建解析任务 */
+  uploadFromShared: (formData, onUploadProgress) =>
+    api.post('/parse/upload-from-shared', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+      onUploadProgress,
+    }),
   
   // 获取任务列表
   listTasks: (page = 1, pageSize = 20) => 
@@ -130,6 +191,12 @@ export const eventAnalysisApi = {
 export const standaloneEventApi = {
   upload: (formData) =>
     api.post('/event-analysis/standalone/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    }),
+
+  fromShared: (formData) =>
+    api.post('/event-analysis/standalone/from-shared', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 300000,
     }),

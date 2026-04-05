@@ -16,12 +16,18 @@ from datetime import datetime
 from sqlalchemy import select
 
 from ..database import get_db
+from ..deps import get_current_user
 from ..models import ParseTask
 from ..services import EventAnalysisService
+from ..services import shared_tsn_service as shared_tsn_svc
 from ..config import UPLOAD_DIR, MAX_UPLOAD_SIZE, ALLOWED_EXTENSIONS
 
 
-router = APIRouter(prefix="/api/event-analysis", tags=["事件分析"])
+router = APIRouter(
+    prefix="/api/event-analysis",
+    tags=["事件分析"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 # ========== Pydantic Schemas ==========
@@ -389,6 +395,45 @@ async def upload_standalone_pcap(
         "task_id": task.id,
         "status": "processing",
         "message": "已上传并开始事件分析",
+    }
+
+
+@router.post("/standalone/from-shared")
+async def standalone_from_shared_pcap(
+    background_tasks: BackgroundTasks,
+    shared_tsn_id: int = Form(...),
+    rule_template: str = Form("default_v1"),
+    db: AsyncSession = Depends(get_db),
+):
+    """使用平台共享 TSN 文件创建独立事件分析（复制到 standalone_events 目录）。"""
+    row = await shared_tsn_svc.get_shared_by_id(db, shared_tsn_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="平台共享数据不存在或已过期删除")
+    suffix = Path(row.original_filename).suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="共享文件类型不支持")
+
+    sub = UPLOAD_DIR / "standalone_events"
+    sub.mkdir(parents=True, exist_ok=True)
+    try:
+        dest, display_name = shared_tsn_svc.copy_shared_to_workdir(
+            row, sub, "shared_evt"
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    service = EventAnalysisService(db)
+    task = await service.create_standalone_task(
+        filename=display_name,
+        file_path=str(dest.resolve()),
+        rule_template=rule_template,
+    )
+    background_tasks.add_task(run_standalone_analysis_task, task.id)
+    return {
+        "success": True,
+        "task_id": task.id,
+        "status": "processing",
+        "message": "已使用平台共享数据开始事件分析",
     }
 
 

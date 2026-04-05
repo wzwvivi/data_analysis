@@ -34,3 +34,17 @@ ALLOWED_EXTENSIONS = {".pcapng", ".pcap", ".cap"}
 
 # 协议库配置
 PROTOCOL_EXCEL_EXTENSIONS = {".xlsx", ".xls"}
+
+# 认证（生产环境务必设置环境变量）
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-change-me-use-env-jwt-secret")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "168"))  # 默认 7 天
+
+# 平台共享 TSN：管理员上传文件保留天数
+SHARED_TSN_RETENTION_DAYS = int(os.environ.get("SHARED_TSN_RETENTION_DAYS", "2"))
+
+# 首次启动默认管理员（若库中无任何用户则创建；密码可用环境变量覆盖）
+INIT_ADMIN_USERNAME = os.environ.get("INIT_ADMIN_USERNAME", "admin")
+INIT_ADMIN_PASSWORD = os.environ.get("INIT_ADMIN_PASSWORD", "admin123")
+INIT_USER_USERNAME = os.environ.get("INIT_USER_USERNAME", "user")
+INIT_USER_PASSWORD = os.environ.get("INIT_USER_PASSWORD", "user123")

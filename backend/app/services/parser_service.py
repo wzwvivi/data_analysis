@@ -1134,6 +1134,12 @@ class ParserService:
         print(f"[Parser] 保存端口 {port_number}: {len(trimmed)} 行"
               + (f", {len(target_cols)} 列" if target_cols else ""))
         table = pa.Table.from_pylist(trimmed)
+        if "BeijingDateTime" in table.schema.names:
+            idx = table.schema.get_field_index("BeijingDateTime")
+            table = table.set_column(
+                idx, pa.field("BeijingDateTime", pa.string()),
+                table.column("BeijingDateTime").cast(pa.string()),
+            )
         pq.write_table(table, str(result_file))
 
         return str(result_file)
@@ -1160,6 +1166,15 @@ class ParserService:
             select(ParseResult).where(ParseResult.task_id == task_id)
         )
         return result.scalars().all()
+
+    @staticmethod
+    def _keep_datetime_as_str(df: pd.DataFrame) -> pd.DataFrame:
+        """防止 pandas 把 BeijingDateTime 等时间字符串列自动推断为 datetime64，
+        确保导出 CSV/Excel 时毫秒精度不丢失。"""
+        for col in ("BeijingDateTime",):
+            if col in df.columns and hasattr(df[col], "dt"):
+                df[col] = df[col].astype(str)
+        return df
 
     def _build_time_filter(
         self,
@@ -1254,29 +1269,28 @@ class ParserService:
         time_end: float = None,
         max_points: int = 1000,
         parser_id: int = None
-    ) -> Tuple[List[float], List[Any]]:
-        """获取时序数据
-        
-        Args:
-            task_id: 任务ID
-            port_number: 端口号
-            field_name: 字段名
-            time_start: 开始时间戳
-            time_end: 结束时间戳
-            max_points: 最大数据点数
-            parser_id: 解析器ID (可选, 多解析器时用于区分)
+    ) -> Tuple[List[float], List[Any], Optional[List[str]]]:
+        """获取时序数据，若存在对应 _enum 列则一并返回。
+
+        Returns:
+            (timestamps, values, enum_labels)
+            enum_labels 为 None 表示该字段无枚举映射。
         """
         result_dir = DATA_DIR / "results" / str(task_id)
         
         result_file = self._find_parquet_file(result_dir, port_number, parser_id)
         if not result_file:
-            return [], []
+            return [], [], None
         
         _, schema_names = self._iter_filtered_batches(
             result_file, columns=None, time_start=None, time_end=None
         )
         if field_name not in schema_names or "timestamp" not in schema_names:
-            return [], []
+            return [], [], None
+
+        enum_col = f"{field_name}_enum"
+        has_enum = enum_col in schema_names
+        fetch_cols = ["timestamp", field_name] + ([enum_col] if has_enum else [])
 
         # 第一遍：统计过滤后的总行数，不把整表放进内存
         total_rows = 0
@@ -1286,15 +1300,16 @@ class ParserService:
         for b in count_batches:
             total_rows += b.num_rows
         if total_rows <= 0:
-            return [], []
+            return [], [], None
 
         # 第二遍：按目标采样点抽取
         fetch_batches, _ = self._iter_filtered_batches(
-            result_file, columns=["timestamp", field_name], time_start=time_start, time_end=time_end
+            result_file, columns=fetch_cols, time_start=time_start, time_end=time_end
         )
 
         timestamps: List[float] = []
         values: List[Any] = []
+        enum_labels: List[str] = [] if has_enum else None
 
         if total_rows <= max_points:
             for b in fetch_batches:
@@ -1302,7 +1317,9 @@ class ParserService:
                     continue
                 timestamps.extend(b.column("timestamp").to_pylist())
                 values.extend(b.column(field_name).to_pylist())
-            return timestamps, values
+                if has_enum:
+                    enum_labels.extend(b.column(enum_col).to_pylist())
+            return timestamps, values, enum_labels
 
         pick_count = max(1, max_points)
         step = total_rows / pick_count
@@ -1327,9 +1344,11 @@ class ParserService:
                 picked = b.take(idx_array)
                 timestamps.extend(picked.column("timestamp").to_pylist())
                 values.extend(picked.column(field_name).to_pylist())
+                if has_enum:
+                    enum_labels.extend(picked.column(enum_col).to_pylist())
             global_idx = batch_end
 
-        return timestamps, values
+        return timestamps, values, enum_labels
     
     async def export_data(
         self,
@@ -1371,6 +1390,7 @@ class ParserService:
             writer = None
             wrote_rows = False
             with open(export_file, "wb") as sink:
+                sink.write(b"\xef\xbb\xbf")
                 for b in batches:
                     if writer is None:
                         writer = pacsv.CSVWriter(sink, b.schema)
@@ -1379,15 +1399,18 @@ class ParserService:
                 if writer is not None:
                     writer.close()
             if not wrote_rows:
-                pd.DataFrame(columns=schema_names).to_csv(export_file, index=False)
+                pd.DataFrame(columns=schema_names).to_csv(
+                    export_file, index=False, encoding="utf-8-sig"
+                )
         elif format == "excel":
             export_file = export_dir / f"port_{port_number}{suffix}.xlsx"
-            # Excel 写出依赖 pandas；这里至少先通过 Arrow 过滤减少输入规模。
             table = ds.dataset(str(result_file), format="parquet").scanner(
                 filter=self._build_time_filter(schema_names, time_start, time_end),
                 batch_size=65536,
             ).to_table()
-            table.to_pandas().to_excel(export_file, index=False)
+            df = table.to_pandas()
+            self._keep_datetime_as_str(df)
+            df.to_excel(export_file, index=False)
         elif format == "parquet":
             export_file = export_dir / f"port_{port_number}{suffix}.parquet"
             writer = None

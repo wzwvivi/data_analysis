@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS
+from ..deps import get_current_user
 from ..services import ParserService
+from ..services import shared_tsn_service as shared_tsn_svc
 from ..services.port_anomaly_service import PortAnomalyService, STUCK_CONSECUTIVE_FRAMES
 from ..schemas import (
     ParseTaskResponse, ParseTaskListResponse,
@@ -26,7 +28,11 @@ from ..schemas.parse import (
 )
 from ..schemas.protocol import ParserProfileResponse, ParserProfileListResponse
 
-router = APIRouter(prefix="/api/parse", tags=["解析任务"])
+router = APIRouter(
+    prefix="/api/parse",
+    tags=["解析任务"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _match_device_by_keywords(devices: list, keywords: list) -> Optional[dict]:
@@ -36,6 +42,138 @@ def _match_device_by_keywords(devices: list, keywords: list) -> Optional[dict]:
         if any(k.upper() in upper for k in keywords):
             return d
     return None
+
+
+async def _validate_parse_profiles(
+    service: ParserService,
+    *,
+    parser_profile_id: Optional[int],
+    parser_profile_ids: Optional[str],
+    device_parser_map: Optional[str],
+    protocol_version_id: Optional[int],
+):
+    """校验解析器与设备映射，返回 (dpm, profile_ids, profile_names)。"""
+    import json
+
+    dpm = None
+    if device_parser_map:
+        try:
+            raw = json.loads(device_parser_map)
+            if not isinstance(raw, dict) or not raw:
+                raise ValueError("device_parser_map 不能为空")
+            dpm = {k: int(v) for k, v in raw.items()}
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            raise HTTPException(status_code=400, detail=f"设备解析器映射格式错误: {e}")
+
+    profile_ids = []
+    if dpm:
+        profile_ids = list(set(dpm.values()))
+    elif parser_profile_ids:
+        try:
+            profile_ids = [int(p.strip()) for p in parser_profile_ids.split(",") if p.strip()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="解析器ID格式错误")
+    elif parser_profile_id:
+        profile_ids = [parser_profile_id]
+
+    if not profile_ids:
+        raise HTTPException(status_code=400, detail="请至少选择一个协议解析器")
+
+    profile_names = []
+    for pid in profile_ids:
+        profile = await service.get_parser_profile(pid)
+        if not profile:
+            raise HTTPException(status_code=400, detail=f"协议解析器 {pid} 不存在")
+        if not profile.is_active:
+            raise HTTPException(status_code=400, detail=f"协议解析器 {profile.name} 已停用")
+        profile_names.append(profile.name)
+
+    if protocol_version_id:
+        version = await service.protocol_service.get_version(protocol_version_id)
+        if not version:
+            raise HTTPException(status_code=400, detail="TSN网络配置版本不存在")
+
+    if dpm and protocol_version_id:
+        pid_profiles = {}
+        for pid in set(dpm.values()):
+            p = await service.get_parser_profile(pid)
+            if p:
+                pid_profiles[pid] = p
+        has_atg = any((p.protocol_family or "").lower() == "atg" for p in pid_profiles.values())
+
+        if has_atg:
+            devices_with_family = await service.protocol_service.get_devices_with_family(protocol_version_id)
+            active_profiles = await service.get_parser_profiles(active_only=True)
+
+            family_default_pid = {}
+            for p in active_profiles:
+                fam = (p.protocol_family or "").lower()
+                if fam and fam not in family_default_pid:
+                    family_default_pid[fam] = p.id
+
+            required_slots = [
+                ("FCC1", ["FCC1", "飞控1"], "fcc"),
+                ("FCC2", ["FCC2", "飞控2"], "fcc"),
+                ("FCC3", ["FCC3", "飞控3"], "fcc"),
+                ("RTK1", ["RTK1", "GPS1", "地基接收机1"], "rtk"),
+                ("RTK2", ["RTK2", "GPS2", "地基接收机2"], "rtk"),
+                ("IRS1", ["IRS1", "惯导1"], "irs"),
+                ("IRS2", ["IRS2", "惯导2"], "irs"),
+                ("IRS3", ["IRS3", "惯导3"], "irs"),
+            ]
+
+            for _, kws, fam in required_slots:
+                dev = _match_device_by_keywords(devices_with_family, kws)
+                if not dev:
+                    continue
+                dev_name = dev["device_name"]
+                if dev_name in dpm:
+                    continue
+                parser_candidates = dev.get("available_parsers") or []
+                parser_id = None
+                if parser_candidates:
+                    parser_id = int(parser_candidates[0]["id"])
+                elif fam in family_default_pid:
+                    parser_id = int(family_default_pid[fam])
+                if parser_id:
+                    dpm[dev_name] = parser_id
+
+            profile_ids = sorted(set(int(v) for v in dpm.values()))
+            profile_names = []
+            for pid in profile_ids:
+                profile = await service.get_parser_profile(pid)
+                if not profile:
+                    raise HTTPException(status_code=400, detail=f"协议解析器 {pid} 不存在")
+                if not profile.is_active:
+                    raise HTTPException(status_code=400, detail=f"协议解析器 {profile.name} 已停用")
+                profile_names.append(profile.name)
+
+    return dpm, profile_ids, profile_names
+
+
+def _resolve_ports_devices(
+    selected_ports: Optional[str],
+    selected_devices: Optional[str],
+    dpm,
+):
+    ports = None
+    if selected_ports:
+        try:
+            ports = [int(p.strip()) for p in selected_ports.split(",") if p.strip()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="端口号格式错误")
+
+    devices = None
+    if selected_devices:
+        devices = [d.strip() for d in selected_devices.split(",") if d.strip()]
+        if dpm:
+            for dn in dpm.keys():
+                if dn not in devices:
+                    devices.append(dn)
+    elif dpm:
+        devices = list(dpm.keys())
+
+    return ports, devices
 
 
 # ========== 解析版本相关接口 ==========
@@ -97,153 +235,40 @@ async def upload_and_parse(
     file: UploadFile = File(...),
     parser_profile_id: int = Form(None),
     parser_profile_ids: str = Form(None),
-    device_parser_map: str = Form(None),  # JSON字符串: {"设备名": parser_profile_id}
+    device_parser_map: str = Form(None),
     protocol_version_id: int = Form(None),
     selected_ports: str = Form(None),
     selected_devices: str = Form(None),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """上传文件并创建解析任务
-    
-    新模式: device_parser_map（设备到解析器映射）
-    旧模式(兼容): parser_profile_id / parser_profile_ids
-    """
-    import json
-    
+    """上传文件并创建解析任务（设备映射 / 多解析器 与旧模式兼容）。"""
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
-            status_code=400, 
-            detail=f"不支持的文件类型，只支持: {', '.join(ALLOWED_EXTENSIONS)}"
+            status_code=400,
+            detail=f"不支持的文件类型，只支持: {', '.join(ALLOWED_EXTENSIONS)}",
         )
-    
+
     service = ParserService(db)
-    
-    # 新模式: device_parser_map
-    dpm = None
-    if device_parser_map:
-        try:
-            raw = json.loads(device_parser_map)
-            if not isinstance(raw, dict) or not raw:
-                raise ValueError("device_parser_map 不能为空")
-            dpm = {k: int(v) for k, v in raw.items()}
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            raise HTTPException(status_code=400, detail=f"设备解析器映射格式错误: {e}")
-    
-    # 收集所有需要验证的解析器ID
-    profile_ids = []
-    if dpm:
-        profile_ids = list(set(dpm.values()))
-    elif parser_profile_ids:
-        try:
-            profile_ids = [int(p.strip()) for p in parser_profile_ids.split(",") if p.strip()]
-        except ValueError:
-            raise HTTPException(status_code=400, detail="解析器ID格式错误")
-    elif parser_profile_id:
-        profile_ids = [parser_profile_id]
-    
-    if not profile_ids:
-        raise HTTPException(status_code=400, detail="请至少选择一个协议解析器")
-    
-    profile_names = []
-    for pid in profile_ids:
-        profile = await service.get_parser_profile(pid)
-        if not profile:
-            raise HTTPException(status_code=400, detail=f"协议解析器 {pid} 不存在")
-        if not profile.is_active:
-            raise HTTPException(status_code=400, detail=f"协议解析器 {profile.name} 已停用")
-        profile_names.append(profile.name)
-    
-    if protocol_version_id:
-        version = await service.protocol_service.get_version(protocol_version_id)
-        if not version:
-            raise HTTPException(status_code=400, detail="TSN网络配置版本不存在")
+    dpm, profile_ids, profile_names = await _validate_parse_profiles(
+        service,
+        parser_profile_id=parser_profile_id,
+        parser_profile_ids=parser_profile_ids,
+        device_parser_map=device_parser_map,
+        protocol_version_id=protocol_version_id,
+    )
 
-    # ATG 自动补齐依赖设备与解析器（FCC1-3 / RTK1-2 / IRS1-3）
-    if dpm and protocol_version_id:
-        pid_profiles = {}
-        for pid in set(dpm.values()):
-            p = await service.get_parser_profile(pid)
-            if p:
-                pid_profiles[pid] = p
-        has_atg = any((p.protocol_family or "").lower() == "atg" for p in pid_profiles.values())
-
-        if has_atg:
-            devices_with_family = await service.protocol_service.get_devices_with_family(protocol_version_id)
-            active_profiles = await service.get_parser_profiles(active_only=True)
-
-            family_default_pid = {}
-            for p in active_profiles:
-                fam = (p.protocol_family or "").lower()
-                if fam and fam not in family_default_pid:
-                    family_default_pid[fam] = p.id
-
-            required_slots = [
-                ("FCC1", ["FCC1", "飞控1"], "fcc"),
-                ("FCC2", ["FCC2", "飞控2"], "fcc"),
-                ("FCC3", ["FCC3", "飞控3"], "fcc"),
-                ("RTK1", ["RTK1", "GPS1", "地基接收机1"], "rtk"),
-                ("RTK2", ["RTK2", "GPS2", "地基接收机2"], "rtk"),
-                ("IRS1", ["IRS1", "惯导1"], "irs"),
-                ("IRS2", ["IRS2", "惯导2"], "irs"),
-                ("IRS3", ["IRS3", "惯导3"], "irs"),
-            ]
-
-            for _, kws, fam in required_slots:
-                dev = _match_device_by_keywords(devices_with_family, kws)
-                if not dev:
-                    continue
-                dev_name = dev["device_name"]
-                if dev_name in dpm:
-                    continue
-                parser_candidates = dev.get("available_parsers") or []
-                parser_id = None
-                if parser_candidates:
-                    parser_id = int(parser_candidates[0]["id"])
-                elif fam in family_default_pid:
-                    parser_id = int(family_default_pid[fam])
-                if parser_id:
-                    dpm[dev_name] = parser_id
-
-            # 重新构建 profile_ids/profile_names（包含自动补齐项）
-            profile_ids = sorted(set(int(v) for v in dpm.values()))
-            profile_names = []
-            for pid in profile_ids:
-                profile = await service.get_parser_profile(pid)
-                if not profile:
-                    raise HTTPException(status_code=400, detail=f"协议解析器 {pid} 不存在")
-                if not profile.is_active:
-                    raise HTTPException(status_code=400, detail=f"协议解析器 {profile.name} 已停用")
-                profile_names.append(profile.name)
-    
     upload_path = UPLOAD_DIR / "pcap"
     upload_path.mkdir(parents=True, exist_ok=True)
-    
     import time
+
     timestamp = int(time.time() * 1000)
     safe_filename = f"{timestamp}_{file.filename}"
     file_path = upload_path / safe_filename
-    
     with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f, length=1024*1024)
-    
-    ports = None
-    if selected_ports:
-        try:
-            ports = [int(p.strip()) for p in selected_ports.split(",") if p.strip()]
-        except ValueError:
-            raise HTTPException(status_code=400, detail="端口号格式错误")
-    
-    devices = None
-    if selected_devices:
-        devices = [d.strip() for d in selected_devices.split(",") if d.strip()]
-        if dpm:
-            for dn in dpm.keys():
-                if dn not in devices:
-                    devices.append(dn)
-    elif dpm:
-        devices = list(dpm.keys())
-    
+        shutil.copyfileobj(file.file, f, length=1024 * 1024)
+
+    ports, devices = _resolve_ports_devices(selected_ports, selected_devices, dpm)
     task = await service.create_task(
         filename=file.filename,
         file_path=str(file_path),
@@ -254,14 +279,69 @@ async def upload_and_parse(
         selected_ports=ports,
         selected_devices=devices,
     )
-    
     background_tasks.add_task(run_parse_task, task.id)
-    
     return {
         "success": True,
         "task_id": task.id,
         "parser_profiles": profile_names,
-        "message": "文件上传成功，解析任务已创建"
+        "message": "文件上传成功，解析任务已创建",
+    }
+
+
+@router.post("/upload-from-shared")
+async def upload_from_shared_pcap(
+    background_tasks: BackgroundTasks,
+    shared_tsn_id: int = Form(...),
+    parser_profile_id: int = Form(None),
+    parser_profile_ids: str = Form(None),
+    device_parser_map: str = Form(None),
+    protocol_version_id: int = Form(None),
+    selected_ports: str = Form(None),
+    selected_devices: str = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """使用管理员上传的平台共享 TSN 文件创建解析任务（复制到本地上传目录）。"""
+    row = await shared_tsn_svc.get_shared_by_id(db, shared_tsn_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="平台共享数据不存在或已过期删除")
+
+    ext = Path(row.original_filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="共享文件扩展名不支持")
+
+    service = ParserService(db)
+    dpm, profile_ids, profile_names = await _validate_parse_profiles(
+        service,
+        parser_profile_id=parser_profile_id,
+        parser_profile_ids=parser_profile_ids,
+        device_parser_map=device_parser_map,
+        protocol_version_id=protocol_version_id,
+    )
+
+    try:
+        dest, display_name = shared_tsn_svc.copy_shared_to_workdir(
+            row, UPLOAD_DIR / "pcap", "shared"
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    ports, devices = _resolve_ports_devices(selected_ports, selected_devices, dpm)
+    task = await service.create_task(
+        filename=display_name,
+        file_path=str(dest),
+        parser_profile_id=profile_ids[0] if len(profile_ids) == 1 and not dpm else None,
+        parser_profile_ids=profile_ids if not dpm else None,
+        device_parser_map=dpm,
+        protocol_version_id=protocol_version_id,
+        selected_ports=ports,
+        selected_devices=devices,
+    )
+    background_tasks.add_task(run_parse_task, task.id)
+    return {
+        "success": True,
+        "task_id": task.id,
+        "parser_profiles": profile_names,
+        "message": "已使用平台共享数据创建解析任务",
     }
 
 
@@ -597,20 +677,23 @@ async def get_time_series(
     """
     service = ParserService(db)
     
-    timestamps, values = await service.get_time_series(
+    timestamps, values, enum_labels = await service.get_time_series(
         task_id, port_number, field_name, time_start, time_end, max_points, parser_id
     )
     
     clean_values = [None if isinstance(v, float) and (math.isnan(v) or math.isinf(v)) else v for v in values]
     
-    return {
+    resp = {
         "port_number": port_number,
         "parser_id": parser_id,
         "field_name": field_name,
         "point_count": len(timestamps),
         "timestamps": timestamps,
-        "values": clean_values
+        "values": clean_values,
     }
+    if enum_labels is not None:
+        resp["enum_labels"] = enum_labels
+    return resp
 
 
 @router.get("/tasks/{task_id}/export/{port_number}")
@@ -698,6 +781,7 @@ async def export_batch(
             if not result_file:
                 continue
             df = pd.read_parquet(result_file)
+            service._keep_datetime_as_str(df)
             sheet_name = f"port_{port}"
             if pid:
                 sheet_name = f"port_{port}_p{pid}"

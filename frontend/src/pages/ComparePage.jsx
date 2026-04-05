@@ -19,6 +19,7 @@ import {
   Spin,
   Slider,
   Tabs,
+  Radio,
 } from 'antd'
 import {
   UploadOutlined,
@@ -28,7 +29,7 @@ import {
   WarningOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
-import { compareApi, protocolApi } from '../services/api'
+import { compareApi, protocolApi, sharedTsnApi } from '../services/api'
 
 const { Panel } = Collapse
 
@@ -40,6 +41,11 @@ function ComparePage() {
   const [form] = Form.useForm()
   const [file1, setFile1] = useState(null)
   const [file2, setFile2] = useState(null)
+  const [sharedList, setSharedList] = useState([])
+  const [mode1, setMode1] = useState('platform')
+  const [mode2, setMode2] = useState('platform')
+  const [sharedId1, setSharedId1] = useState(null)
+  const [sharedId2, setSharedId2] = useState(null)
   const [versions, setVersions] = useState([])
   const [uploading, setUploading] = useState(false)
   
@@ -55,6 +61,10 @@ function ComparePage() {
   // 加载网络配置版本列表
   useEffect(() => {
     loadVersions()
+  }, [])
+
+  useEffect(() => {
+    sharedTsnApi.list().then((r) => setSharedList(r.data || [])).catch(() => setSharedList([]))
   }, [])
 
   // 如果有taskId，加载任务详情并轮询直到完成
@@ -116,24 +126,34 @@ function ComparePage() {
   }
 
   const handleUpload = async (values) => {
-    if (!file1 || !file2) {
-      message.error('请选择两个文件')
+    const ok1 = (mode1 === 'local' && file1) || (mode1 === 'platform' && sharedId1)
+    const ok2 = (mode2 === 'local' && file2) || (mode2 === 'platform' && sharedId2)
+    if (!ok1 || !ok2) {
+      message.error('请为交换机1、交换机2 各选择一种数据来源（本地上传或平台数据）')
       return
     }
 
     const formData = new FormData()
-    formData.append('file_1', file1)
-    formData.append('file_2', file2)
     formData.append('protocol_version_id', values.protocol_version_id)
     formData.append('jitter_threshold_pct', values.jitter_threshold_pct || 10.0)
+    if (mode1 === 'local') {
+      formData.append('file_1', file1)
+    } else {
+      formData.append('shared_id_1', String(sharedId1))
+    }
+    if (mode2 === 'local') {
+      formData.append('file_2', file2)
+    } else {
+      formData.append('shared_id_2', String(sharedId2))
+    }
 
     try {
       setUploading(true)
       const res = await compareApi.upload(formData)
-      message.success('文件上传成功，开始检查')
+      message.success('任务已创建，开始检查')
       navigate(`/compare/${res.data.task_id}`)
     } catch (error) {
-      message.error(error.response?.data?.detail || '上传失败')
+      message.error(error.response?.data?.detail || '提交失败')
     } finally {
       setUploading(false)
     }
@@ -418,41 +438,95 @@ function ComparePage() {
         />
         
         <Form form={form} layout="vertical" onFinish={handleUpload}>
-          <Form.Item
-            label="交换机1数据包"
-            required
-            tooltip="第一个交换机的pcap/pcapng文件"
-          >
-            <Upload
-              beforeUpload={(file) => {
-                setFile1(file)
-                return false
+          <Form.Item label="交换机1 数据来源" required>
+            <Radio.Group
+              value={mode1}
+              onChange={(e) => {
+                setMode1(e.target.value)
+                setFile1(null)
+                setSharedId1(null)
               }}
-              onRemove={() => setFile1(null)}
-              maxCount={1}
-              accept=".pcap,.pcapng,.cap"
             >
-              <Button icon={<UploadOutlined />}>选择文件</Button>
-            </Upload>
+              <Radio.Button value="platform">平台共享</Radio.Button>
+              <Radio.Button value="local">本地上传</Radio.Button>
+            </Radio.Group>
           </Form.Item>
+          {mode1 === 'platform' ? (
+            <Form.Item label="交换机1 平台数据">
+              <Select
+                placeholder="选择平台共享抓包"
+                style={{ width: '100%' }}
+                value={sharedId1}
+                onChange={setSharedId1}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={sharedList.map((s) => ({
+                  value: s.id,
+                  label: `#${s.id} ${s.original_filename}${s.experiment_label ? ` — ${s.experiment_label}` : ''}`,
+                }))}
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item label="交换机1 文件" tooltip="第一个交换机的 pcap/pcapng">
+              <Upload
+                beforeUpload={(f) => {
+                  setFile1(f)
+                  return false
+                }}
+                onRemove={() => setFile1(null)}
+                maxCount={1}
+                accept=".pcap,.pcapng,.cap"
+              >
+                <Button icon={<UploadOutlined />}>选择文件</Button>
+              </Upload>
+            </Form.Item>
+          )}
 
-          <Form.Item
-            label="交换机2数据包"
-            required
-            tooltip="第二个交换机的pcap/pcapng文件"
-          >
-            <Upload
-              beforeUpload={(file) => {
-                setFile2(file)
-                return false
+          <Form.Item label="交换机2 数据来源" required>
+            <Radio.Group
+              value={mode2}
+              onChange={(e) => {
+                setMode2(e.target.value)
+                setFile2(null)
+                setSharedId2(null)
               }}
-              onRemove={() => setFile2(null)}
-              maxCount={1}
-              accept=".pcap,.pcapng,.cap"
             >
-              <Button icon={<UploadOutlined />}>选择文件</Button>
-            </Upload>
+              <Radio.Button value="platform">平台共享</Radio.Button>
+              <Radio.Button value="local">本地上传</Radio.Button>
+            </Radio.Group>
           </Form.Item>
+          {mode2 === 'platform' ? (
+            <Form.Item label="交换机2 平台数据">
+              <Select
+                placeholder="选择平台共享抓包"
+                style={{ width: '100%' }}
+                value={sharedId2}
+                onChange={setSharedId2}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={sharedList.map((s) => ({
+                  value: s.id,
+                  label: `#${s.id} ${s.original_filename}${s.experiment_label ? ` — ${s.experiment_label}` : ''}`,
+                }))}
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item label="交换机2 文件">
+              <Upload
+                beforeUpload={(f) => {
+                  setFile2(f)
+                  return false
+                }}
+                onRemove={() => setFile2(null)}
+                maxCount={1}
+                accept=".pcap,.pcapng,.cap"
+              >
+                <Button icon={<UploadOutlined />}>选择文件</Button>
+              </Upload>
+            </Form.Item>
+          )}
 
           <Form.Item
             name="protocol_version_id"
@@ -498,7 +572,12 @@ function ComparePage() {
               type="primary"
               htmlType="submit"
               loading={uploading}
-              disabled={!file1 || !file2}
+              disabled={
+                !(
+                  ((mode1 === 'local' && file1) || (mode1 === 'platform' && sharedId1))
+                  && ((mode2 === 'local' && file2) || (mode2 === 'platform' && sharedId2))
+                )
+              }
               block
             >
               开始检查

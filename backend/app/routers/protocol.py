@@ -4,13 +4,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
+from ..deps import get_current_user
 from ..services import ProtocolService
 from ..schemas import (
     ProtocolCreate, ProtocolResponse, ProtocolListResponse,
     ProtocolVersionResponse, PortDefinitionResponse
 )
 
-router = APIRouter(prefix="/api/protocols", tags=["协议库"])
+router = APIRouter(
+    prefix="/api/protocols",
+    tags=["协议库"],
+    dependencies=[Depends(get_current_user)],
+)
 FIXED_PROTOCOL_NAME = "TSN ICD"
 FIXED_PROTOCOL_VERSION = "v6.0.1"
 

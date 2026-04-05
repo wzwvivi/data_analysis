@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
 """初始化数据 - 创建内置的设备协议解析器配置"""
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
-from .models import ParserProfile
+from .models import ParserProfile, User
+from .config import (
+    INIT_ADMIN_USERNAME,
+    INIT_ADMIN_PASSWORD,
+    INIT_USER_USERNAME,
+    INIT_USER_PASSWORD,
+)
+from .services.auth_password import hash_password
 
 ADC_OUTPUT_FIELDS = (
     '["timestamp","adru_id","adru_id_cn","label_octal","label_name","ssm","ssm_cn",'
@@ -90,6 +97,46 @@ async def init_parser_profiles(db: AsyncSession):
         print("[Init] JZXPDR113B 解析版本已存在")
     
     # IRS 惯性基准系统解析器
+    _IRS_OUTPUT_FIELDS = (
+        '["timestamp","BeijingDateTime",'
+        '"device_id","device_name_enum","frame_count",'
+        '"heading","pitch","roll",'
+        '"east_velocity","north_velocity","vertical_velocity",'
+        '"latitude","longitude","altitude",'
+        '"angular_rate_x","angular_rate_y","angular_rate_z",'
+        '"accel_x","accel_y","accel_z",'
+        '"work_mode","work_mode_enum","nav_mode","nav_mode_enum",'
+        '"p_align_status","p_align_status_enum","sat_source","sat_source_enum",'
+        '"align_status","align_status_enum","align_mode","align_mode_enum",'
+        '"align_pos_source","align_pos_source_enum",'
+        '"cycle_self_check_status","cycle_self_check_status_enum",'
+        '"poweron_self_check_status","poweron_self_check_status_enum",'
+        '"x_gyro_status","x_gyro_status_enum","y_gyro_status","y_gyro_status_enum",'
+        '"z_gyro_status","z_gyro_status_enum",'
+        '"x_accelerometer_status","x_accelerometer_status_enum",'
+        '"y_accelerometer_status","y_accelerometer_status_enum",'
+        '"z_accelerometer_status","z_accelerometer_status_enum",'
+        '"attitude_status","attitude_status_enum",'
+        '"heading_status","heading_status_enum",'
+        '"position_status","position_status_enum",'
+        '"altitude_status","altitude_status_enum",'
+        '"velocity_ud_status","velocity_ud_status_enum",'
+        '"velocity_ew_status","velocity_ew_status_enum",'
+        '"velocity_ns_status","velocity_ns_status_enum",'
+        '"x_axis_angular_velocity_status","x_axis_angular_velocity_status_enum",'
+        '"y_axis_angular_velocity_status","y_axis_angular_velocity_status_enum",'
+        '"z_axis_angular_velocity_status","z_axis_angular_velocity_status_enum",'
+        '"x_axis_acceleration_status","x_axis_acceleration_status_enum",'
+        '"y_axis_acceleration_status","y_axis_acceleration_status_enum",'
+        '"z_axis_acceleration_status","z_axis_acceleration_status_enum",'
+        '"rtk1_hpl","rtk2_hpl","rtk1_vpl","rtk2_vpl",'
+        '"rtk1_sat_count","rtk2_sat_count",'
+        '"rtk1_fix_type","rtk1_fix_type_enum",'
+        '"rtk2_fix_type","rtk2_fix_type_enum",'
+        '"rtk1_pos_valid","rtk1_pos_valid_enum","rtk1_dop_valid","rtk1_dop_valid_enum",'
+        '"rtk2_pos_valid","rtk2_pos_valid_enum","rtk2_dop_valid","rtk2_dop_valid_enum",'
+        '"sw_version","hw_version","crc_valid"]'
+    )
     if not irs_exists:
         profiles_to_create.append(
             ParserProfile(
@@ -101,7 +148,7 @@ async def init_parser_profiles(db: AsyncSession):
                 is_active=True,
                 description="惯导通讯协议V3.0解析器。解码姿态角（航向/俯仰/滚动）、速度（东/北/天向）、位置（经纬度/高度）、角速度、加速度等参数。端口由TSN网络配置动态指定，解析时通过包头(0xEB 0x90)自动识别数据格式。",
                 supported_ports="",
-                output_fields='["timestamp","device_id","device_name","heading","pitch","roll","east_velocity","north_velocity","vertical_velocity","latitude","longitude","altitude","angular_rate_x","angular_rate_y","angular_rate_z","accel_x","accel_y","accel_z","work_mode","nav_mode","align_status","fault_status","frame_count"]',
+                output_fields=_IRS_OUTPUT_FIELDS,
             )
         )
         print("[Init] 将创建 IRS惯性基准系统 解析器配置")
@@ -109,9 +156,44 @@ async def init_parser_profiles(db: AsyncSession):
         if not irs_exists.protocol_family:
             irs_exists.protocol_family = "irs"
             print("[Init] 已更新 IRS protocol_family = irs")
-        print("[Init] IRS惯性基准系统 解析版本已存在，跳过创建")
+        if irs_exists.output_fields != _IRS_OUTPUT_FIELDS:
+            irs_exists.output_fields = _IRS_OUTPUT_FIELDS
+            print("[Init] 已更新 IRS output_fields（新增枚举/有效性拆分列）")
+        print("[Init] IRS惯性基准系统 解析版本已存在")
     
     # RTK 地基接收机解析器
+    _RTK_OUTPUT_FIELDS = (
+        '["timestamp","BeijingDateTime","frame_count",'
+        '"equipment_location_number","equipment_location_number_enum",'
+        '"locate_validity_flag","locate_validity_flag_enum",'
+        '"satellite_system_flag","satellite_system_flag_enum",'
+        '"DOP_validity_flag","DOP_validity_flag_enum",'
+        '"GPS_validity_insufNumSats","GPS_validity_insufNumSats_enum",'
+        '"GPS_validity_noSbas","GPS_validity_noSbas_enum",'
+        '"GPS_validity_paModeEnabled","GPS_validity_paModeEnabled_enum",'
+        '"GPS_validity_posPartCorrected","GPS_validity_posPartCorrected_enum",'
+        '"GPS_validity_posFullCorrected","GPS_validity_posFullCorrected_enum",'
+        '"GPS_validity_posFullMonitored","GPS_validity_posFullMonitored_enum",'
+        '"GPS_validity_posPaQualified","GPS_validity_posPaQualified_enum",'
+        '"receiver_positioning_status","receiver_positioning_status_enum",'
+        '"num_sats_used","num_sats_visible",'
+        '"hdop","vdop",'
+        '"altitude_ft","altitude_m","ellipsoid_height_ft","ellipsoid_height_m",'
+        '"track_angle_deg","ground_speed_kn","ground_speed_m_s",'
+        '"latitude_deg","longitude_deg",'
+        '"hpl_sbas_nm","hpl_sbas_km","SBAS_flag","SBAS_flag_enum",'
+        '"hpl_fd_nm","hpl_fd_km","HPL_FD_flag","HPL_FD_flag_enum",'
+        '"vpl_sbas_ft","vpl_sbas_m","vpl_fd_ft","vpl_fd_m",'
+        '"vfom_ft","vfom_m","hfom_nm","hfom_km",'
+        '"vertical_speed_ftmin","vertical_speed_m_s",'
+        '"east_speed_kn","east_speed_m_s","north_speed_kn","north_speed_m_s",'
+        '"receiver_FaultFlags","receiver_FaultFlags_enum",'
+        '"vul_ft","vul_m","hul_nm","hul_km",'
+        '"utc_date","utc_date_year","utc_date_mon","utc_date_day",'
+        '"utc_time","utc_time_hour","utc_time_min","utc_time_sec",'
+        '"utc_day_second","utc_millisecond",'
+        '"sw_version","hw_version"]'
+    )
     if not rtk_exists:
         profiles_to_create.append(
             ParserProfile(
@@ -123,7 +205,7 @@ async def init_parser_profiles(db: AsyncSession):
                 is_active=True,
                 description="RTK设备通信协议V1.4解析器。解码GPS/北斗定位数据，包括经纬度、海拔/椭球高度、地速、航迹角、天向/东向/北向速度、HDOP/VDOP、保护级(HPL/VPL)、UTC时间等参数。帧头0x55AA55AA，24组32bit数据，大端序。端口由TSN网络配置动态指定。",
                 supported_ports="",
-                output_fields='["timestamp","device_position","fix_valid","sat_system","dop_valid","fix_type","num_sats_used","num_sats_visible","hdop","vdop","altitude_ft","ellipsoid_height_ft","track_angle_deg","ground_speed_kn","latitude_deg","longitude_deg","vertical_speed_ftmin","east_speed_kn","north_speed_kn","utc_date","utc_time","utc_day_second","utc_millisecond","sw_version","hw_version"]',
+                output_fields=_RTK_OUTPUT_FIELDS,
             )
         )
         print("[Init] 将创建 RTK地基接收机 解析器配置")
@@ -131,7 +213,10 @@ async def init_parser_profiles(db: AsyncSession):
         if not rtk_exists.protocol_family:
             rtk_exists.protocol_family = "rtk"
             print("[Init] 已更新 RTK protocol_family = rtk")
-        print("[Init] RTK地基接收机 解析版本已存在，跳过创建")
+        if rtk_exists.output_fields != _RTK_OUTPUT_FIELDS:
+            rtk_exists.output_fields = _RTK_OUTPUT_FIELDS
+            print("[Init] 已更新 RTK output_fields（新增枚举/GPS有效性/故障标识拆分列）")
+        print("[Init] RTK地基接收机 解析版本已存在")
 
     # ATG(CPE) 解析器
     if not atg_exists:
@@ -316,6 +401,40 @@ async def init_parser_profiles(db: AsyncSession):
         print("[Init] 所有解析器配置已存在，无需创建")
 
 
+async def init_users(db: AsyncSession):
+    """为缺失的默认管理员/普通用户建号（密码见环境变量或 config 默认值）。
+
+    旧逻辑仅在「用户表完全为空」时建号；若库里已有其他用户但从未建过 admin，
+    会导致无法用 admin 登录。此处按用户名逐个补全，不覆盖已存在账号的密码。
+    """
+    specs = [
+        (INIT_ADMIN_USERNAME, INIT_ADMIN_PASSWORD, "admin"),
+        (INIT_USER_USERNAME, INIT_USER_PASSWORD, "user"),
+    ]
+    created: list[str] = []
+    for username, raw_password, role in specs:
+        r = await db.execute(select(User).where(User.username == username))
+        if r.scalar_one_or_none() is not None:
+            continue
+        db.add(
+            User(
+                username=username,
+                password_hash=hash_password(raw_password),
+                role=role,
+            )
+        )
+        created.append(f"{username}({role})")
+    if created:
+        await db.commit()
+        print(
+            f"[Init] 已创建账号: {', '.join(created)}；请尽快修改密码，"
+            f"可通过 INIT_ADMIN_PASSWORD / INIT_USER_PASSWORD 指定初始密码"
+        )
+    else:
+        print("[Init] 默认管理员与普通用户已存在，跳过账号创建")
+
+
 async def init_all_data(db: AsyncSession):
     """初始化所有数据"""
+    await init_users(db)
     await init_parser_profiles(db)

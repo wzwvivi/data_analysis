@@ -3,6 +3,8 @@ from .protocol import Protocol, ProtocolVersion, PortDefinition, FieldDefinition
 from .parse_task import ParseTask, ParseResult
 from .event_analysis import EventAnalysisTask, EventCheckResult, EventTimelineEvent
 from .compare_task import CompareTask, ComparePortResult, CompareGapRecord, ComparePortTimingResult
+from .user import User
+from .shared_tsn import SharedTsnFile
 
 __all__ = [
     "Protocol",
@@ -19,4 +21,6 @@ __all__ = [
     "ComparePortResult",
     "CompareGapRecord",
     "ComparePortTimingResult",
+    "User",
+    "SharedTsnFile",
 ]

@@ -23,8 +23,11 @@ RS422 字节流中的 RTK 96字节帧可能跨越多个网络包。
 端口配置：动态端口，从TSN网络配置读取
 """
 import struct
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional
 from .base import BaseParser, ParserRegistry, FieldLayout
+
+_BEIJING_TZ = timezone(timedelta(hours=8))
 
 FRAME_HEADER = 0x55AA55AA
 FRAME_HEADER_BYTES = b'\x55\xAA\x55\xAA'
@@ -44,42 +47,72 @@ class RTKParser(BaseParser):
     name = "RTK地基接收机"
     supported_ports = []
 
+    # ---- 枚举映射表 ----
+    _DEV_POS_MAP = {0b01: "左侧GPS1", 0b10: "右侧GPS2"}
+    _FIX_VALID_MAP = {0b11: "有效", 0b01: "无效"}
+    _SAT_SYS_MAP = {0: "无", 1: "GPS", 2: "北斗", 3: "组合"}
+    _DOP_VALID_MAP = {0b11: "有效", 0b01: "无效"}
+    _FIX_TYPE_MAP = {
+        0x04: "无效解", 0x08: "单点定位",
+        0x0C: "伪距差分", 0x15: "固定解", 0x0D: "浮点解",
+    }
+    _FAULT_01 = {0: "正常", 1: "故障"}
+
+    # ---- 单位转换常量 ----
+    _FT_TO_M = 0.3048
+    _KN_TO_MS = 0.514444
+    _NM_TO_KM = 1.852
+    _FTMIN_TO_MS = 0.00508  # 1 ft/min = 0.3048/60 m/s
+
     OUTPUT_COLUMNS = [
-        'timestamp',
-        'device_position',
-        'fix_valid',
-        'sat_system',
-        'dop_valid',
-        'fix_type',
-        'num_sats_used',
-        'num_sats_visible',
-        'hdop',
-        'vdop',
-        'altitude_ft',
-        'ellipsoid_height_ft',
+        'timestamp', 'BeijingDateTime',
+        'frame_count',
+        # 枚举状态（原始值 + _enum）
+        'equipment_location_number', 'equipment_location_number_enum',
+        'locate_validity_flag', 'locate_validity_flag_enum',
+        'satellite_system_flag', 'satellite_system_flag_enum',
+        'DOP_validity_flag', 'DOP_validity_flag_enum',
+        # GPS 有效性子字段
+        'GPS_validity_insufNumSats', 'GPS_validity_insufNumSats_enum',
+        'GPS_validity_noSbas', 'GPS_validity_noSbas_enum',
+        'GPS_validity_paModeEnabled', 'GPS_validity_paModeEnabled_enum',
+        'GPS_validity_posPartCorrected', 'GPS_validity_posPartCorrected_enum',
+        'GPS_validity_posFullCorrected', 'GPS_validity_posFullCorrected_enum',
+        'GPS_validity_posFullMonitored', 'GPS_validity_posFullMonitored_enum',
+        'GPS_validity_posPaQualified', 'GPS_validity_posPaQualified_enum',
+        # 接收机状态
+        'receiver_positioning_status', 'receiver_positioning_status_enum',
+        'num_sats_used', 'num_sats_visible',
+        # DOP
+        'hdop', 'vdop',
+        # 位置 / 速度（英制 + 公制）
+        'altitude_ft', 'altitude_m',
+        'ellipsoid_height_ft', 'ellipsoid_height_m',
         'track_angle_deg',
-        'ground_speed_kn',
-        'latitude_deg',
-        'longitude_deg',
-        'hpl_sbas_nm',
-        'hpl_fd_nm',
-        'vpl_sbas_ft',
-        'vpl_fd_ft',
-        'vfom_ft',
-        'hfom_nm',
-        'vertical_speed_ftmin',
-        'east_speed_kn',
-        'north_speed_kn',
-        'vul_ft',
-        'hul_nm',
-        'utc_date',
-        'utc_time',
-        'utc_day_second',
-        'utc_millisecond',
-        'sw_version',
-        'hw_version',
-        'gps_validity_raw',
-        'maint_fault_raw',
+        'ground_speed_kn', 'ground_speed_m_s',
+        'latitude_deg', 'longitude_deg',
+        # 保护级 + 故障标识（英制 + 公制）
+        'hpl_sbas_nm', 'hpl_sbas_km', 'SBAS_flag', 'SBAS_flag_enum',
+        'hpl_fd_nm', 'hpl_fd_km', 'HPL_FD_flag', 'HPL_FD_flag_enum',
+        'vpl_sbas_ft', 'vpl_sbas_m',
+        'vpl_fd_ft', 'vpl_fd_m',
+        'vfom_ft', 'vfom_m',
+        'hfom_nm', 'hfom_km',
+        # 速度（英制 + 公制）
+        'vertical_speed_ftmin', 'vertical_speed_m_s',
+        'east_speed_kn', 'east_speed_m_s',
+        'north_speed_kn', 'north_speed_m_s',
+        # 维护故障
+        'receiver_FaultFlags', 'receiver_FaultFlags_enum',
+        # 精度（英制 + 公制）
+        'vul_ft', 'vul_m',
+        'hul_nm', 'hul_km',
+        # UTC 时间（加工 + 原始分量）
+        'utc_date', 'utc_date_year', 'utc_date_mon', 'utc_date_day',
+        'utc_time', 'utc_time_hour', 'utc_time_min', 'utc_time_sec',
+        'utc_day_second', 'utc_millisecond',
+        # 版本
+        'sw_version', 'hw_version',
     ]
 
     def __init__(self):
@@ -226,93 +259,131 @@ class RTKParser(BaseParser):
 
     def _parse_frame(self, data: bytes, timestamp: float) -> Dict[str, Any]:
         words = struct.unpack('>24I', data)
-        record = {'timestamp': timestamp}
+        record: Dict[str, Any] = {'timestamp': timestamp}
 
-        # Word 2 (index 1): 设备位置 + 定位有效 + 卫星系统 + DOP有效 + GPS有效性 + 接收机状态
+        # BeijingDateTime
+        try:
+            dt_utc = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            dt_bj = dt_utc.astimezone(_BEIJING_TZ)
+            record['BeijingDateTime'] = dt_bj.strftime('%Y-%m-%d %H:%M:%S.') + f"{dt_bj.microsecond // 1000:03d}"
+        except Exception:
+            record['BeijingDateTime'] = ''
+
+        # Word 1 (index 0): 帧头(已校验), 帧计数在 byte[1] 的低 8 bit
+        record['frame_count'] = data[4] if len(data) > 4 else 0
+
+        # ---- Word 2 (index 1) ----
         w2 = words[1]
+
         dev_pos = (w2 >> 30) & 0x03
-        record['device_position'] = {0b01: "左侧GPS1", 0b10: "右侧GPS2"}.get(dev_pos, f"未知({dev_pos})")
+        record['equipment_location_number'] = dev_pos
+        record['equipment_location_number_enum'] = self._DEV_POS_MAP.get(dev_pos, f"未知({dev_pos})")
 
         fix_valid = (w2 >> 28) & 0x03
-        record['fix_valid'] = "有效" if fix_valid == 0b11 else "无效"
+        record['locate_validity_flag'] = fix_valid
+        record['locate_validity_flag_enum'] = self._FIX_VALID_MAP.get(fix_valid, f"未知({fix_valid})")
 
         sat_sys = (w2 >> 26) & 0x03
-        record['sat_system'] = {0: "无", 1: "GPS", 2: "北斗", 3: "组合"}.get(sat_sys, f"未知({sat_sys})")
+        record['satellite_system_flag'] = sat_sys
+        record['satellite_system_flag_enum'] = self._SAT_SYS_MAP.get(sat_sys, f"未知({sat_sys})")
 
         dop_valid = (w2 >> 24) & 0x03
-        record['dop_valid'] = "有效" if dop_valid == 0b11 else "无效"
+        record['DOP_validity_flag'] = dop_valid
+        record['DOP_validity_flag_enum'] = self._DOP_VALID_MAP.get(dop_valid, f"未知({dop_valid})")
 
-        gps_validity = (w2 >> 17) & 0x7F
-        record['gps_validity_raw'] = gps_validity
+        # GPS 有效性 7 bit 拆分
+        gps_v = (w2 >> 17) & 0x7F
+        self._decode_gps_validity(record, gps_v)
 
+        # 接收机状态
         rx_status = (w2 >> 2) & 0x7FFF
         fix_type_raw = (rx_status >> 10) & 0x1F
-        record['fix_type'] = {
-            0x04: "无效解", 0x08: "单点定位",
-            0x0C: "伪距差分", 0x15: "固定解", 0x0D: "浮点解"
-        }.get(fix_type_raw, f"其他({fix_type_raw:#x})")
+        record['receiver_positioning_status'] = fix_type_raw
+        record['receiver_positioning_status_enum'] = self._FIX_TYPE_MAP.get(fix_type_raw, f"其他({fix_type_raw:#x})")
         record['num_sats_used'] = (rx_status >> 5) & 0x1F
         record['num_sats_visible'] = rx_status & 0x1F
 
-        # Word 3 (index 2): HDOP + VDOP
+        # ---- Word 3 (index 2): HDOP + VDOP ----
         w3 = words[2]
-        hdop_raw = (w3 >> 16) & 0xFFFF
-        vdop_raw = w3 & 0xFFFF
-        record['hdop'] = hdop_raw * 0.03125
-        record['vdop'] = vdop_raw * 0.03125
+        record['hdop'] = ((w3 >> 16) & 0xFFFF) * 0.03125
+        record['vdop'] = (w3 & 0xFFFF) * 0.03125
 
-        # Word 4 (index 3): 海拔高度 (signed 21bit, BIT32-BIT12, res 0.125ft)
-        record['altitude_ft'] = self._signed_bnr(words[3], 31, 21, 0.125)
+        # ---- Word 4-5: 海拔 / 椭球高度 ----
+        alt = self._signed_bnr(words[3], 31, 21, 0.125)
+        record['altitude_ft'] = alt
+        record['altitude_m'] = alt * self._FT_TO_M
+        eh = self._signed_bnr(words[4], 31, 21, 0.125)
+        record['ellipsoid_height_ft'] = eh
+        record['ellipsoid_height_m'] = eh * self._FT_TO_M
 
-        # Word 5 (index 4): 椭球高度
-        record['ellipsoid_height_ft'] = self._signed_bnr(words[4], 31, 21, 0.125)
-
-        # Word 6 (index 5): 航迹角(16bit high) + 地速(16bit low)
+        # ---- Word 6: 航迹角 + 地速 ----
         w6 = words[5]
         record['track_angle_deg'] = self._signed_bnr_field((w6 >> 16) & 0xFFFF, 16, 180.0 / (2**15))
-        record['ground_speed_kn'] = self._signed_bnr_field(w6 & 0xFFFF, 16, 0.125)
+        gs = self._signed_bnr_field(w6 & 0xFFFF, 16, 0.125)
+        record['ground_speed_kn'] = gs
+        record['ground_speed_m_s'] = gs * self._KN_TO_MS
 
-        # Word 7 (index 6): 纬度 (signed 32bit, res 180/2^31)
+        # ---- Word 7-8: 纬度 / 经度 ----
         record['latitude_deg'] = self._signed_bnr_field(words[6], 32, 180.0 / (2**31))
-
-        # Word 8 (index 7): 经度
         record['longitude_deg'] = self._signed_bnr_field(words[7], 32, 180.0 / (2**31))
 
-        # Word 9 (index 8): HPL_SBAS & 故障检测
-        record['hpl_sbas_nm'] = self._unsigned_bnr_19(words[8], 16.0 / (2**17))
+        # ---- Word 9: HPL_SBAS + SBAS_flag (BIT32) ----
+        hpl_sbas = self._unsigned_bnr_19(words[8], 16.0 / (2**17))
+        record['hpl_sbas_nm'] = hpl_sbas
+        record['hpl_sbas_km'] = hpl_sbas * self._NM_TO_KM
+        sbas_f = (words[8] >> 31) & 0x01
+        record['SBAS_flag'] = sbas_f
+        record['SBAS_flag_enum'] = self._FAULT_01.get(sbas_f, str(sbas_f))
 
-        # Word 10 (index 9): HPL_FD
-        record['hpl_fd_nm'] = self._unsigned_bnr_19(words[9], 16.0 / (2**17))
+        # ---- Word 10: HPL_FD + HPL_FD_flag (BIT32) ----
+        hpl_fd = self._unsigned_bnr_19(words[9], 16.0 / (2**17))
+        record['hpl_fd_nm'] = hpl_fd
+        record['hpl_fd_km'] = hpl_fd * self._NM_TO_KM
+        fd_f = (words[9] >> 31) & 0x01
+        record['HPL_FD_flag'] = fd_f
+        record['HPL_FD_flag_enum'] = self._FAULT_01.get(fd_f, str(fd_f))
 
-        # Word 11 (index 10): VPL_SBAS
-        record['vpl_sbas_ft'] = self._unsigned_bnr_19(words[10], 0.125)
+        # ---- Word 11-14: VPL_SBAS / VPL_FD / VFOM / HFOM ----
+        vpl_sbas = self._unsigned_bnr_19(words[10], 0.125)
+        record['vpl_sbas_ft'] = vpl_sbas
+        record['vpl_sbas_m'] = vpl_sbas * self._FT_TO_M
+        vpl_fd = self._unsigned_bnr_19(words[11], 0.125)
+        record['vpl_fd_ft'] = vpl_fd
+        record['vpl_fd_m'] = vpl_fd * self._FT_TO_M
+        vfom = self._unsigned_bnr_19(words[12], 0.125)
+        record['vfom_ft'] = vfom
+        record['vfom_m'] = vfom * self._FT_TO_M
+        hfom = self._unsigned_bnr_19(words[13], 16.0 / (2**18))
+        record['hfom_nm'] = hfom
+        record['hfom_km'] = hfom * self._NM_TO_KM
 
-        # Word 12 (index 11): VPL_FD
-        record['vpl_fd_ft'] = self._unsigned_bnr_19(words[11], 0.125)
-
-        # Word 13 (index 12): VFOM
-        record['vfom_ft'] = self._unsigned_bnr_19(words[12], 0.125)
-
-        # Word 14 (index 13): HFOM
-        record['hfom_nm'] = self._unsigned_bnr_19(words[13], 16.0 / (2**18))
-
-        # Word 15 (index 14): 天向速度(16bit high) + 东向速度(16bit low)
+        # ---- Word 15: 天向速度 + 东向速度 ----
         w15 = words[14]
-        record['vertical_speed_ftmin'] = self._signed_bnr_field((w15 >> 16) & 0xFFFF, 16, 1.0)
-        record['east_speed_kn'] = self._signed_bnr_field(w15 & 0xFFFF, 16, 0.125)
+        vs = self._signed_bnr_field((w15 >> 16) & 0xFFFF, 16, 1.0)
+        record['vertical_speed_ftmin'] = vs
+        record['vertical_speed_m_s'] = vs * self._FTMIN_TO_MS
+        es = self._signed_bnr_field(w15 & 0xFFFF, 16, 0.125)
+        record['east_speed_kn'] = es
+        record['east_speed_m_s'] = es * self._KN_TO_MS
 
-        # Word 16 (index 15): 北向速度(16bit high) + 维护故障字(16bit low)
+        # ---- Word 16: 北向速度 + 维护故障字 ----
         w16 = words[15]
-        record['north_speed_kn'] = self._signed_bnr_field((w16 >> 16) & 0xFFFF, 16, 0.125)
-        record['maint_fault_raw'] = w16 & 0xFFFF
+        ns = self._signed_bnr_field((w16 >> 16) & 0xFFFF, 16, 0.125)
+        record['north_speed_kn'] = ns
+        record['north_speed_m_s'] = ns * self._KN_TO_MS
+        mf = w16 & 0xFFFF
+        record['receiver_FaultFlags'] = mf
+        record['receiver_FaultFlags_enum'] = "正常" if mf == 0 else "故障"
 
-        # Word 17 (index 16): VUL
-        record['vul_ft'] = self._unsigned_bnr_19(words[16], 0.125)
+        # ---- Word 17-18: VUL / HUL ----
+        vul = self._unsigned_bnr_19(words[16], 0.125)
+        record['vul_ft'] = vul
+        record['vul_m'] = vul * self._FT_TO_M
+        hul = self._unsigned_bnr_19(words[17], 16.0 / (2**18))
+        record['hul_nm'] = hul
+        record['hul_km'] = hul * self._NM_TO_KM
 
-        # Word 18 (index 17): HUL
-        record['hul_nm'] = self._unsigned_bnr_19(words[17], 16.0 / (2**18))
-
-        # Word 19 (index 18): 日期
+        # ---- Word 19: 日期 ----
         w19 = words[18]
         day = (w19 >> 27) & 0x1F
         month = (w19 >> 23) & 0x0F
@@ -320,28 +391,48 @@ class RTKParser(BaseParser):
         year_lo = (w19 >> 9) & 0x7F
         year = year_hi * 100 + year_lo
         record['utc_date'] = f"{year:04d}-{month:02d}-{day:02d}" if month > 0 and day > 0 else "N/A"
+        record['utc_date_year'] = year
+        record['utc_date_mon'] = month
+        record['utc_date_day'] = day
 
-        # Word 20 (index 19): 时分秒
+        # ---- Word 20: 时分秒 ----
         w20 = words[19]
         hour = (w20 >> 27) & 0x1F
         minute = (w20 >> 21) & 0x3F
         second = (w20 >> 15) & 0x3F
         record['utc_time'] = f"{hour:02d}:{minute:02d}:{second:02d}"
+        record['utc_time_hour'] = hour
+        record['utc_time_min'] = minute
+        record['utc_time_sec'] = second
 
-        # Word 21 (index 20): UTC日内秒
-        w21 = words[20]
-        record['utc_day_second'] = (w21 >> 15) & 0x1FFFF
+        # ---- Word 21: UTC日内秒 ----
+        record['utc_day_second'] = (words[20] >> 15) & 0x1FFFF
 
-        # Word 22 (index 21): 软件版本(16bit high) + 硬件版本(16bit low)
+        # ---- Word 22: 版本 ----
         w22 = words[21]
         record['sw_version'] = self._decode_version((w22 >> 16) & 0xFFFF, "SW")
         record['hw_version'] = self._decode_version(w22 & 0xFFFF, "HW")
 
-        # Word 23 (index 22): UTC毫秒(16bit high) + 用户预留(16bit low)
-        w23 = words[22]
-        record['utc_millisecond'] = (w23 >> 16) & 0xFFFF
+        # ---- Word 23: UTC毫秒 ----
+        record['utc_millisecond'] = (words[22] >> 16) & 0xFFFF
 
         return record
+
+    def _decode_gps_validity(self, record: Dict[str, Any], gps_v: int) -> None:
+        """拆分 GPS 有效性 7bit 为独立子字段"""
+        fields = [
+            ('GPS_validity_insufNumSats', 0, {0: "充足", 1: "不足"}),
+            ('GPS_validity_noSbas', 1, {0: "已收到SBAS", 1: "未收到SBAS"}),
+            ('GPS_validity_paModeEnabled', 2, {0: "未启用", 1: "已启用"}),
+            ('GPS_validity_posPartCorrected', 3, {0: "未校正", 1: "已部分校正"}),
+            ('GPS_validity_posFullCorrected', 4, {0: "未校正", 1: "已完全校正"}),
+            ('GPS_validity_posFullMonitored', 5, {0: "未监控", 1: "全程监控"}),
+            ('GPS_validity_posPaQualified', 6, {0: "不符合PA", 1: "符合PA"}),
+        ]
+        for col, bit, enum_map in fields:
+            v = (gps_v >> bit) & 0x01
+            record[col] = v
+            record[col + '_enum'] = enum_map.get(v, str(v))
 
     @staticmethod
     def _signed_bnr(word: int, msb: int, nbits: int, resolution: float) -> float:

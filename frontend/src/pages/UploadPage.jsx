@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Card, Upload, Button, Select, Form, message, Space, Tag, Row, Col, Alert, Divider, Table, Progress
+  Card, Upload, Button, Select, Form, message, Space, Tag, Row, Col, Alert, Divider, Table, Progress, Radio,
 } from 'antd'
 import {
   InboxOutlined, CloudUploadOutlined, ApiOutlined, DesktopOutlined, SettingOutlined
 } from '@ant-design/icons'
-import { parseApi, protocolApi } from '../services/api'
+import { parseApi, protocolApi, sharedTsnApi } from '../services/api'
 
 const { Dragger } = Upload
 const { Option } = Select
@@ -50,12 +50,28 @@ function UploadPage() {
   const [deviceParserMap, setDeviceParserMap] = useState({})
 
   const [fileList, setFileList] = useState([])
+  const [dataSource, setDataSource] = useState('platform') // platform 优先；local | platform
+  const [sharedList, setSharedList] = useState([])
+  const [platformFileId, setPlatformFileId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
 
   useEffect(() => {
     loadVersions()
+  }, [])
+
+  const loadSharedTsn = async () => {
+    try {
+      const res = await sharedTsnApi.list()
+      setSharedList(res.data || [])
+    } catch {
+      setSharedList([])
+    }
+  }
+
+  useEffect(() => {
+    loadSharedTsn()
   }, [])
 
   useEffect(() => {
@@ -184,8 +200,12 @@ function UploadPage() {
   }, [selectedDevices, deviceParserMap])
 
   const handleUpload = async () => {
-    if (fileList.length === 0) {
+    if (dataSource === 'local' && fileList.length === 0) {
       message.warning('请先选择文件')
+      return
+    }
+    if (dataSource === 'platform' && !platformFileId) {
+      message.warning('请选择平台共享数据')
       return
     }
     if (!allDevicesConfigured) {
@@ -195,7 +215,11 @@ function UploadPage() {
 
     setUploading(true)
     const formData = new FormData()
-    formData.append('file', fileList[0])
+    if (dataSource === 'local') {
+      formData.append('file', fileList[0])
+    } else {
+      formData.append('shared_tsn_id', String(platformFileId))
+    }
     formData.append('device_parser_map', JSON.stringify(deviceParserMap))
 
     if (selectedVersion) {
@@ -209,14 +233,20 @@ function UploadPage() {
     }
 
     try {
-      const res = await parseApi.upload(formData, (progressEvent) => {
-        const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-        setUploadProgress(percent)
-      })
-      message.success('上传成功，解析任务已创建')
+      const onProg = (progressEvent) => {
+        if (progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          setUploadProgress(percent)
+        }
+      }
+      const res =
+        dataSource === 'local'
+          ? await parseApi.upload(formData, onProg)
+          : await parseApi.uploadFromShared(formData, onProg)
+      message.success('解析任务已创建')
       navigate(`/tasks/${res.data.task_id}`)
     } catch (err) {
-      message.error(err.response?.data?.detail || '上传失败')
+      message.error(err.response?.data?.detail || '提交失败')
     } finally {
       setUploading(false)
       setUploadProgress(0)
@@ -329,17 +359,54 @@ function UploadPage() {
               </Space>
             }
           >
-            <Dragger {...uploadProps} style={{ marginBottom: 24 }}>
-              <p className="ant-upload-drag-icon">
-                <InboxOutlined style={{ color: '#d29922', fontSize: 48 }} />
-              </p>
-              <p className="ant-upload-text" style={{ color: '#c9d1d9' }}>
-                点击或拖拽文件到此区域上传
-              </p>
-              <p className="ant-upload-hint" style={{ color: '#8b949e' }}>
-                支持 .pcapng, .pcap, .cap 格式的网络抓包文件
-              </p>
-            </Dragger>
+            <div style={{ marginBottom: 16 }}>
+              <span style={{ color: '#8b949e', marginRight: 12 }}>数据来源</span>
+              <Radio.Group
+                value={dataSource}
+                onChange={(e) => {
+                  setDataSource(e.target.value)
+                  setFileList([])
+                  setPlatformFileId(null)
+                }}
+              >
+                <Radio.Button value="platform">平台共享数据</Radio.Button>
+                <Radio.Button value="local">本地上传</Radio.Button>
+              </Radio.Group>
+            </div>
+
+            {dataSource === 'platform' ? (
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ color: '#8b949e', marginBottom: 8 }}>选择管理员上传的平台数据（近 2 天内有效）</div>
+                <Select
+                  placeholder="选择一条平台数据"
+                  style={{ width: '100%' }}
+                  value={platformFileId}
+                  onChange={setPlatformFileId}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  options={sharedList.map((s) => ({
+                    value: s.id,
+                    label: `#${s.id} ${s.original_filename}${s.experiment_label ? ` — ${s.experiment_label}` : ''}${s.experiment_date ? ` (${s.experiment_date})` : ''}`,
+                  }))}
+                />
+                {sharedList.length === 0 && (
+                  <Alert type="info" showIcon style={{ marginTop: 12 }} message="暂无平台数据，请管理员在「系统配置 → 平台共享数据」中上传" />
+                )}
+              </div>
+            ) : (
+              <Dragger {...uploadProps} style={{ marginBottom: 24 }}>
+                <p className="ant-upload-drag-icon">
+                  <InboxOutlined style={{ color: '#d29922', fontSize: 48 }} />
+                </p>
+                <p className="ant-upload-text" style={{ color: '#c9d1d9' }}>
+                  点击或拖拽文件到此区域上传
+                </p>
+                <p className="ant-upload-hint" style={{ color: '#8b949e' }}>
+                  支持 .pcapng, .pcap, .cap 格式的网络抓包文件
+                </p>
+              </Dragger>
+            )}
 
             <Form form={form} layout="vertical">
               {/* 1. TSN网络配置 */}
@@ -535,7 +602,11 @@ function UploadPage() {
                   icon={<CloudUploadOutlined />}
                   onClick={handleUpload}
                   loading={uploading}
-                  disabled={fileList.length === 0 || !allDevicesConfigured}
+                  disabled={
+                    !allDevicesConfigured
+                    || (dataSource === 'local' && fileList.length === 0)
+                    || (dataSource === 'platform' && !platformFileId)
+                  }
                   block
                 >
                   {uploading ? `上传中 ${uploadProgress}%` : '开始解析'}
