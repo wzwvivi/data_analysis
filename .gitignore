@@ -18,6 +18,15 @@ backend/uploads/pcap/
 backend/uploads/protocols/
 backend/uploads/*/
 
+# Docker bind mounts: large exports / raw uploads (do not commit)
+backend-data/exports/
+backend-uploads/
+
+# Local scratch / accidental copies
+backend/debug_task57.py
+backend/tmp_icd602.xlsx
+backend/tsn_analyzer.db
+
 # IDE/local
 .DS_Store
 Thumbs.db

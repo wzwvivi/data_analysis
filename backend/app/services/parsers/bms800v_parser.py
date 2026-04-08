@@ -81,6 +81,35 @@ def _extract_motorola(data: bytes, startbit: int, length: int) -> int:
 
 _BASE_COLUMNS = ["timestamp", "source_port", "can_id_hex", "msg_type", "pack_id"]
 
+import struct
+
+_VALID_STATUS = 0x03
+_PROTOCOL_PAD_LEN = 4
+_STATUS_LEN = 4
+_FRAME_LEN = 16
+_GROUP_FRAMES = 4
+_GROUP_DATA_LEN = _STATUS_LEN + _FRAME_LEN * _GROUP_FRAMES  # 68
+
+
+def _can_frame_valid(payload: bytes, byte_offset: int, expected_cid: int) -> bool:
+    """Check status-set validity and CAN-ID match for a frame at byte_offset."""
+    frame_idx_in_payload = byte_offset - _PROTOCOL_PAD_LEN - _STATUS_LEN
+    if frame_idx_in_payload < 0:
+        return True
+    group_idx = frame_idx_in_payload // (_FRAME_LEN * _GROUP_FRAMES + _STATUS_LEN)
+    slot_in_group = (frame_idx_in_payload - group_idx * (_FRAME_LEN * _GROUP_FRAMES + _STATUS_LEN)) // _FRAME_LEN
+    status_offset = _PROTOCOL_PAD_LEN + group_idx * _GROUP_DATA_LEN
+    if status_offset + _STATUS_LEN > len(payload):
+        return True
+    if slot_in_group < 0 or slot_in_group >= _STATUS_LEN:
+        return True
+    if payload[status_offset + slot_in_group] != _VALID_STATUS:
+        return False
+    actual_cid = struct.unpack_from(">I", payload, byte_offset)[0]
+    if actual_cid != expected_cid and actual_cid != 0:
+        return False
+    return True
+
 
 @ParserRegistry.register
 class BMS800VParser(BaseParser):
@@ -112,6 +141,9 @@ class BMS800VParser(BaseParser):
 
         for expected_cid, byte_offset in frame_list:
             if byte_offset + 16 > len(payload):
+                continue
+
+            if not _can_frame_valid(payload, byte_offset, expected_cid):
                 continue
 
             frame_bytes = payload[byte_offset: byte_offset + 16]

@@ -29,10 +29,17 @@ PORT_FAMILY_MAP: Dict[int, str] = {
     # 下行
     8002: "bms270v", 8010: "bms270v",
 
+    # ── BPCU / EMPC 配电系统 (bpcu_empc) ──
+    # 上行（BPCU/EMPC → 飞管）
+    7050: "bpcu_empc", 7051: "bpcu_empc",
+    7052: "bpcu_empc", 7053: "bpcu_empc",
+    7054: "bpcu_empc", 7055: "bpcu_empc",
+    # 下行 — 灯光系统（飞管 → BPCU 负载复位命令）
+    8035: "bpcu_empc", 8042: "bpcu_empc",
+
     # ── ADC 大气数据系统 (adc) ──
     7001: "adc", 7002: "adc", 7003: "adc",
     7022: "adc", 7023: "adc", 7024: "adc", 7025: "adc", 7026: "adc", 7027: "adc",
-    8003: "adc", 8004: "adc", 8005: "adc", 8006: "adc", 8007: "adc", 8008: "adc",
 
     # ── 无线电高度表 (ra) ──
     7007: "ra", 7008: "ra", 7009: "ra", 7010: "ra", 7011: "ra", 7012: "ra",
@@ -273,7 +280,7 @@ class ProtocolService:
         """
         获取网络配置版本下的设备列表，按设备名聚合端口
         
-        只基于 source_device（待转换TSN设备/发送端），target_device 作为参考信息但不作为主设备归属。
+        基于 source_device 聚合设备；并保留该设备出现过的数据方向（uplink/downlink/network）。
         
         返回格式:
         [
@@ -282,14 +289,14 @@ class ProtocolService:
                 "ports": [端口列表],
                 "messages": [消息名称列表],
                 "port_count": 端口数量,
-                "direction": "source"
+                "direction": "uplink/downlink/network"
             },
             ...
         ]
         """
         ports = await self.get_ports_by_version(version_id)
         
-        # 用于聚合的字典: device_name -> {ports, messages}
+        # 用于聚合的字典: device_name -> {ports, messages, directions}
         device_map = {}
         
         for port in ports:
@@ -301,20 +308,26 @@ class ProtocolService:
                         device_map[device_name] = {
                             "ports": set(),
                             "messages": set(),
+                            "directions": set(),
                         }
                     device_map[device_name]["ports"].add(port.port_number)
                     if port.message_name:
                         device_map[device_name]["messages"].add(port.message_name)
+                    if port.data_direction:
+                        device_map[device_name]["directions"].add(port.data_direction)
         
         # 转换为列表
         devices = []
         for device_name, data in device_map.items():
+            dirs = sorted(list(data["directions"]))
+            # 单方向直接返回；多方向用 "/" 连接，便于前端展示
+            direction = "/".join(dirs) if dirs else "uplink"
             devices.append({
                 "device_name": device_name,
                 "ports": sorted(list(data["ports"])),
                 "messages": sorted(list(data["messages"])),
                 "port_count": len(data["ports"]),
-                "direction": "source"  # 统一为 source，表示这是发送端设备
+                "direction": direction,
             })
         
         # 按设备名排序

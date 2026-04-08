@@ -67,10 +67,43 @@ class Arinc429Mixin:
     _OUTPUT_COLUMNS: List[str] = []
     _PORT_LABELS: Optional[Dict[int, List[int]]] = None
 
+    # 功能状态集中，字节值为 0x03 代表对应槽位有效（按解析思路文档约定）
+    _VALID_STATUS_VALUE: int = 0x03
+
     def _mixin_init(self):
         """在子类 __init__ 中调用，初始化公共状态。"""
         self.decoder = ARINC429Decoder()
         self._port_columns_cache: Dict[int, List[str]] = {}
+
+    def _extract_status_slots(
+        self,
+        payload: bytes,
+        offset: int,
+        length: int,
+    ) -> Optional[List[int]]:
+        """从 payload 指定区间提取功能状态集字节列表。"""
+        if length <= 0 or offset < 0:
+            return None
+        end = offset + length
+        if end > len(payload):
+            return None
+        raw = payload[offset:end]
+        if not raw:
+            return None
+        return list(raw)
+
+    def _status_slot_is_valid(self, status_slots: Optional[List[int]], slot_index: int) -> bool:
+        """
+        判断当前槽位是否有效。
+        - 无状态集时：默认有效（兼容历史行为）
+        - 槽位越界时：默认有效（避免未知布局被误杀）
+        - 槽位值等于 _VALID_STATUS_VALUE 时：有效
+        """
+        if status_slots is None:
+            return True
+        if slot_index < 0 or slot_index >= len(status_slots):
+            return True
+        return status_slots[slot_index] == self._VALID_STATUS_VALUE
 
     # ------------------------------------------------------------------
     # parse_packet 分发
@@ -101,9 +134,22 @@ class Arinc429Mixin:
         record["timestamp"] = timestamp
         found_any = False
 
+        status_slots: Optional[List[int]] = None
+        status_idx = 0
+
         for field in field_layout:
+            if field.field_name == '功能状态集':
+                status_slots = self._extract_status_slots(payload, field.field_offset, field.field_length)
+                status_idx = 0
+                continue
             if field.field_name in SKIP_FIELDS:
                 continue
+
+            slot_valid = self._status_slot_is_valid(status_slots, status_idx)
+            status_idx += 1
+            if not slot_valid:
+                continue
+
             label_octal = self._FIELD_NAME_TO_LABEL.get(field.field_name)
             if label_octal is None:
                 continue
@@ -142,6 +188,8 @@ class Arinc429Mixin:
         else:
             allowed_labels = set(self._LABEL_DEFS.keys())
 
+        status_slots = self._extract_status_slots(payload, 4, 4)
+        status_idx = 0
         data = payload[TSN_HEADER_LEN:]
         record: Dict[str, Any] = {c: None for c in port_cols}
         record["timestamp"] = timestamp
@@ -151,6 +199,11 @@ class Arinc429Mixin:
         while offset + 4 <= len(data):
             word = struct.unpack(">I", data[offset: offset + 4])[0]
             offset += 4
+
+            slot_valid = self._status_slot_is_valid(status_slots, status_idx)
+            status_idx += 1
+            if not slot_valid:
+                continue
             if word == 0:
                 continue
 

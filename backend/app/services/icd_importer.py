@@ -160,8 +160,16 @@ class ICDImporter:
                 
                 current_port = port_num
                 current_msg_name = str(row.get(msg_col)) if msg_col and pd.notna(row.get(msg_col)) else None
-                current_source_device = str(row.get(source_device_col)) if source_device_col and pd.notna(row.get(source_device_col)) else None
-                current_target_device = str(row.get(target_device_col)) if target_device_col and pd.notna(row.get(target_device_col)) else None
+                raw_source_device = row.get(source_device_col) if source_device_col else None
+                raw_target_device = row.get(target_device_col) if target_device_col else None
+                current_source_device = self._build_source_device_name(
+                    direction=direction,
+                    source_name=raw_source_device,
+                    target_name=raw_target_device,
+                )
+                if not current_source_device:
+                    current_source_device = None
+                current_target_device = self._normalize_cell_text(raw_target_device) or None
                 current_description = str(row.get(desc_col)) if desc_col and pd.notna(row.get(desc_col)) else None
                 current_ip = str(row.get(ip_col)) if ip_col and pd.notna(row.get(ip_col)) else None
                 
@@ -226,6 +234,45 @@ class ICDImporter:
         await self.db.commit()
         
         return port_count, field_count
+
+    @staticmethod
+    def _normalize_cell_text(value: Any) -> str:
+        """将单元格值规范化为字符串，空值返回空串。"""
+        if value is None or pd.isna(value):
+            return ""
+        text = str(value).strip()
+        if text.lower() == "nan":
+            return ""
+        return text
+
+    def _build_source_device_name(
+        self,
+        direction: str,
+        source_name: Any,
+        target_name: Any,
+    ) -> str:
+        """
+        构建设备名称规则：
+        - uplink: 直接使用设备名称
+        - downlink: 使用 发出端->接收端
+        - 其他: 优先源设备，缺失时回退到组合名
+        """
+        src = self._normalize_cell_text(source_name)
+        dst = self._normalize_cell_text(target_name)
+
+        if direction == "uplink":
+            return src
+
+        if direction == "downlink":
+            if src and dst:
+                return f"{src}->{dst}"
+            return src or dst
+
+        if src:
+            return src
+        if src and dst:
+            return f"{src}->{dst}"
+        return dst
     
     def _find_column(self, columns, keywords: List[str], require_all: bool = False) -> str:
         """查找包含关键词的列"""

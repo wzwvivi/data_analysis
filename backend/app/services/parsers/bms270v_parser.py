@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
 from .base import BaseParser, ParserRegistry, FieldLayout
-from .bms800v_parser import _extract_motorola
+from .bms800v_parser import _extract_motorola, _can_frame_valid
 
 _DATA_DIR = Path(__file__).parent
 
@@ -86,6 +86,9 @@ class BMS270VParser(BaseParser):
 
         for expected_cid, byte_offset in frame_list:
             if byte_offset + 16 > len(payload):
+                continue
+
+            if not _can_frame_valid(payload, byte_offset, expected_cid):
                 continue
 
             frame_bytes = payload[byte_offset: byte_offset + 16]

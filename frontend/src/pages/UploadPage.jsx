@@ -26,6 +26,19 @@ const FAMILY_LABELS = {
   bms270v: '270V&28V 动力电池 BMS',
 }
 
+const DIRECTION_LABELS = {
+  uplink: '上行数据',
+  downlink: '下行数据',
+  network: '网络交互数据',
+}
+
+const formatDirectionLabel = (direction) => {
+  if (!direction) return '上行数据'
+  const parts = String(direction).split('/').map(s => s.trim()).filter(Boolean)
+  const mapped = parts.map(p => DIRECTION_LABELS[p] || p)
+  return mapped.join('/')
+}
+
 const ATG_DEPENDENCY_SLOTS = [
   { key: 'FCC1', keywords: ['FCC1', '飞控1'], family: 'fcc' },
   { key: 'FCC2', keywords: ['FCC2', '飞控2'], family: 'fcc' },
@@ -507,7 +520,7 @@ function UploadPage() {
                           {device.protocol_family && (
                             <Tag color="blue">{FAMILY_LABELS[device.protocol_family] || device.protocol_family}</Tag>
                           )}
-                          <Tag color="green">发送端</Tag>
+                          <Tag color="green">{formatDirectionLabel(device.direction)}</Tag>
                         </Space>
                       </Option>
                     ))}
