@@ -8,6 +8,7 @@ import {
   ApiOutlined,
   SwapOutlined,
   FileSearchOutlined,
+  TeamOutlined,
   UserOutlined,
   LogoutOutlined,
 } from '@ant-design/icons'
@@ -30,6 +31,11 @@ function MainLayout() {
         key: '/admin/platform-data',
         icon: <CloudUploadOutlined />,
         label: '平台共享数据',
+      })
+      sysChildren.push({
+        key: '/admin/users',
+        icon: <TeamOutlined />,
+        label: '用户管理',
       })
     }
     return [
@@ -75,6 +81,7 @@ function MainLayout() {
     if (path.startsWith('/compare')) return '/compare'
     if (path.startsWith('/event-analysis')) return '/event-analysis'
     if (path.startsWith('/admin/platform-data')) return '/admin/platform-data'
+    if (path.startsWith('/admin/users')) return '/admin/users'
     return path
   }
 
@@ -137,6 +144,7 @@ function MainLayout() {
             {location.pathname.startsWith('/tasks/') && !location.pathname.includes('/analysis') && '网络数据分析 / 解析结果查看'}
             {location.pathname === '/network-config' && '系统配置 / 网络配置'}
             {location.pathname.startsWith('/admin/platform-data') && '系统配置 / 平台共享数据'}
+            {location.pathname.startsWith('/admin/users') && '系统配置 / 用户管理'}
           </div>
           <Dropdown
             menu={{

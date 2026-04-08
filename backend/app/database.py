@@ -250,5 +250,10 @@ async def init_db():
                             text("ALTER TABLE event_analysis_tasks ADD COLUMN pcap_file_path VARCHAR(500)")
                         )
                         print("[DB] 已添加 event_analysis_tasks.pcap_file_path")
+                    if 'progress' not in ea_col_names:
+                        sync_conn.execute(
+                            text("ALTER TABLE event_analysis_tasks ADD COLUMN progress INTEGER DEFAULT 0")
+                        )
+                        print("[DB] 已添加 event_analysis_tasks.progress")
         
         await conn.run_sync(_check_and_add_columns)

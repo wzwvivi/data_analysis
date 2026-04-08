@@ -13,17 +13,121 @@ from .config import (
 from .services.auth_password import hash_password
 
 ADC_OUTPUT_FIELDS = (
-    '["timestamp","adru_id","adru_id_cn","label_octal","label_name","ssm","ssm_cn",'
-    '"label_count","labels_octal","labels_cn","ssm_values",'
-    '"abs_alt_voted_ft","qnh_alt_voted_ft","qfe_alt_voted_ft","mach_voted","ias_voted_kn",'
-    '"cas_voted_kn","tas_voted_kn","vspeed_voted_ftmin","tat_voted_c","sat_voted_c","aoa_voted_deg","aos_voted_deg",'
-    '"left_sp_raw_hpa","right_sp_raw_hpa","total_p_raw_hpa","avg_sp_raw_hpa","avg_sp_corr_hpa",'
-    '"abs_alt_src_ft","qnh_alt_src_ft","qfe_alt_src_ft","mach_src","ias_src_kn","cas_src_kn","tas_src_kn",'
-    '"vspeed_src_ftmin","tat_src_c","sat_src_c","aoa_src_deg","aos_src_deg",'
-    '"pbit_240","cbit_241","cbit_242","cbit_243","sw_version","qnh_report_hpa","qfe_report_hpa","flap_status_report",'
-    '"inertial_vrate_report","maint_bit_cmd_report","heat_cmd_report","wow_report",'
-    '"flap_takeoff_valid","flap_cruise_valid","flap_landing_valid",'
-    '"maint_bit_cmd_active","maint_bit_cmd_cn","heat_cmd_mode","heat_cmd_mode_cn","wow_compressed","wow_compressed_cn"]'
+    '["timestamp","adru_id","adru_id_cn",'
+    '"label_102.voted_qfe_alt","label_102.sdi","label_102.ssm","label_102.ssm_enum","label_102.parity",'
+    '"label_103.voted_qnh_alt","label_103.sdi","label_103.ssm","label_103.ssm_enum","label_103.parity",'
+    '"label_137.flap_status","label_137.flap_status_enum","label_137.sdi","label_137.ssm","label_137.ssm_enum","label_137.parity",'
+    '"label_176.src_left_sp","label_176.sdi","label_176.ssm","label_176.ssm_enum","label_176.parity",'
+    '"label_177.src_right_sp","label_177.sdi","label_177.ssm","label_177.ssm_enum","label_177.parity",'
+    '"label_203.voted_abs_alt","label_203.sdi","label_203.ssm","label_203.ssm_enum","label_203.parity",'
+    '"label_205.voted_mach","label_205.sdi","label_205.ssm","label_205.ssm_enum","label_205.parity",'
+    '"label_206.voted_ias","label_206.sdi","label_206.ssm","label_206.ssm_enum","label_206.parity",'
+    '"label_207.voted_cas","label_207.sdi","label_207.ssm","label_207.ssm_enum","label_207.parity",'
+    '"label_210.voted_tas","label_210.sdi","label_210.ssm","label_210.ssm_enum","label_210.parity",'
+    '"label_211.voted_tat","label_211.sdi","label_211.ssm","label_211.ssm_enum","label_211.parity",'
+    '"label_212.voted_vspeed","label_212.sdi","label_212.ssm","label_212.ssm_enum","label_212.parity",'
+    '"label_213.voted_sat","label_213.sdi","label_213.ssm","label_213.ssm_enum","label_213.parity",'
+    '"label_221.voted_aoa","label_221.sdi","label_221.ssm","label_221.ssm_enum","label_221.parity",'
+    '"label_226.voted_aos","label_226.sdi","label_226.ssm","label_226.ssm_enum","label_226.parity",'
+    '"label_233.qnh_report","label_233.qnh_report_enum","label_233.sdi","label_233.ssm","label_233.ssm_enum","label_233.parity",'
+    '"label_234.qfe_report","label_234.qfe_report_enum","label_234.sdi","label_234.ssm","label_234.ssm_enum","label_234.parity",'
+    '"label_235.wow","label_235.wow_enum","label_235.sdi","label_235.ssm","label_235.ssm_enum","label_235.parity",'
+    '"label_236.maint_bit","label_236.maint_bit_enum","label_236.sdi","label_236.ssm","label_236.ssm_enum","label_236.parity",'
+    '"label_237.heat_cmd","label_237.heat_cmd_enum","label_237.sdi","label_237.ssm","label_237.ssm_enum","label_237.parity",'
+    '"label_240.pbit","label_240.pbit_enum","label_240.sdi","label_240.ssm","label_240.ssm_enum","label_240.parity",'
+    '"label_241.cbit1","label_241.cbit1_enum","label_241.sdi","label_241.ssm","label_241.ssm_enum","label_241.parity",'
+    '"label_242.cbit2","label_242.cbit2_enum","label_242.sdi","label_242.ssm","label_242.ssm_enum","label_242.parity",'
+    '"label_243.cbit3","label_243.cbit3_enum","label_243.sdi","label_243.ssm","label_243.ssm_enum","label_243.parity",'
+    '"label_244.src_total_p","label_244.sdi","label_244.ssm","label_244.ssm_enum","label_244.parity",'
+    '"label_245.src_avg_sp","label_245.sdi","label_245.ssm","label_245.ssm_enum","label_245.parity",'
+    '"label_246.src_avg_sp_corr","label_246.sdi","label_246.ssm","label_246.ssm_enum","label_246.parity",'
+    '"label_303.src_abs_alt","label_303.sdi","label_303.ssm","label_303.ssm_enum","label_303.parity",'
+    '"label_304.src_qnh_alt","label_304.sdi","label_304.ssm","label_304.ssm_enum","label_304.parity",'
+    '"label_305.src_mach","label_305.sdi","label_305.ssm","label_305.ssm_enum","label_305.parity",'
+    '"label_306.src_ias","label_306.sdi","label_306.ssm","label_306.ssm_enum","label_306.parity",'
+    '"label_307.src_cas","label_307.sdi","label_307.ssm","label_307.ssm_enum","label_307.parity",'
+    '"label_310.src_tas","label_310.sdi","label_310.ssm","label_310.ssm_enum","label_310.parity",'
+    '"label_311.src_tat","label_311.sdi","label_311.ssm","label_311.ssm_enum","label_311.parity",'
+    '"label_312.src_vspeed","label_312.sdi","label_312.ssm","label_312.ssm_enum","label_312.parity",'
+    '"label_313.src_sat","label_313.sdi","label_313.ssm","label_313.ssm_enum","label_313.parity",'
+    '"label_314.src_qfe_alt","label_314.sdi","label_314.ssm","label_314.ssm_enum","label_314.parity",'
+    '"label_321.src_aoa","label_321.sdi","label_321.ssm","label_321.ssm_enum","label_321.parity",'
+    '"label_326.src_aos","label_326.sdi","label_326.ssm","label_326.ssm_enum","label_326.parity",'
+    '"label_350.sw_ver","label_350.sw_ver_enum","label_350.sdi","label_350.ssm","label_350.ssm_enum","label_350.parity",'
+    '"label_364.inertial_vrate","label_364.sdi","label_364.ssm","label_364.ssm_enum","label_364.parity"]'
+)
+
+RA_OUTPUT_FIELDS = (
+    '["timestamp","ra_id","ra_id_cn",'
+    '"label_164.alt_bnr","label_164.inhibit_selftest","label_164.inhibit_selftest_enum","label_164.sdi","label_164.ssm","label_164.ssm_enum","label_164.parity",'
+    '"label_165.alt_bcd","label_165.alt_bcd_sign","label_165.alt_bcd_sign_enum","label_165.sdi","label_165.ssm","label_165.ssm_enum","label_165.parity",'
+    '"label_270.discrete","label_270.discrete_enum","label_270.inhibit_selftest","label_270.inhibit_selftest_enum","label_270.aid20","label_270.aid20_enum","label_270.aid40","label_270.aid40_enum","label_270.aid57","label_270.aid57_enum","label_270.aid_check","label_270.aid_check_enum","label_270.alt_valid","label_270.alt_valid_enum","label_270.selftest","label_270.selftest_enum","label_270.sdi","label_270.ssm","label_270.ssm_enum","label_270.parity",'
+    '"label_350.bit_status","label_350.bit_status_enum","label_350.ra_status","label_350.ra_status_enum","label_350.source_signal","label_350.source_signal_enum","label_350.aid_detect","label_350.aid_detect_enum","label_350.fpga_monitor","label_350.fpga_monitor_enum","label_350.volt_5v","label_350.volt_5v_enum","label_350.volt_15v","label_350.volt_15v_enum","label_350.volt_28v","label_350.volt_28v_enum","label_350.tx_channel","label_350.tx_channel_enum","label_350.rx_channel_a","label_350.rx_channel_a_enum","label_350.rx_channel_b","label_350.rx_channel_b_enum","label_350.tx429_ch1","label_350.tx429_ch1_enum","label_350.tx429_ch2","label_350.tx429_ch2_enum","label_350.rx_antenna","label_350.rx_antenna_enum","label_350.tx_antenna","label_350.tx_antenna_enum","label_350.clock1","label_350.clock1_enum","label_350.clock2","label_350.clock2_enum","label_350.sdi","label_350.ssm","label_350.ssm_enum","label_350.parity"]'
+)
+
+BRAKE_OUTPUT_FIELDS = (
+    '["timestamp","unit_id","unit_id_cn",'
+    '"label_002.left_avg_wheel_speed","label_002.sdi","label_002.ssm","label_002.ssm_enum","label_002.parity",'
+    '"label_003.right_avg_wheel_speed","label_003.sdi","label_003.ssm","label_003.ssm_enum","label_003.parity",'
+    '"label_004.left_inside_wheel_speed","label_004.sdi","label_004.ssm","label_004.ssm_enum","label_004.parity",'
+    '"label_005.left_outside_wheel_speed","label_005.sdi","label_005.ssm","label_005.ssm_enum","label_005.parity",'
+    '"label_006.right_inside_wheel_speed","label_006.sdi","label_006.ssm","label_006.ssm_enum","label_006.parity",'
+    '"label_007.right_outside_wheel_speed","label_007.sdi","label_007.ssm","label_007.ssm_enum","label_007.parity",'
+    '"label_051.auto_brk_fail","label_051.auto_brk_lo","label_051.auto_brk_med","label_051.auto_brk_hi","label_051.auto_brk_rto","label_051.brk_plt_ped_fail","label_051.brk_coplt_ped_fail","label_051.brk_nml_no_dispatch","label_051.tire_pr_fail","label_051.left_inside_tire_pr_advy","label_051.left_outside_tire_pr_advy","label_051.right_inside_tire_pr_advy","label_051.right_outside_tire_pr_advy","label_051.ctr_status","label_051.sdi","label_051.ssm","label_051.ssm_enum","label_051.parity",'
+    '"label_060.left_inside_tire_pressure","label_060.sdi","label_060.ssm","label_060.ssm_enum","label_060.parity",'
+    '"label_061.right_inside_tire_pressure","label_061.sdi","label_061.ssm","label_061.ssm_enum","label_061.parity",'
+    '"label_062.left_outside_tire_pressure","label_062.sdi","label_062.ssm","label_062.ssm_enum","label_062.parity",'
+    '"label_063.right_outside_tire_pressure","label_063.sdi","label_063.ssm","label_063.ssm_enum","label_063.parity",'
+    '"label_070.left_inside_brake_force","label_070.sdi","label_070.ssm","label_070.ssm_enum","label_070.parity",'
+    '"label_071.right_inside_brake_force","label_071.sdi","label_071.ssm","label_071.ssm_enum","label_071.parity",'
+    '"label_072.left_outside_brake_force","label_072.sdi","label_072.ssm","label_072.ssm_enum","label_072.parity",'
+    '"label_073.right_outside_brake_force","label_073.sdi","label_073.ssm","label_073.ssm_enum","label_073.parity",'
+    '"label_114.left_inside_brake_temp","label_114.sdi","label_114.ssm","label_114.ssm_enum","label_114.parity",'
+    '"label_115.right_inside_brake_temp","label_115.sdi","label_115.ssm","label_115.ssm_enum","label_115.parity",'
+    '"label_116.left_outside_brake_temp","label_116.sdi","label_116.ssm","label_116.ssm_enum","label_116.parity",'
+    '"label_117.right_outside_brake_temp","label_117.sdi","label_117.ssm","label_117.ssm_enum","label_117.parity",'
+    '"label_170.left_main_pedal_stroke","label_170.sdi","label_170.ssm","label_170.ssm_enum","label_170.parity",'
+    '"label_171.right_main_pedal_stroke","label_171.sdi","label_171.ssm","label_171.ssm_enum","label_171.parity",'
+    '"label_172.left_copilot_pedal_stroke","label_172.sdi","label_172.ssm","label_172.ssm_enum","label_172.parity",'
+    '"label_173.right_copilot_pedal_stroke","label_173.sdi","label_173.ssm","label_173.ssm_enum","label_173.parity",'
+    '"label_174.left_brake_feedback","label_174.sdi","label_174.ssm","label_174.ssm_enum","label_174.parity",'
+    '"label_175.right_brake_feedback","label_175.sdi","label_175.ssm","label_175.ssm_enum","label_175.parity",'
+    '"label_176.autoflight_left_brake_cmd","label_176.sdi","label_176.ssm","label_176.ssm_enum","label_176.parity",'
+    '"label_177.autoflight_right_brake_cmd","label_177.sdi","label_177.ssm","label_177.ssm_enum","label_177.parity",'
+    '"label_351.park_brk_fail","label_351.park_brk_on","label_351.park_brk_apply","label_351.brk_nml_fail","label_351.antiskid_off","label_351.brk_emer_fail","label_351.brk_total_loss","label_351.brk_degrd","label_351.brk_lh_fail","label_351.brk_rh_fail","label_351.antiskid_fail","label_351.left_inside_temp_overheat","label_351.left_outside_temp_overheat","label_351.right_inside_temp_overheat","label_351.right_outside_temp_overheat","label_351.brk_temp_fail","label_351.sdi","label_351.ssm","label_351.ssm_enum","label_351.parity",'
+    '"label_352.left_inside_antiskid","label_352.left_outside_antiskid","label_352.right_inside_antiskid","label_352.right_outside_antiskid","label_352.left_inside_antiskid_fault","label_352.left_outside_antiskid_fault","label_352.right_inside_antiskid_fault","label_352.right_outside_antiskid_fault","label_352.auto_brk_on","label_352.brk_nml_on","label_352.brk_alt_on","label_352.brk_emer_on","label_352.sdi","label_352.ssm","label_352.ssm_enum","label_352.parity",'
+    '"label_353.fcc_master","label_353.fcc_master_enum","label_353.autoflight_mode_on","label_353.autoflight_park_brake_on","label_353.autoflight_antiskid_on","label_353.autoflight_autobrake_off","label_353.autoflight_autobrake_lo","label_353.autoflight_autobrake_med","label_353.autoflight_autobrake_hi","label_353.autoflight_autobrake_rto","label_353.left_throttle_cmd","label_353.right_throttle_cmd","label_353.sdi","label_353.ssm","label_353.ssm_enum","label_353.parity"]'
+)
+
+LGCU_OUTPUT_FIELDS = (
+    '["timestamp","unit_id","unit_id_cn",'
+    '"label_103.rh_mlg_woffw_1","label_103.rh_mlg_woffw_1_op","label_103.spare_13","label_103.spare_14","label_103.rh_mlg_dnlk_1","label_103.rh_mlg_dnlk_1_op","label_103.sdi","label_103.ssm","label_103.ssm_enum","label_103.parity",'
+    '"label_115.lh_mlg_woffw_2","label_115.lh_mlg_woffw_2_op","label_115.spare_13","label_115.spare_14","label_115.lh_mlg_dnlk_2","label_115.lh_mlg_dnlk_2_op","label_115.sdi","label_115.ssm","label_115.ssm_enum","label_115.parity",'
+    '"label_271.mlg_rh_uplock","label_271.mlg_lh_uplock","label_271.nlg_lock","label_271.mlg_rh_dnlock","label_271.mlg_lh_dnlock","label_271.nlg_pos","label_271.mlg_rh_uplock_op","label_271.mlg_lh_uplock_op","label_271.nlg_lock_op","label_271.mlg_rh_dnlock_op","label_271.mlg_lh_dnlock_op","label_271.nlg_pos_op","label_271.lgcl_up","label_271.lgcl_down","label_271.lgcl_up_op","label_271.lgcl_down_op","label_271.lgcl_auto","label_271.lgcl_auto_op","label_271.sdi","label_271.ssm","label_271.ssm_enum","label_271.parity",'
+    '"label_273.all_gear_dnlk","label_273.all_gear_uplk","label_273.nlg_uplk","label_273.nlg_dnlk","label_273.cmd_retract","label_273.cmd_extend","label_273.auto_retract_cmd","label_273.auto_extend_cmd","label_273.auto_flight_mode","label_273.spare_20","label_273.spare_21","label_273.spare_22","label_273.spare_23","label_273.lgcl_up_dn","label_273.spare_25","label_273.spare_26","label_273.cons_mlg_dnlk","label_273.cons_mlg_uplk","label_273.lgcl_dn_up","label_273.sdi","label_273.ssm","label_273.ssm_enum","label_273.parity",'
+    '"label_274.rh_mlg_wow","label_274.lh_mlg_wow","label_274.nlg_wow","label_274.rh_mlg_wow_op","label_274.lh_mlg_wow_op","label_274.nlg_wow_op","label_274.sdi","label_274.ssm","label_274.ssm_enum","label_274.parity",'
+    '"label_275.spare_11","label_275.all_gear_wow","label_275.mlg_wow","label_275.gr_woffw","label_275.nlg_wow","label_275.nlg_uplock_sw_off_mon","label_275.rh_mlg_uplock_sw_off_mon","label_275.lh_mlg_uplock_sw_off_mon","label_275.spare_19","label_275.spare_20","label_275.spare_21","label_275.spare_22","label_275.aes_gnd_disc","label_275.aes_28v_en","label_275.all_gear_wow_op","label_275.mlg_wow_op","label_275.sdi","label_275.ssm","label_275.ssm_enum","label_275.parity",'
+    '"label_276.lg_sys_nd_fault","label_276.lgcu_internal_fault","label_276.lg_sys_degraded","label_276.wow_sys_fault","label_276.wow_sys_degraded","label_276.alt_ext_lg_down","label_276.alt_ext_lg_fault","label_276.ng_disagree","label_276.lg_disagree","label_276.rg_disagree","label_276.ng_uplocked","label_276.lg_uplocked","label_276.rg_uplocked","label_276.ng_in_transit","label_276.lg_in_transit","label_276.rg_in_transit","label_276.ng_downlocked","label_276.lg_downlocked","label_276.rg_downlocked","label_276.sdi","label_276.ssm","label_276.ssm_enum","label_276.parity",'
+    '"label_350.lgcu_nd_fault","label_350.aes_relay3_nd_fault","label_350.aes_relay3_elec_fault","label_350.aes_relay2_nd_fault","label_350.aes_relay1_elec_fault","label_350.aes_relay2_elec_fault","label_350.aes_ng_uplk_elec_fault","label_350.aes_lg_uplk_elec_fault","label_350.aes_rg_uplk_elec_fault","label_350.spare_20","label_350.spare_21","label_350.ehm3_fault","label_350.lgcl_elec_fault","label_350.lgcl_nd_fault","label_350.aev_pos2_elec_fault","label_350.ehm1_fault","label_350.ehm2_fault","label_350.aev_pos1_elec_fault","label_350.aes_relay1_nd_fault","label_350.sdi","label_350.ssm","label_350.ssm_enum","label_350.parity",'
+    '"label_351.lh_mlg_woffw_adj","label_351.rh_mlg_woffw_adj","label_351.nlg_woffw_adj","label_351.lh_mlg_dnlock_adj","label_351.rh_mlg_dnlock_adj","label_351.nlg_dnlock_adj","label_351.nlg_uplock_adj","label_351.rh_mlg_uplock_adj","label_351.lh_mlg_uplock_adj","label_351.sdi","label_351.ssm","label_351.ssm_enum","label_351.parity",'
+    '"label_354.spare_11","label_354.spare_12","label_354.aes_relay4_nd_fault","label_354.aes_relay4_elec_fault","label_354.aes_relay5_nd_fault","label_354.aes_relay5_elec_fault","label_354.sdi","label_354.ssm","label_354.ssm_enum","label_354.parity",'
+    '"label_355.invalid_time_date","label_355.spare_12","label_355.spare_13","label_355.spare_14","label_355.spare_15","label_355.spare_16","label_355.spare_17","label_355.spare_18","label_355.spare_19","label_355.spare_20","label_355.spare_21","label_355.spare_22","label_355.spare_23","label_355.spare_24","label_355.invalid_crosscom_cc","label_355.spare_26","label_355.spare_27","label_355.sdi","label_355.ssm","label_355.ssm_enum","label_355.parity",'
+    '"label_360.lh_mlg_woffw_unreas","label_360.rh_mlg_woffw_unreas","label_360.nlg_woffw_unreas","label_360.lh_mlg_dnlock_unreas","label_360.rh_mlg_dnlock_unreas","label_360.nlg_dnlock_unreas","label_360.nlg_uplock_unreas","label_360.rh_mlg_uplock_unreas","label_360.lh_mlg_uplock_unreas","label_360.sdi","label_360.ssm","label_360.ssm_enum","label_360.parity",'
+    '"label_361.lh_mlg_woffw_fault","label_361.rh_mlg_woffw_fault","label_361.nlg_woffw_fault","label_361.lh_mlg_dnlock_fault","label_361.rh_mlg_dnlock_fault","label_361.nlg_dnlock_fault","label_361.nlg_uplock_fault","label_361.rh_mlg_uplock_fault","label_361.lh_mlg_uplock_fault","label_361.spare_20","label_361.do_cons_mlg_wow_fault","label_361.do_mlg_lh_wow_fault","label_361.do_mlg_rh_wow_fault","label_361.do_cons_mlg_uplk_fault","label_361.do_cons_mlg_not_dnlk_fault","label_361.dc_bus_low","label_361.spare_27","label_361.ae_valve_mech_fault","label_361.dc_ess_bus_low","label_361.sdi","label_361.ssm","label_361.ssm_enum","label_361.parity",'
+    '"label_364.mc_adc_bit_flt","label_364.cc_adc_bit_flt","label_364.dac_bit_flt","label_364.spare_14","label_364.spare_15","label_364.spare_16","label_364.aev_do_pos2_mon_flt","label_364.mc_sw_inop_mon_flt","label_364.cc_sw_inop_mon_flt","label_364.pow_int_eval_flt","label_364.aev_do_pos1_mon_flt","label_364.ext_do_mon_flt","label_364.cmd_asym_mon_flt","label_364.internal_bus_flt","label_364.eeprom_calib_flt","label_364.mc_timing_test_flt","label_364.dr_open_do_mon_flt","label_364.dr_cld_do_mon_flt","label_364.ret_do_mon_flt","label_364.sdi","label_364.ssm","label_364.ssm_enum","label_364.parity",'
+    '"label_367.spare_11","label_367.spare_12","label_367.aev2_28v_pos1","label_367.aev2_28v_pos2","label_367.lgcl_aes_28v_en","label_367.spare_16","label_367.rh_mlg_uplock_gnd","label_367.lh_mlg_uplock_gnd","label_367.nlg_uplock_gnd","label_367.spare_20","label_367.spare_21","label_367.spare_22","label_367.spare_23","label_367.rh_mlg_uplock_28v","label_367.lh_mlg_uplock_28v","label_367.nlg_uplock_28v","label_367.sdi","label_367.ssm","label_367.ssm_enum","label_367.parity"]'
+)
+
+TURN_OUTPUT_FIELDS = (
+    '["timestamp","scu_id","scu_id_cn",'
+    '"label_111.nw_angle","label_111.sdi","label_111.ssm","label_111.ssm_enum","label_111.parity",'
+    '"label_112.left_handwheel","label_112.sdi","label_112.ssm","label_112.ssm_enum","label_112.parity",'
+    '"label_113.right_handwheel","label_113.sdi","label_113.ssm","label_113.ssm_enum","label_113.parity",'
+    '"label_114.zero_offset","label_114.sdi","label_114.ssm","label_114.ssm_enum","label_114.parity",'
+    '"label_154.control","label_154.control_enum","label_154.zero_cmd","label_154.zero_cmd_enum","label_154.steer_disc","label_154.steer_disc_enum","label_154.park_brk_on","label_154.park_brk_on_enum","label_154.sdi","label_154.ssm","label_154.ssm_enum","label_154.parity",'
+    '"label_212.pedal_cmd_echo","label_212.sdi","label_212.ssm","label_212.ssm_enum","label_212.parity",'
+    '"label_244.status","label_244.status_enum","label_244.pedal_release","label_244.pedal_release_enum","label_244.work_state","label_244.work_state_enum","label_244.tow_state","label_244.tow_state_enum","label_244.sw_major","label_244.sw_minor","label_244.sw_version","label_244.sw_version_enum","label_244.sdi","label_244.ssm","label_244.ssm_enum","label_244.parity",'
+    '"label_314.fault_word","label_314.fault_word_enum","label_314.left_hw_fault","label_314.left_hw_fault_enum","label_314.right_hw_fault","label_314.right_hw_fault_enum","label_314.a429_comm_fault","label_314.a429_comm_fault_enum","label_314.nw_work_fault","label_314.nw_work_fault_enum","label_314.tow_overtravel","label_314.tow_overtravel_enum","label_314.sdi","label_314.ssm","label_314.ssm_enum","label_314.parity"]'
 )
 
 
@@ -65,6 +169,18 @@ async def init_parser_profiles(db: AsyncSession):
         select(ParserProfile).where(ParserProfile.parser_key == "fcc_v13")
     )
     fcc_exists = result.scalar_one_or_none()
+
+    # 检查RA是否已存在
+    result = await db.execute(
+        select(ParserProfile).where(ParserProfile.parser_key == "ra_v1.0")
+    )
+    ra_exists = result.scalar_one_or_none()
+
+    # 检查转弯系统是否已存在
+    result = await db.execute(
+        select(ParserProfile).where(ParserProfile.parser_key == "turn_v2")
+    )
+    turn_exists = result.scalar_one_or_none()
     
     profiles_to_create = []
     
@@ -273,6 +389,7 @@ async def init_parser_profiles(db: AsyncSession):
     )
     adc_exists = result.scalar_one_or_none()
 
+    _ADC_PORTS = "7001,7002,7003,7022,7023,7024,7025,7026,7027"
     if not adc_exists:
         profiles_to_create.append(
             ParserProfile(
@@ -282,8 +399,8 @@ async def init_parser_profiles(db: AsyncSession):
                 protocol_family="adc",
                 parser_key="adc_v2.2",
                 is_active=True,
-                description="S/ADS-5大气数据系统通讯协议V2.2解析器。解码ARINC 429数据，包括表决后/源数据大气参数（气压高度、空速、马赫数、升降速度、温度、迎角、侧滑角等）、自检状态字、装订气压回报、软件版本。端口由TSN网络配置动态指定。",
-                supported_ports="",
+                description="S/ADS-5大气数据系统通讯协议V2.2解析器。解码ARINC 429数据，包括表决后/源数据大气参数（气压高度、空速、马赫数、升降速度、温度、迎角、侧滑角等）、自检状态字、装订气压回报、软件版本。端口7001-7003(全量)/7022-7027(子集)。",
+                supported_ports=_ADC_PORTS,
                 output_fields=ADC_OUTPUT_FIELDS,
             )
         )
@@ -292,10 +409,134 @@ async def init_parser_profiles(db: AsyncSession):
         if not adc_exists.protocol_family:
             adc_exists.protocol_family = "adc"
             print("[Init] 已更新 ADC protocol_family = adc")
+        if (adc_exists.supported_ports or "") != _ADC_PORTS:
+            adc_exists.supported_ports = _ADC_PORTS
+            print("[Init] 已更新 ADC supported_ports")
         if adc_exists.output_fields != ADC_OUTPUT_FIELDS:
             adc_exists.output_fields = ADC_OUTPUT_FIELDS
             print("[Init] 已更新 ADC output_fields 到最新版本")
         print("[Init] 大气数据系统 解析版本已存在，跳过创建")
+
+    # RA 无线电高度表解析器
+    if not ra_exists:
+        profiles_to_create.append(
+            ParserProfile(
+                name="无线电高度表",
+                version="V1.0",
+                device_model="RA",
+                protocol_family="ra",
+                parser_key="ra_v1.0",
+                is_active=True,
+                description="无线电高度表429协议V1.0解析器。解码Label 164/165/270/350（BNR高度、BCD高度、离散状态、BIT状态），端口7007-7012（RA1/RA2）。",
+                supported_ports="7007,7008,7009,7010,7011,7012",
+                output_fields=RA_OUTPUT_FIELDS,
+            )
+        )
+        print("[Init] 将创建 无线电高度表 解析器配置")
+    else:
+        if not ra_exists.protocol_family:
+            ra_exists.protocol_family = "ra"
+            print("[Init] 已更新 RA protocol_family = ra")
+        if (ra_exists.supported_ports or "") != "7007,7008,7009,7010,7011,7012":
+            ra_exists.supported_ports = "7007,7008,7009,7010,7011,7012"
+            print("[Init] 已更新 RA supported_ports")
+        if ra_exists.output_fields != RA_OUTPUT_FIELDS:
+            ra_exists.output_fields = RA_OUTPUT_FIELDS
+            print("[Init] 已更新 RA output_fields 到最新版本")
+        print("[Init] 无线电高度表 解析版本已存在，跳过创建")
+
+    # 转弯系统解析器
+    _TURN_PORTS = "7019,7020"
+    if not turn_exists:
+        profiles_to_create.append(
+            ParserProfile(
+                name="前轮转弯系统",
+                version="V2.0",
+                device_model="LS1/SCU",
+                protocol_family="turn",
+                parser_key="turn_v2",
+                is_active=True,
+                description="转弯系统ARINC429通讯协议V2解析器。解码Label 111/112/113/114/154/212/244/314（前轮角度反馈、手轮指令、回绕、控制信号、状态上报、故障状态字），端口7019/7020。",
+                supported_ports=_TURN_PORTS,
+                output_fields=TURN_OUTPUT_FIELDS,
+            )
+        )
+        print("[Init] 将创建 前轮转弯系统 解析器配置")
+    else:
+        if not turn_exists.protocol_family:
+            turn_exists.protocol_family = "turn"
+            print("[Init] 已更新 Turn protocol_family = turn")
+        if (turn_exists.supported_ports or "") != _TURN_PORTS:
+            turn_exists.supported_ports = _TURN_PORTS
+            print("[Init] 已更新 Turn supported_ports")
+        if (turn_exists.device_model or "") != "LS1/SCU":
+            turn_exists.device_model = "LS1/SCU"
+            print("[Init] 已更新 Turn device_model = LS1/SCU")
+        if turn_exists.output_fields != TURN_OUTPUT_FIELDS:
+            turn_exists.output_fields = TURN_OUTPUT_FIELDS
+            print("[Init] 已更新 Turn output_fields 到最新版本")
+        print("[Init] 前轮转弯系统 解析版本已存在，跳过创建")
+
+    # 机轮刹车系统解析器
+    result = await db.execute(
+        select(ParserProfile).where(ParserProfile.parser_key == "brake_v7.3")
+    )
+    brake_exists = result.scalar_one_or_none()
+
+    _BRAKE_PORTS = ""
+    if not brake_exists:
+        profiles_to_create.append(
+            ParserProfile(
+                name="机轮刹车系统",
+                version="V7.3",
+                device_model="BCMU/ABCU",
+                protocol_family="brake",
+                parser_key="brake_v7.3",
+                is_active=True,
+                description="机轮刹车系统EIOCD字节定义V7.3解析器。解码ARINC 429数据，包括CAS1/CAS2离散状态、4轮速/2平均轮速、4胎压、4刹车压力、4刹车温度、4脚蹬行程、刹车量反馈、防滑状态/刹车模式、自动飞行状态回绕等。SDI区分BCMU/ABCU。",
+                supported_ports=_BRAKE_PORTS,
+                output_fields=BRAKE_OUTPUT_FIELDS,
+            )
+        )
+        print("[Init] 将创建 机轮刹车系统 解析器配置")
+    else:
+        if not brake_exists.protocol_family:
+            brake_exists.protocol_family = "brake"
+            print("[Init] 已更新 Brake protocol_family = brake")
+        if brake_exists.output_fields != BRAKE_OUTPUT_FIELDS:
+            brake_exists.output_fields = BRAKE_OUTPUT_FIELDS
+            print("[Init] 已更新 Brake output_fields 到最新版本")
+        print("[Init] 机轮刹车系统 解析版本已存在，跳过创建")
+
+    # 电起落架收放控制单元解析器
+    result = await db.execute(
+        select(ParserProfile).where(ParserProfile.parser_key == "lgcu_v4.0")
+    )
+    lgcu_exists = result.scalar_one_or_none()
+
+    if not lgcu_exists:
+        profiles_to_create.append(
+            ParserProfile(
+                name="收放控制单元",
+                version="V4.0",
+                device_model="LGCU",
+                protocol_family="lgcu",
+                parser_key="lgcu_v4.0",
+                is_active=True,
+                description="电起落架收放控制单元EOICD V4.0解析器。解码ARINC 429离散数据，包括起落架位置传感器、综合起落架位置、WOFFW、WOW、位置指示状态、维护字1-13等。SDI区分LGCU1/LGCU2。",
+                supported_ports="7077,7078,7079,7080",
+                output_fields=LGCU_OUTPUT_FIELDS,
+            )
+        )
+        print("[Init] 将创建 收放控制单元 解析器配置")
+    else:
+        if not lgcu_exists.protocol_family:
+            lgcu_exists.protocol_family = "lgcu"
+            print("[Init] 已更新 LGCU protocol_family = lgcu")
+        if lgcu_exists.output_fields != LGCU_OUTPUT_FIELDS:
+            lgcu_exists.output_fields = LGCU_OUTPUT_FIELDS
+            print("[Init] 已更新 LGCU output_fields 到最新版本")
+        print("[Init] 收放控制单元 解析版本已存在，跳过创建")
 
     # 800V BMS 动力电池解析器
     result = await db.execute(

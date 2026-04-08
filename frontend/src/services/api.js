@@ -44,15 +44,18 @@ export const authApi = {
     return api.post('/auth/login', payload)
   },
   me: () => api.get('/auth/me'),
+  listUsers: () => api.get('/auth/users'),
+  createUser: (data) => api.post('/auth/users', data),
 }
 
 /** 平台共享 TSN（管理员上传，全员可选用） */
 export const sharedTsnApi = {
   list: () => api.get('/shared-tsn'),
-  upload: (formData) =>
+  upload: (formData, onUploadProgress) =>
     api.post('/shared-tsn/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 300000,
+      onUploadProgress,
     }),
   update: (id, body) => api.patch(`/shared-tsn/${id}`, body),
   remove: (id) => api.delete(`/shared-tsn/${id}`),
@@ -135,11 +138,12 @@ export const parseApi = {
     }),
 
   // 批量导出多端口到一个Excel
-  exportBatch: (taskId, ports, parserIds = []) =>
+  exportBatch: (taskId, ports, parserIds = [], includeTextColumns = true) =>
     api.get(`/parse/tasks/${taskId}/export-batch`, {
       params: {
         ports: ports.join(','),
         parser_ids: parserIds.join(','),
+        include_text_columns: includeTextColumns,
       },
       responseType: 'blob',
       timeout: 120000,
@@ -189,10 +193,11 @@ export const eventAnalysisApi = {
 
 /** 独立事件分析（直接上传 pcap，不依赖解析任务） */
 export const standaloneEventApi = {
-  upload: (formData) =>
+  upload: (formData, onUploadProgress) =>
     api.post('/event-analysis/standalone/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 300000,
+      onUploadProgress,
     }),
 
   fromShared: (formData) =>
@@ -223,9 +228,10 @@ export const standaloneEventApi = {
 // TSN数据异常检查（双交换机比对）相关 API
 export const compareApi = {
   // 上传两个文件并创建比对任务
-  upload: (formData) => api.post('/compare/upload', formData, {
+  upload: (formData, onUploadProgress) => api.post('/compare/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300000,
+    onUploadProgress,
   }),
   
   // 获取比对任务列表

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import {
   Card, Table, Tabs, Tag, Button, Space, message, Statistic, Row, Col,
   Spin, Empty, Select, Radio, Checkbox, Alert, Progress, InputNumber, Divider, Segmented,
-  Modal, Collapse, Tooltip, Popover,
+  Modal, Collapse, Tooltip,
 } from 'antd'
 import {
   DownloadOutlined, LineChartOutlined, ReloadOutlined,
@@ -15,7 +15,7 @@ import {
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import * as echarts from 'echarts'
-import { parseApi } from '../services/api'
+import { parseApi, protocolApi } from '../services/api'
 import dayjs from 'dayjs'
 
 const { Option } = Select
@@ -35,6 +35,73 @@ const SKIP_FIELDS = new Set([
   'intruder_lon_h_raw', 'intruder_lon_l_raw', 'intruder_addr_h_raw',
   'intruder_addr_l_raw', 'start_stop_raw',
 ])
+
+const FIELD_EXACT_CN = {
+  timestamp: '时间戳（秒）',
+  unit_id: '设备单元号',
+  unit_id_cn: '设备单元中文标识',
+  adru_id: 'ADRU 单元号',
+  adru_id_cn: 'ADRU 单元中文标识',
+  ra_id: '无线电高度表单元号',
+  ra_id_cn: '无线电高度表单元中文标识',
+  scu_id: '转弯控制单元号',
+  scu_id_cn: '转弯控制单元中文标识',
+  sdi: 'SDI 源/目的标识',
+  ssm: 'SSM 状态矩阵',
+  ssm_enum: 'SSM 中文状态',
+  parity: '奇偶校验',
+}
+
+const FIELD_TOKEN_CN = {
+  lh: '左',
+  rh: '右',
+  nlg: '前起落架',
+  mlg: '主起落架',
+  lg: '起落架',
+  lgcu: '起落架控制单元',
+  wow: '空重信号',
+  woffw: '空重/离地信号',
+  dnlk: '下锁',
+  dnlock: '下锁',
+  uplk: '上锁',
+  uplock: '上锁',
+  prox: '接近开关',
+  mon: '监控',
+  cons: '综合',
+  sys: '系统',
+  fault: '故障',
+  status: '状态',
+  cmd: '指令',
+  retract: '收起',
+  extend: '放下',
+  auto: '自动',
+  flight: '飞行',
+  mode: '模式',
+  lock: '锁定',
+  down: '放下',
+  up: '收起',
+  work: '工作',
+  state: '状态',
+  steer: '转弯',
+  brake: '刹车',
+  park: '停留',
+  control: '控制',
+  zero: '调零',
+  pedal: '脚蹬',
+  release: '释放',
+  sw: '软件',
+  version: '版本',
+  major: '主版本',
+  minor: '子版本',
+  check: '检测',
+  valid: '有效',
+  invalid: '无效',
+  bit: '自检位',
+  maint: '维护',
+  word: '字',
+  spare: '保留位',
+  op: '反向/互补位',
+}
 
 function binarySearchNearest(data, targetTime) {
   if (!data || data.length === 0) return null
@@ -62,12 +129,31 @@ function getResultLabel(result) {
   return label
 }
 
+function buildChineseHintFromField(fieldName) {
+  if (!fieldName) return '字段含义'
+  const lower = String(fieldName).toLowerCase()
+  const noLabelPrefix = lower.includes('.') ? lower.split('.').slice(1).join('.') : lower
+  const core = noLabelPrefix.replace(/\./g, '_').replace(/_enum$/, '')
+  if (FIELD_EXACT_CN[core]) return FIELD_EXACT_CN[core]
+
+  const parts = core.split('_').filter(Boolean)
+  if (parts.length === 0) return '字段含义'
+
+  const translated = parts.map((p) => {
+    if (/^\d+$/.test(p)) return p
+    return FIELD_TOKEN_CN[p] || p.toUpperCase()
+  })
+  return translated.join(' ')
+}
+
 function ResultPage() {
   const { taskId } = useParams()
+  const location = useLocation()
   const [task, setTask] = useState(null)
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeResult, setActiveResult] = useState(null)
+  const [activeFieldDescMap, setActiveFieldDescMap] = useState({})
   const [portData, setPortData] = useState([])
   const [portColumns, setPortColumns] = useState([])
   const [allColumnNames, setAllColumnNames] = useState([])
@@ -89,7 +175,9 @@ function ResultPage() {
   const [batchExportOpen, setBatchExportOpen] = useState(false)
   const [batchExportFormat, setBatchExportFormat] = useState('csv')
   const [batchExportSelected, setBatchExportSelected] = useState([])
+  const [batchExportIncludeText, setBatchExportIncludeText] = useState(true)
   const [batchExporting, setBatchExporting] = useState(false)
+  const [singleExportIncludeText, setSingleExportIncludeText] = useState(true)
 
   // ---- Port anomaly analysis ----
   const [anomalyDefaultsLoading, setAnomalyDefaultsLoading] = useState(false)
@@ -166,6 +254,37 @@ function ResultPage() {
   useEffect(() => {
     if (activeResult) loadPortData()
   }, [activeResult, pagination.current, pagination.pageSize])
+
+  useEffect(() => {
+    const loadFieldDescriptions = async () => {
+      if (!activeResult || !task?.protocol_version_id) {
+        setActiveFieldDescMap({})
+        return
+      }
+      try {
+        const res = await protocolApi.getPortDetail(task.protocol_version_id, activeResult.port_number)
+        const fields = res.data?.fields || []
+        const map = {}
+        fields.forEach((f) => {
+          if (!f?.field_name || !f?.description) return
+          const keyRaw = String(f.field_name).trim()
+          const keyLower = keyRaw.toLowerCase()
+          map[keyRaw] = String(f.description).trim()
+          map[keyLower] = String(f.description).trim()
+          const suffix = keyLower.includes('.') ? keyLower.split('.').slice(1).join('.') : keyLower
+          map[suffix] = String(f.description).trim()
+        })
+        setActiveFieldDescMap(map)
+      } catch {
+        setActiveFieldDescMap({})
+      }
+    }
+    loadFieldDescriptions()
+  }, [activeResult, task?.protocol_version_id])
+
+  useEffect(() => {
+    setMainTab(location.pathname.endsWith('/analysis') ? 'analysis' : 'table')
+  }, [location.pathname])
 
   useEffect(() => {
     if (allColumnNames.length === 0) return
@@ -260,7 +379,7 @@ function ResultPage() {
     }
     const hide = message.loading(`正在导出 ${format.toUpperCase()} ...`, 0)
     try {
-      const params = {}
+      const params = { include_text_columns: singleExportIncludeText }
       if (activeResult.parser_profile_id) params.parser_id = activeResult.parser_profile_id
       console.log('[Export]', { taskId, port: activeResult.port_number, format, params })
       const res = await parseApi.exportData(taskId, activeResult.port_number, format, params)
@@ -313,7 +432,7 @@ function ResultPage() {
         for (const key of batchExportSelected) {
           const r = results.find(res => getResultKey(res) === key)
           if (!r) continue
-          const params = {}
+          const params = { include_text_columns: batchExportIncludeText }
           if (r.parser_profile_id) params.parser_id = r.parser_profile_id
           const res2 = await parseApi.exportData(taskId, r.port_number, 'csv', params)
           const blob = new Blob([res2.data])
@@ -336,7 +455,7 @@ function ResultPage() {
         const selectedResults = batchExportSelected.map(key => results.find(res => getResultKey(res) === key)).filter(Boolean)
         const ports = selectedResults.map(r => r.port_number)
         const parserIds = selectedResults.map(r => r.parser_profile_id ? String(r.parser_profile_id) : '')
-        const res = await parseApi.exportBatch(taskId, ports, parserIds)
+        const res = await parseApi.exportBatch(taskId, ports, parserIds, batchExportIncludeText)
         const url = window.URL.createObjectURL(new Blob([res.data]))
         const link = document.createElement('a')
         link.href = url
@@ -583,6 +702,22 @@ function ResultPage() {
     return typeof val === 'number' ? val.toFixed(6) : String(val)
   }
 
+  const getFieldTooltipText = (fieldName) => {
+    const keyRaw = String(fieldName)
+    const keyLower = keyRaw.toLowerCase()
+    const suffix = keyLower.includes('.') ? keyLower.split('.').slice(1).join('.') : keyLower
+    const desc = activeFieldDescMap[keyRaw] || activeFieldDescMap[keyLower] || activeFieldDescMap[suffix]
+    if (!desc) return `${fieldName}: ${buildChineseHintFromField(fieldName)}`
+    const short = desc.length > 48 ? `${desc.slice(0, 48)}...` : desc
+    return `${fieldName}: ${short}`
+  }
+
+  const renderFieldWithTooltip = (fieldName) => (
+    <Tooltip title={getFieldTooltipText(fieldName)}>
+      <span className="mono" style={{ fontSize: 13, color: '#c9d1d9' }}>{fieldName}</span>
+    </Tooltip>
+  )
+
   const formatYAxisTick = (value) => {
     const n = Number(value)
     if (!Number.isFinite(n)) return String(value ?? '')
@@ -731,57 +866,6 @@ function ResultPage() {
           handleStyle: { color: '#58a6ff' }, textStyle: { color: '#8b949e' } }
       ],
       color: CHART_COLORS,
-    }
-  }
-
-  const getSpSingleChartOption = (fieldName) => {
-    const data = spChartData[fieldName]
-    if (!data) return {}
-    const el = data.enumLabels
-    const points = data.timestamps.map((t, i) => [t * 1000, data.values[i], el ? el[i] : null])
-    const range = computeYRange({ [fieldName]: points }, [fieldName])
-    const color = getSpFieldColor(fieldName)
-    return {
-      backgroundColor: 'transparent',
-      title: { text: fieldName, left: 'center', top: 6, textStyle: { color: '#c9d1d9', fontSize: 13, fontFamily: 'JetBrains Mono' } },
-      tooltip: {
-        trigger: 'axis', backgroundColor: '#161b22', borderColor: '#30363d',
-        textStyle: { color: '#c9d1d9' },
-        formatter: (params) => {
-          if (!params || params.length === 0) return ''
-          const p = params[0]
-          const display = formatValueWithEnum(p.value[1], p.value[2])
-          return `<div style="font-weight:600;margin-bottom:4px">${dayjs(p.value[0]).format('HH:mm:ss.SSS')}</div>
-            <div style="display:flex;justify-content:space-between;gap:16px"><span>${p.marker} ${fieldName}</span><span style="font-family:JetBrains Mono">${display}</span></div>`
-        },
-      },
-      axisPointer: { link: [{ xAxisIndex: 'all' }] },
-      grid: { left: 56, right: 16, top: 36, bottom: 46 },
-      xAxis: {
-        type: 'time',
-        axisPointer: { snap: true, label: { show: false } },
-        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
-        axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false },
-      },
-      yAxis: {
-        type: 'value', name: '', min: range.min, max: range.max,
-        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-        axisLine: { lineStyle: { color: '#30363d' } },
-        splitLine: { lineStyle: { color: '#30363d' } },
-      },
-      series: [{
-        name: fieldName, type: 'line', data: points,
-        smooth: true, symbol: 'circle', symbolSize: 4, showSymbol: false,
-        lineStyle: { width: 1.5, color }, itemStyle: { color },
-        emphasis: { lineStyle: { width: 3 }, itemStyle: { borderWidth: 2 } },
-      }],
-      dataZoom: [
-        { type: 'inside', start: 0, end: 100 },
-        { type: 'slider', start: 0, end: 100, height: 16, bottom: 4,
-          borderColor: '#30363d', backgroundColor: '#161b22',
-          fillerColor: 'rgba(88, 166, 255, 0.2)',
-          handleStyle: { color: '#58a6ff' }, textStyle: { color: '#8b949e' } }
-      ],
     }
   }
 
@@ -1226,7 +1310,7 @@ function ResultPage() {
                 maxTagCount={6}
                 disabled={spAvailableFields.length === 0}
               >
-                {spAvailableFields.map(f => <Option key={f} value={f}>{f}</Option>)}
+                {spAvailableFields.map(f => <Option key={f} value={f}>{renderFieldWithTooltip(f)}</Option>)}
               </Select>
             </Col>
             <Col flex="100px">
@@ -1256,7 +1340,7 @@ function ResultPage() {
                     <Row gutter={[16, 12]}>
                       {spAvailableFields.map(f => (
                         <Col span={6} key={f}>
-                          <Checkbox value={f}><span className="mono" style={{ fontSize: 13, color: '#c9d1d9' }}>{f}</span></Checkbox>
+                          <Checkbox value={f}>{renderFieldWithTooltip(f)}</Checkbox>
                         </Col>
                       ))}
                     </Row>
@@ -1336,7 +1420,7 @@ function ResultPage() {
                             placeholder="选择要叠加显示的字段"
                             maxTagCount={2}
                           >
-                            {spAvailableFields.map(f => <Option key={f} value={f}>{f}</Option>)}
+                            {spAvailableFields.map(f => <Option key={f} value={f}>{renderFieldWithTooltip(f)}</Option>)}
                           </Select>
                           <Button
                             type="text" size="small" danger
@@ -1447,7 +1531,7 @@ function ResultPage() {
               <Row gutter={[16, 12]}>
                 {cpCommonFields.map(f => (
                   <Col span={6} key={f}>
-                    <Checkbox value={f}><span className="mono" style={{ fontSize: 13, color: '#c9d1d9' }}>{f}</span></Checkbox>
+                    <Checkbox value={f}>{renderFieldWithTooltip(f)}</Checkbox>
                   </Col>
                 ))}
               </Row>
@@ -1483,7 +1567,7 @@ function ResultPage() {
                     <Row gutter={[16, 8]}>
                       {uniqueFields.map(f => (
                         <Col span={6} key={f}>
-                          <Checkbox value={f}><span className="mono" style={{ fontSize: 13, color: '#c9d1d9' }}>{f}</span></Checkbox>
+                          <Checkbox value={f}>{renderFieldWithTooltip(f)}</Checkbox>
                         </Col>
                       ))}
                     </Row>
@@ -1719,7 +1803,7 @@ function ResultPage() {
                 <Row gutter={[8, 8]}>
                   {anomalyNumericFields.map((f) => (
                     <Col xs={24} sm={12} md={8} lg={6} key={f}>
-                      <Checkbox value={f}><span className="mono">{f}</span></Checkbox>
+                      <Checkbox value={f}>{renderFieldWithTooltip(f)}</Checkbox>
                     </Col>
                   ))}
                 </Row>
@@ -1732,7 +1816,9 @@ function ResultPage() {
                 {anomalySelectedFields.map((f) => (
                   <Col xs={24} sm={12} md={8} key={f}>
                     <Space>
-                      <span className="mono" style={{ color: '#c9d1d9', minWidth: 120 }}>{f}</span>
+                      <Tooltip title={getFieldTooltipText(f)}>
+                        <span className="mono" style={{ color: '#c9d1d9', minWidth: 120 }}>{f}</span>
+                      </Tooltip>
                       <InputNumber
                         min={0.01}
                         max={500}
@@ -2048,6 +2134,12 @@ function ResultPage() {
             <Space>
                     {activeResult && (
                       <>
+                        <Checkbox
+                          checked={singleExportIncludeText}
+                          onChange={(e) => setSingleExportIncludeText(e.target.checked)}
+                        >
+                          导出中文说明列
+                        </Checkbox>
                         <Button icon={<DownloadOutlined />} onClick={() => handleExport('csv')}>导出 CSV</Button>
                         <Button icon={<DownloadOutlined />} onClick={() => handleExport('parquet')}>导出 Parquet</Button>
                       </>
@@ -2221,6 +2313,13 @@ function ResultPage() {
           <Radio.Group value={batchExportFormat} onChange={e => setBatchExportFormat(e.target.value)}>
             <Radio.Button value="csv">CSV（多个文件）</Radio.Button>
             <Radio.Button value="excel">Excel（多 Sheet）</Radio.Button>
+          </Radio.Group>
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>文字列导出</div>
+          <Radio.Group value={batchExportIncludeText} onChange={e => setBatchExportIncludeText(e.target.value)}>
+            <Radio.Button value={true}>导出文字列</Radio.Button>
+            <Radio.Button value={false}>去掉中文说明列</Radio.Button>
           </Radio.Group>
         </div>
         <div style={{ marginBottom: 12 }}>

@@ -48,6 +48,7 @@ function ComparePage() {
   const [sharedId2, setSharedId2] = useState(null)
   const [versions, setVersions] = useState([])
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   
   // 任务状态
   const [task, setTask] = useState(null)
@@ -149,13 +150,18 @@ function ComparePage() {
 
     try {
       setUploading(true)
-      const res = await compareApi.upload(formData)
+      setUploadProgress(0)
+      const hasLocalFile = mode1 === 'local' || mode2 === 'local'
+      const res = await compareApi.upload(formData, hasLocalFile ? (e) => {
+        if (e.total) setUploadProgress(Math.round((e.loaded * 100) / e.total))
+      } : undefined)
       message.success('任务已创建，开始检查')
       navigate(`/compare/${res.data.task_id}`)
     } catch (error) {
       message.error(error.response?.data?.detail || '提交失败')
     } finally {
       setUploading(false)
+      setUploadProgress(0)
     }
   }
 
@@ -568,6 +574,9 @@ function ComparePage() {
           </Form.Item>
 
           <Form.Item>
+            {uploading && uploadProgress > 0 && (
+              <Progress percent={uploadProgress} status="active" style={{ marginBottom: 12 }} />
+            )}
             <Button
               type="primary"
               htmlType="submit"
@@ -580,7 +589,9 @@ function ComparePage() {
               }
               block
             >
-              开始检查
+              {uploading
+                ? ((mode1 === 'local' || mode2 === 'local') ? `上传中 ${uploadProgress}%` : '提交中...')
+                : '开始检查'}
             </Button>
           </Form.Item>
         </Form>

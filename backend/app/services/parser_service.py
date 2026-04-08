@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from ..config import DATA_DIR
+from ..config import DATA_DIR, UPLOAD_DIR
 from ..models import ParseTask, ParseResult, PortDefinition, FieldDefinition, ParserProfile
 from .protocol_service import ProtocolService
 from .parsers import ParserRegistry, BaseParser, FieldLayout
@@ -64,8 +64,6 @@ class ParserService:
         self,
         filename: str,
         file_path: str,
-        parser_profile_id: int = None,
-        parser_profile_ids: List[int] = None,
         device_parser_map: Dict[str, int] = None,
         protocol_version_id: int = None,
         selected_ports: List[int] = None,
@@ -73,14 +71,13 @@ class ParserService:
     ) -> ParseTask:
         """创建解析任务
         
-        新模式: device_parser_map = {"设备名": parser_profile_id, ...}
-        旧模式(兼容): parser_profile_id / parser_profile_ids
+        仅新模式: device_parser_map = {"设备名": parser_profile_id, ...}
         """
+        if not device_parser_map:
+            raise ValueError("已禁用旧模式，create_task 必须提供 device_parser_map")
         task = ParseTask(
             filename=filename,
             file_path=file_path,
-            parser_profile_id=parser_profile_id,
-            parser_profile_ids=parser_profile_ids,
             device_parser_map=device_parser_map,
             protocol_version_id=protocol_version_id,
             selected_ports=selected_ports,
@@ -351,6 +348,14 @@ class ParserService:
             return
         try:
             p = Path(file_path)
+            shared_dir = (UPLOAD_DIR / "shared_tsn").resolve()
+            try:
+                # 平台共享库文件需要保留，不能在解析后删除
+                if p.resolve().is_relative_to(shared_dir):
+                    print(f"[Cleanup] 跳过共享文件: {p.name}")
+                    return
+            except Exception:
+                pass
             if p.is_file():
                 size_mb = p.stat().st_size / (1024 * 1024)
                 p.unlink()
@@ -470,8 +475,6 @@ class ParserService:
         
         新模式 (device_parser_map):
             按设备分配端口和解析器，每个解析器只扫描属于该设备的端口。
-        旧模式 (parser_profile_ids / parser_profile_id):
-            兼容：所有解析器尝试所有目标端口。
         """
         print(f"[Parser] 获取任务 {task_id}")
         task = await self.get_task(task_id)
@@ -484,13 +487,10 @@ class ParserService:
         
         try:
             # 获取所有端口定义
-            all_port_defs = []
-            all_config_ports = set()
             port_device_map: Dict[int, str] = {}
             if task.protocol_version_id:
                 all_port_defs = await self.protocol_service.get_ports_by_version(task.protocol_version_id)
                 for port in all_port_defs:
-                    all_config_ports.add(port.port_number)
                     # 优先使用 source_device（发送端）作为设备归属
                     if port.source_device:
                         port_device_map[port.port_number] = port.source_device
@@ -505,68 +505,35 @@ class ParserService:
                 device_port_map = await self.protocol_service.get_device_port_mapping(task.protocol_version_id)
             
             # =============== 构建解析计划 ===============
-            # 合并同一个 parser_profile_id 的端口，避免重复读取文件
+            # 合并同一个 parser 的端口，避免重复读取文件
             # merged_plan: {pid: (parser_instance, set_of_ports, [labels])}
             merged_plan: Dict[int, tuple] = {}
             
-            if task.device_parser_map:
-                print(f"[Parser] 使用 device_parser_map 模式")
-                for dev_name, pid in task.device_parser_map.items():
-                    pid = int(pid)
-                    dev_ports = device_port_map.get(dev_name, [])
-                    if not dev_ports:
-                        print(f"[Parser]   设备 {dev_name}: 无对应端口，跳过")
-                        continue
-                    
-                    if pid not in merged_plan:
-                        profile = await self.get_parser_profile(pid)
-                        if not profile:
-                            print(f"[Parser]   警告: 解析器 {pid} 不存在，跳过设备 {dev_name}")
-                            continue
-                        parser = ParserRegistry.create(profile.parser_key)
-                        if not parser:
-                            print(f"[Parser]   警告: 解析器 {profile.parser_key} 未注册")
-                            continue
-                        merged_plan[pid] = (parser, set(), [], profile.name)
-                    
-                    merged_plan[pid][1].update(dev_ports)
-                    merged_plan[pid][2].append(dev_name)
-                    print(f"[Parser]   {dev_name} -> {merged_plan[pid][3]}: 端口 {sorted(dev_ports)}")
-            else:
-                print(f"[Parser] 使用旧模式 (parser_profile_ids)")
-                profile_ids = []
-                if task.parser_profile_ids:
-                    profile_ids = list(task.parser_profile_ids)
-                elif task.parser_profile_id:
-                    profile_ids = [task.parser_profile_id]
+            if not task.device_parser_map:
+                await self.update_task_status(task_id, "failed", error_message="已禁用旧模式：任务缺少 device_parser_map")
+                return False
+            print(f"[Parser] 使用 device_parser_map 模式")
+            for dev_name, pid in task.device_parser_map.items():
+                pid = int(pid)
+                dev_ports = device_port_map.get(dev_name, [])
+                if not dev_ports:
+                    print(f"[Parser]   设备 {dev_name}: 无对应端口，跳过")
+                    continue
                 
-                if not profile_ids:
-                    await self.update_task_status(task_id, "failed", error_message="未指定协议解析器")
-                    return False
-                
-                device_ports = set()
-                if task.selected_devices and device_port_map:
-                    for device in task.selected_devices:
-                        if device in device_port_map:
-                            device_ports.update(device_port_map[device])
-                
-                if task.selected_ports:
-                    target_ports_set = set(task.selected_ports)
-                elif device_ports:
-                    target_ports_set = all_config_ports | device_ports
-                elif all_config_ports:
-                    target_ports_set = all_config_ports
-                else:
-                    target_ports_set = None
-                
-                for pid in profile_ids:
+                if pid not in merged_plan:
                     profile = await self.get_parser_profile(pid)
                     if not profile:
+                        print(f"[Parser]   警告: 解析器 {pid} 不存在，跳过设备 {dev_name}")
                         continue
                     parser = ParserRegistry.create(profile.parser_key)
                     if not parser:
+                        print(f"[Parser]   警告: 解析器 {profile.parser_key} 未注册")
                         continue
-                    merged_plan[pid] = (parser, target_ports_set, [profile.name], profile.name)
+                    merged_plan[pid] = (parser, set(), [], profile.name)
+                
+                merged_plan[pid][1].update(dev_ports)
+                merged_plan[pid][2].append(dev_name)
+                print(f"[Parser]   {dev_name} -> {merged_plan[pid][3]}: 端口 {sorted(dev_ports)}")
             
             if not merged_plan:
                 await self.update_task_status(task_id, "failed", error_message="未能构建有效的解析计划")
@@ -574,17 +541,11 @@ class ParserService:
             
             # 汇总所有需要解析的端口
             all_target_ports = set()
-            for pid, (_, ports, _, _) in merged_plan.items():
-                if ports is None:
-                    all_target_ports = None
-                    break
+            for _, (_, ports, _, _) in merged_plan.items():
                 all_target_ports.update(ports)
             
-            target_ports_list = sorted(all_target_ports) if all_target_ports is not None else None
-            if target_ports_list:
-                print(f"[Parser] 目标端口({len(target_ports_list)}个): {target_ports_list}")
-            else:
-                print(f"[Parser] 将扫描所有UDP端口")
+            target_ports_list = sorted(all_target_ports)
+            print(f"[Parser] 目标端口({len(target_ports_list)}个): {target_ports_list}")
             
             # 构造网络配置布局
             network_layout: Dict[int, List[FieldLayout]] = {}
@@ -597,36 +558,9 @@ class ParserService:
             # =============== 单次遍历解析（所有解析器共享一次文件读取） ===============
             total_records = 0
             
-            # 检查是否所有解析器都有明确的端口列表（单次遍历的前提条件）
-            has_scan_all = any(ports is None for _, (_, ports, _, _) in merged_plan.items())
-            
-            if not has_scan_all:
-                all_parsed_data = await self._parse_single_pass(
-                    task.file_path, merged_plan, network_layout, task_id=task_id
-                )
-            else:
-                # 回退：有解析器需要扫描所有端口，仍用逐个遍历模式
-                print("[Parser] 存在全端口扫描需求，使用逐个遍历模式")
-                all_parsed_data: Dict[int, Dict[int, List[Dict]]] = {}
-                total_passes = max(len(merged_plan), 1)
-                for idx, (pid, (parser, plan_ports, dev_labels, profile_name)) in enumerate(merged_plan.items()):
-                    plan_ports_list = sorted(plan_ports) if plan_ports is not None else None
-                    label = f"{profile_name} ({', '.join(dev_labels)})"
-                    print(f"[Parser] 执行: {label} -> 端口 {plan_ports_list}")
-                    parsed_data = await self._parse_with_custom_parser(
-                        task.file_path, parser, plan_ports_list, network_layout,
-                        task_id=task_id, pass_index=idx, total_passes=total_passes,
-                    )
-                    if parsed_data:
-                        parsed_data = {p: recs for p, recs in parsed_data.items() if recs}
-                        if parsed_data:
-                            all_parsed_data[pid] = parsed_data
-                            port_summary = {p: len(r) for p, r in parsed_data.items()}
-                            print(f"[Parser]   结果: {port_summary}")
-                        else:
-                            print(f"[Parser]   未解析到有效数据")
-                    else:
-                        print(f"[Parser]   未解析到任何数据")
+            all_parsed_data = await self._parse_single_pass(
+                task.file_path, merged_plan, network_layout, task_id=task_id
+            )
             
             if not all_parsed_data:
                 await self.update_task_status(task_id, "failed", error_message="未能解析出任何数据，请确认数据文件和解析器选择是否正确")
@@ -785,13 +719,15 @@ class ParserService:
         """使用自定义解析器解析pcapng文件
         
         Args:
-            target_ports: 目标端口列表。为 None 时扫描所有 UDP 端口。
+            target_ports: 目标端口列表。
             task_id: 任务ID，用于上报解析进度
             pass_index/total_passes: 多遍扫描时用于合并进度百分比
         """
         print(f"[Parser] 使用自定义解析器: {parser.parser_key}")
-        scan_all = target_ports is None
-        parsed_data: Dict[int, List[Dict]] = {} if scan_all else {port: [] for port in target_ports}
+        if target_ports is None:
+            print("[Parser] 未提供目标端口，跳过解析")
+            return {}
+        parsed_data: Dict[int, List[Dict]] = {port: [] for port in target_ports}
         
         file_size = 0
         if task_id is not None and file_path:
@@ -812,7 +748,7 @@ class ParserService:
         try:
             packet_count = 0
             matched_count = 0
-            target_set = None if scan_all else set(target_ports)
+            target_set = set(target_ports)
             
             with open(file_path, 'rb') as f:
                 try:
@@ -856,7 +792,7 @@ class ParserService:
                                 udp = ip.data
                                 dst_port = udp.dport
                                 
-                                if scan_all or dst_port in target_set:
+                                if dst_port in target_set:
                                     payload = bytes(udp.data)
                                     if payload:
                                         port_layout = network_layout.get(dst_port)
@@ -1357,7 +1293,8 @@ class ParserService:
         format: str = "csv",
         time_start: float = None,
         time_end: float = None,
-        parser_id: int = None
+        parser_id: int = None,
+        include_text_columns: bool = True,
     ) -> Optional[str]:
         """导出数据
         
@@ -1368,6 +1305,7 @@ class ParserService:
             time_start: 开始时间戳
             time_end: 结束时间戳
             parser_id: 解析器ID (可选, 多解析器时用于区分)
+            include_text_columns: 是否导出文字列（字符串列）
         """
         result_dir = DATA_DIR / "results" / str(task_id)
         
@@ -1380,10 +1318,43 @@ class ParserService:
         
         # 导出文件名包含解析器ID
         suffix = f"_parser_{parser_id}" if parser_id else ""
+
+        def _rename_export_time_col(names: List[str]) -> List[str]:
+            return ["time" if n == "timestamp" else n for n in names]
+
+        def _rename_batch_timestamp(b: pa.RecordBatch) -> pa.RecordBatch:
+            new_names = _rename_export_time_col(list(b.schema.names))
+            return pa.RecordBatch.from_arrays(
+                [b.column(i) for i in range(b.num_columns)],
+                names=new_names,
+            )
+
+        def _is_cn_description_col(name: str) -> bool:
+            if name == "unit_id_cn":
+                return True
+            if name.endswith("_cn"):
+                return True
+            if name.endswith("_enum"):
+                return True
+            if name.endswith(".ssm_enum"):
+                return True
+            if name.endswith(".parity"):
+                return True
+            return False
+
+        dataset = ds.dataset(str(result_file), format="parquet")
+        source_schema = dataset.schema
+        selected_columns: Optional[List[str]] = None
+        if not include_text_columns:
+            selected_columns = [
+                f.name for f in source_schema
+                if not _is_cn_description_col(f.name)
+            ]
         
         batches, schema_names = self._iter_filtered_batches(
-            result_file, columns=None, time_start=time_start, time_end=time_end
+            result_file, columns=selected_columns, time_start=time_start, time_end=time_end
         )
+        export_schema_names = selected_columns if selected_columns is not None else schema_names
 
         if format == "csv":
             export_file = export_dir / f"port_{port_number}{suffix}.csv"
@@ -1392,40 +1363,49 @@ class ParserService:
             with open(export_file, "wb") as sink:
                 sink.write(b"\xef\xbb\xbf")
                 for b in batches:
+                    renamed = _rename_batch_timestamp(b)
                     if writer is None:
-                        writer = pacsv.CSVWriter(sink, b.schema)
-                    writer.write_batch(b)
-                    wrote_rows = wrote_rows or b.num_rows > 0
+                        writer = pacsv.CSVWriter(sink, renamed.schema)
+                    writer.write_batch(renamed)
+                    wrote_rows = wrote_rows or renamed.num_rows > 0
                 if writer is not None:
                     writer.close()
             if not wrote_rows:
-                pd.DataFrame(columns=schema_names).to_csv(
+                pd.DataFrame(columns=_rename_export_time_col(export_schema_names)).to_csv(
                     export_file, index=False, encoding="utf-8-sig"
                 )
         elif format == "excel":
             export_file = export_dir / f"port_{port_number}{suffix}.xlsx"
-            table = ds.dataset(str(result_file), format="parquet").scanner(
+            table = dataset.scanner(
+                columns=selected_columns,
                 filter=self._build_time_filter(schema_names, time_start, time_end),
                 batch_size=65536,
             ).to_table()
             df = table.to_pandas()
             self._keep_datetime_as_str(df)
+            df.rename(columns={"timestamp": "time"}, inplace=True)
             df.to_excel(export_file, index=False)
         elif format == "parquet":
             export_file = export_dir / f"port_{port_number}{suffix}.parquet"
             writer = None
             wrote_rows = False
             for b in batches:
+                renamed = _rename_batch_timestamp(b)
                 if writer is None:
-                    writer = pq.ParquetWriter(str(export_file), b.schema)
-                writer.write_batch(b)
-                wrote_rows = wrote_rows or b.num_rows > 0
+                    writer = pq.ParquetWriter(str(export_file), renamed.schema)
+                writer.write_batch(renamed)
+                wrote_rows = wrote_rows or renamed.num_rows > 0
             if writer is not None:
                 writer.close()
             elif not wrote_rows:
+                if selected_columns is None:
+                    empty_arrays = [pa.array([], type=f.type) for f in source_schema]
+                else:
+                    typed_map = {f.name: f.type for f in source_schema}
+                    empty_arrays = [pa.array([], type=typed_map[name]) for name in selected_columns]
                 empty_table = pa.Table.from_arrays(
-                    [pa.array([], type=f.type) for f in ds.dataset(str(result_file), format="parquet").schema],
-                    names=schema_names,
+                    empty_arrays,
+                    names=_rename_export_time_col(export_schema_names),
                 )
                 pq.write_table(empty_table, str(export_file))
         else:

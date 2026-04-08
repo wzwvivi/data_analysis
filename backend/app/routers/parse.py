@@ -47,37 +47,23 @@ def _match_device_by_keywords(devices: list, keywords: list) -> Optional[dict]:
 async def _validate_parse_profiles(
     service: ParserService,
     *,
-    parser_profile_id: Optional[int],
-    parser_profile_ids: Optional[str],
     device_parser_map: Optional[str],
     protocol_version_id: Optional[int],
 ):
-    """校验解析器与设备映射，返回 (dpm, profile_ids, profile_names)。"""
+    """校验设备-解析器映射，返回 (dpm, profile_names)。"""
     import json
 
-    dpm = None
-    if device_parser_map:
-        try:
-            raw = json.loads(device_parser_map)
-            if not isinstance(raw, dict) or not raw:
-                raise ValueError("device_parser_map 不能为空")
-            dpm = {k: int(v) for k, v in raw.items()}
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            raise HTTPException(status_code=400, detail=f"设备解析器映射格式错误: {e}")
+    if not device_parser_map:
+        raise HTTPException(status_code=400, detail="已禁用旧模式，请使用 device_parser_map 指定设备解析器映射")
+    try:
+        raw = json.loads(device_parser_map)
+        if not isinstance(raw, dict) or not raw:
+            raise ValueError("device_parser_map 不能为空")
+        dpm = {k: int(v) for k, v in raw.items()}
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"设备解析器映射格式错误: {e}")
 
-    profile_ids = []
-    if dpm:
-        profile_ids = list(set(dpm.values()))
-    elif parser_profile_ids:
-        try:
-            profile_ids = [int(p.strip()) for p in parser_profile_ids.split(",") if p.strip()]
-        except ValueError:
-            raise HTTPException(status_code=400, detail="解析器ID格式错误")
-    elif parser_profile_id:
-        profile_ids = [parser_profile_id]
-
-    if not profile_ids:
-        raise HTTPException(status_code=400, detail="请至少选择一个协议解析器")
+    profile_ids = list(set(dpm.values()))
 
     profile_names = []
     for pid in profile_ids:
@@ -148,7 +134,7 @@ async def _validate_parse_profiles(
                     raise HTTPException(status_code=400, detail=f"协议解析器 {profile.name} 已停用")
                 profile_names.append(profile.name)
 
-    return dpm, profile_ids, profile_names
+    return dpm, profile_names
 
 
 def _resolve_ports_devices(
@@ -233,15 +219,13 @@ async def get_parser_profile(profile_id: int, db: AsyncSession = Depends(get_db)
 async def upload_and_parse(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    parser_profile_id: int = Form(None),
-    parser_profile_ids: str = Form(None),
     device_parser_map: str = Form(None),
     protocol_version_id: int = Form(None),
     selected_ports: str = Form(None),
     selected_devices: str = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """上传文件并创建解析任务（设备映射 / 多解析器 与旧模式兼容）。"""
+    """上传文件并创建解析任务（仅设备映射新模式）。"""
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -250,10 +234,8 @@ async def upload_and_parse(
         )
 
     service = ParserService(db)
-    dpm, profile_ids, profile_names = await _validate_parse_profiles(
+    dpm, profile_names = await _validate_parse_profiles(
         service,
-        parser_profile_id=parser_profile_id,
-        parser_profile_ids=parser_profile_ids,
         device_parser_map=device_parser_map,
         protocol_version_id=protocol_version_id,
     )
@@ -272,8 +254,6 @@ async def upload_and_parse(
     task = await service.create_task(
         filename=file.filename,
         file_path=str(file_path),
-        parser_profile_id=profile_ids[0] if len(profile_ids) == 1 and not dpm else None,
-        parser_profile_ids=profile_ids if not dpm else None,
         device_parser_map=dpm,
         protocol_version_id=protocol_version_id,
         selected_ports=ports,
@@ -292,15 +272,13 @@ async def upload_and_parse(
 async def upload_from_shared_pcap(
     background_tasks: BackgroundTasks,
     shared_tsn_id: int = Form(...),
-    parser_profile_id: int = Form(None),
-    parser_profile_ids: str = Form(None),
     device_parser_map: str = Form(None),
     protocol_version_id: int = Form(None),
     selected_ports: str = Form(None),
     selected_devices: str = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """使用管理员上传的平台共享 TSN 文件创建解析任务（复制到本地上传目录）。"""
+    """使用管理员上传的平台共享 TSN 文件创建解析任务（直接复用共享文件）。"""
     row = await shared_tsn_svc.get_shared_by_id(db, shared_tsn_id)
     if not row:
         raise HTTPException(status_code=404, detail="平台共享数据不存在或已过期删除")
@@ -310,27 +288,20 @@ async def upload_from_shared_pcap(
         raise HTTPException(status_code=400, detail="共享文件扩展名不支持")
 
     service = ParserService(db)
-    dpm, profile_ids, profile_names = await _validate_parse_profiles(
+    dpm, profile_names = await _validate_parse_profiles(
         service,
-        parser_profile_id=parser_profile_id,
-        parser_profile_ids=parser_profile_ids,
         device_parser_map=device_parser_map,
         protocol_version_id=protocol_version_id,
     )
 
-    try:
-        dest, display_name = shared_tsn_svc.copy_shared_to_workdir(
-            row, UPLOAD_DIR / "pcap", "shared"
-        )
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    src = Path(row.file_path)
+    if not src.is_file():
+        raise HTTPException(status_code=400, detail=f"共享文件不存在: {row.file_path}")
 
     ports, devices = _resolve_ports_devices(selected_ports, selected_devices, dpm)
     task = await service.create_task(
-        filename=display_name,
-        file_path=str(dest),
-        parser_profile_id=profile_ids[0] if len(profile_ids) == 1 and not dpm else None,
-        parser_profile_ids=profile_ids if not dpm else None,
+        filename=row.original_filename,
+        file_path=str(src.resolve()),
         device_parser_map=dpm,
         protocol_version_id=protocol_version_id,
         selected_ports=ports,
@@ -703,6 +674,7 @@ async def export_data(
     format: str = "csv",  # csv, excel, parquet
     time_start: float = None,
     time_end: float = None,
+    include_text_columns: bool = True,
     parser_id: int = None,
     db: AsyncSession = Depends(get_db)
 ):
@@ -714,6 +686,7 @@ async def export_data(
         format: 导出格式(csv/excel/parquet)
         time_start: 开始时间戳(可选)
         time_end: 结束时间戳(可选)
+        include_text_columns: 是否导出文字列(可选, 默认导出)
         parser_id: 解析器ID(可选, 多解析器时区分结果)
     """
     if format not in ("csv", "excel", "parquet"):
@@ -724,7 +697,7 @@ async def export_data(
     try:
         service = ParserService(db)
         file_path = await service.export_data(
-            task_id, port_number, format, time_start, time_end, parser_id
+            task_id, port_number, format, time_start, time_end, parser_id, include_text_columns
         )
     except Exception as e:
         print(f"[Export] ERROR: {e}")
@@ -754,11 +727,25 @@ async def export_batch(
     task_id: int,
     ports: str = Query(..., description="逗号分隔的端口号，如 7004,7005,7006,8030"),
     parser_ids: str = Query("", description="逗号分隔的解析器ID（与ports一一对应，可为空）"),
+    include_text_columns: bool = Query(True, description="是否导出文字列"),
     db: AsyncSession = Depends(get_db)
 ):
     """批量导出多个端口到一个Excel文件（每个端口一个Sheet）"""
     import pandas as pd
     from ..config import DATA_DIR
+
+    def _is_cn_description_col(name: str) -> bool:
+        if name == "unit_id_cn":
+            return True
+        if name.endswith("_cn"):
+            return True
+        if name.endswith("_enum"):
+            return True
+        if name.endswith(".ssm_enum"):
+            return True
+        if name.endswith(".parity"):
+            return True
+        return False
     
     port_list = [int(p.strip()) for p in ports.split(",") if p.strip()]
     pid_list = [s.strip() for s in parser_ids.split(",")]  if parser_ids else []
@@ -782,6 +769,11 @@ async def export_batch(
                 continue
             df = pd.read_parquet(result_file)
             service._keep_datetime_as_str(df)
+            df.rename(columns={"timestamp": "time"}, inplace=True)
+            if not include_text_columns:
+                drop_cols = [c for c in df.columns if _is_cn_description_col(c)]
+                if drop_cols:
+                    df = df.drop(columns=drop_cols)
             sheet_name = f"port_{port}"
             if pid:
                 sheet_name = f"port_{port}_p{pid}"

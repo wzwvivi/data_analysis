@@ -295,6 +295,13 @@ function StandaloneEventTaskPage() {
           <div style={{ textAlign: 'center', padding: 48, color: '#8b949e' }}>
             <Spin style={{ marginRight: 12 }} />
             正在分析 pcap，请稍候…
+            {typeof analysisTask?.progress === 'number' && analysisTask.progress > 0 && (
+              <Progress
+                percent={analysisTask.progress}
+                status="active"
+                style={{ marginTop: 16, maxWidth: 400, marginLeft: 'auto', marginRight: 'auto' }}
+              />
+            )}
           </div>
         ) : analysisTask?.status === 'failed' ? (
           <Empty description="分析失败，请查看上方错误说明" />

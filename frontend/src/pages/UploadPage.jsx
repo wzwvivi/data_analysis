@@ -19,6 +19,9 @@ const FAMILY_LABELS = {
   atg: 'ATG 协议',
   fms: '飞管 FMS 协议',
   adc: '大气数据 ADC 协议',
+  ra: '无线电高度表 RA 协议',
+  turn: '前轮转弯系统协议',
+  brake: '机轮刹车系统协议',
   bms800v: '800V 动力电池 BMS',
   bms270v: '270V&28V 动力电池 BMS',
 }
@@ -589,7 +592,7 @@ function UploadPage() {
               )}
 
               <Form.Item style={{ marginTop: 16 }}>
-                {uploading && uploadProgress > 0 && (
+                {uploading && dataSource === 'local' && uploadProgress > 0 && (
                   <Progress 
                     percent={uploadProgress} 
                     status="active"
@@ -609,7 +612,9 @@ function UploadPage() {
                   }
                   block
                 >
-                  {uploading ? `上传中 ${uploadProgress}%` : '开始解析'}
+                  {uploading
+                    ? (dataSource === 'platform' ? '提交中...' : `上传中 ${uploadProgress}%`)
+                    : '开始解析'}
                 </Button>
               </Form.Item>
             </Form>

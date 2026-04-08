@@ -8,6 +8,10 @@ from .atg_cpe_parser import ATGCPEParser
 from .fcc_parser import FCCParser
 from .fms_fcc_parser import FMSFCCParser
 from .adc_parser import ADCParser
+from .ra_parser import RAParser
+from .turn_parser import TurnParser
+from .brake_parser import BrakeParser
+from .lgcu_parser import LGCUParser
 from .bms800v_parser import BMS800VParser
 from .bms270v_parser import BMS270VParser
 from .fms_irs_fwd_parser import FMSIRSForwardParser
@@ -23,6 +27,10 @@ __all__ = [
     "FCCParser",
     "FMSFCCParser",
     "ADCParser",
+    "RAParser",
+    "TurnParser",
+    "BrakeParser",
+    "LGCUParser",
     "BMS800VParser",
     "BMS270VParser",
     "FMSIRSForwardParser",

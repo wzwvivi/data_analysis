@@ -114,10 +114,13 @@ class EventAnalysisService:
         
         # 更新状态为处理中
         analysis_task.status = "processing"
+        analysis_task.progress = 0
         await self.db.commit()
         
         try:
             # 获取解析结果文件
+            analysis_task.progress = 10
+            await self.db.commit()
             parsed_data = await self._load_parsed_data(parse_task_id)
             
             if not parsed_data:
@@ -130,6 +133,9 @@ class EventAnalysisService:
             for port, df in parsed_data.items():
                 print(f"[EventAnalysis]   端口 {port}: {len(df)} 条记录")
             
+            analysis_task.progress = 30
+            await self.db.commit()
+            
             # 选择规则执行器
             if rule_template == "default_v1":
                 checksheet = Checksheet()
@@ -140,10 +146,14 @@ class EventAnalysisService:
                 return False
             
             # 执行分析
+            analysis_task.progress = 40
+            await self.db.commit()
             check_results, timeline_events = checksheet.analyze(parsed_data)
             
             print(f"[EventAnalysis] 分析完成: {len(check_results)} 个检查项, {len(timeline_events)} 个事件")
 
+            analysis_task.progress = 80
+            await self.db.commit()
             await self._persist_analysis_outputs(analysis_task, check_results, timeline_events)
             print(f"[EventAnalysis] 保存完成: {analysis_task.passed_checks} pass, {analysis_task.failed_checks} fail")
             return True
@@ -274,6 +284,7 @@ class EventAnalysisService:
             self.db.add(db_event)
 
         analysis_task.status = "completed"
+        analysis_task.progress = 100
         analysis_task.total_checks = len(check_results)
         analysis_task.passed_checks = passed
         analysis_task.failed_checks = failed
@@ -341,6 +352,7 @@ class EventAnalysisService:
 
         rule_template = analysis_task.rule_template or "default_v1"
         analysis_task.status = "processing"
+        analysis_task.progress = 0
         await self.db.commit()
 
         try:
@@ -359,8 +371,14 @@ class EventAnalysisService:
                 await self.db.commit()
                 return False
 
+            analysis_task.progress = 10
+            await self.db.commit()
+
             required = set(checksheet.get_required_ports())
             parsed_data = pcap_to_port_dataframes(str(pcap_path), required)
+
+            analysis_task.progress = 50
+            await self.db.commit()
 
             if not parsed_data:
                 analysis_task.status = "failed"
@@ -371,6 +389,8 @@ class EventAnalysisService:
             print(f"[EventAnalysis] 独立模式加载 {len(parsed_data)} 个端口")
             check_results, timeline_events = checksheet.analyze(parsed_data)
 
+            analysis_task.progress = 80
+            await self.db.commit()
             await self._persist_analysis_outputs(analysis_task, check_results, timeline_events)
             print(
                 f"[EventAnalysis] 独立分析完成: {analysis_task.passed_checks} pass, "

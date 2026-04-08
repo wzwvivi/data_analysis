@@ -40,6 +40,7 @@ class EventAnalysisTaskResponse(BaseModel):
     name: Optional[str] = None
     rule_template: str
     status: str
+    progress: int = 0
     error_message: Optional[str] = None
     total_checks: int
     passed_checks: int
@@ -323,20 +324,7 @@ async def get_analysis_task(
     if not task:
         raise HTTPException(status_code=404, detail="事件分析任务不存在")
     
-    return EventAnalysisTaskResponse(
-        id=task.id,
-        parse_task_id=task.parse_task_id,
-        pcap_filename=task.pcap_filename,
-        name=task.name,
-        rule_template=task.rule_template,
-        status=task.status,
-        error_message=task.error_message,
-        total_checks=task.total_checks or 0,
-        passed_checks=task.passed_checks or 0,
-        failed_checks=task.failed_checks or 0,
-        created_at=task.created_at,
-        completed_at=task.completed_at
-    )
+    return _task_to_response(task)
 
 
 def _task_to_response(task) -> EventAnalysisTaskResponse:
@@ -347,6 +335,7 @@ def _task_to_response(task) -> EventAnalysisTaskResponse:
         name=task.name,
         rule_template=task.rule_template,
         status=task.status,
+        progress=getattr(task, "progress", None) or 0,
         error_message=task.error_message,
         total_checks=task.total_checks or 0,
         passed_checks=task.passed_checks or 0,

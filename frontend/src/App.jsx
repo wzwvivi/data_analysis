@@ -6,13 +6,13 @@ import LoginPage from './pages/LoginPage'
 import UploadPage from './pages/UploadPage'
 import TaskListPage from './pages/TaskListPage'
 import ResultPage from './pages/ResultPage'
-import AnalysisPage from './pages/AnalysisPage'
 import EventAnalysisPage from './pages/EventAnalysisPage'
 import StandaloneEventPage from './pages/StandaloneEventPage'
 import StandaloneEventTaskPage from './pages/StandaloneEventTaskPage'
 import ProtocolPage from './pages/ProtocolPage'
 import ComparePage from './pages/ComparePage'
 import AdminPlatformDataPage from './pages/AdminPlatformDataPage'
+import AdminUserPage from './pages/AdminUserPage'
 
 function PrivateRoute({ children }) {
   const { user, ready } = useAuth()
@@ -63,7 +63,7 @@ function AppRoutes() {
         <Route path="upload" element={<UploadPage />} />
         <Route path="tasks" element={<TaskListPage />} />
         <Route path="tasks/:taskId" element={<ResultPage />} />
-        <Route path="tasks/:taskId/analysis" element={<AnalysisPage />} />
+        <Route path="tasks/:taskId/analysis" element={<ResultPage />} />
         <Route path="tasks/:taskId/event-analysis" element={<EventAnalysisPage />} />
         <Route path="network-config" element={<ProtocolPage />} />
         <Route path="compare" element={<ComparePage />} />
@@ -75,6 +75,14 @@ function AppRoutes() {
           element={(
             <AdminRoute>
               <AdminPlatformDataPage />
+            </AdminRoute>
+          )}
+        />
+        <Route
+          path="admin/users"
+          element={(
+            <AdminRoute>
+              <AdminUserPage />
             </AdminRoute>
           )}
         />

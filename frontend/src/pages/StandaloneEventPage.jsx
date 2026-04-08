@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Button, Space, message, Tag, Table,
-  Upload, Select, Radio, Alert,
+  Upload, Select, Radio, Alert, Progress,
 } from 'antd'
 import {
   UploadOutlined, ReloadOutlined, PlayCircleOutlined,
@@ -18,6 +18,7 @@ function StandaloneEventPage() {
   const [taskList, setTaskList] = useState([])
   const [listLoading, setListLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [ruleTemplate, setRuleTemplate] = useState('default_v1')
   const [dataSource, setDataSource] = useState('platform')
   const [sharedList, setSharedList] = useState([])
@@ -62,8 +63,11 @@ function StandaloneEventPage() {
     formData.append('file', localFile)
     formData.append('rule_template', ruleTemplate)
     setUploading(true)
+    setUploadProgress(0)
     try {
-      const res = await standaloneEventApi.upload(formData)
+      const res = await standaloneEventApi.upload(formData, (e) => {
+        if (e.total) setUploadProgress(Math.round((e.loaded * 100) / e.total))
+      })
       message.success(res.data.message || '已开始分析')
       loadTaskList()
       navigate(`/event-analysis/task/${res.data.task_id}`)
@@ -71,6 +75,7 @@ function StandaloneEventPage() {
       message.error(err.response?.data?.detail || '上传失败')
     } finally {
       setUploading(false)
+      setUploadProgress(0)
     }
   }
 
@@ -196,29 +201,34 @@ function StandaloneEventPage() {
               </Button>
             </div>
           ) : (
-            <Space wrap>
-              <Upload
-                beforeUpload={(file) => {
-                  setLocalFile(file)
-                  return false
-                }}
-                onRemove={() => setLocalFile(null)}
-                maxCount={1}
-                accept=".pcap,.pcapng,.cap"
-                fileList={localFile ? [{ uid: '-1', name: localFile.name, status: 'done' }] : []}
-              >
-                <Button icon={<UploadOutlined />}>选择文件</Button>
-              </Upload>
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                loading={uploading}
-                disabled={!localFile}
-                onClick={runLocal}
-              >
-                开始分析
-              </Button>
-            </Space>
+            <div>
+              <Space wrap>
+                <Upload
+                  beforeUpload={(file) => {
+                    setLocalFile(file)
+                    return false
+                  }}
+                  onRemove={() => setLocalFile(null)}
+                  maxCount={1}
+                  accept=".pcap,.pcapng,.cap"
+                  fileList={localFile ? [{ uid: '-1', name: localFile.name, status: 'done' }] : []}
+                >
+                  <Button icon={<UploadOutlined />}>选择文件</Button>
+                </Upload>
+                <Button
+                  type="primary"
+                  icon={<PlayCircleOutlined />}
+                  loading={uploading}
+                  disabled={!localFile}
+                  onClick={runLocal}
+                >
+                  {uploading ? `上传中 ${uploadProgress}%` : '开始分析'}
+                </Button>
+              </Space>
+              {uploading && uploadProgress > 0 && (
+                <Progress percent={uploadProgress} status="active" style={{ marginTop: 8, maxWidth: 400 }} />
+              )}
+            </div>
           )}
 
           <Button icon={<ReloadOutlined />} onClick={loadTaskList} loading={listLoading}>

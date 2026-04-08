@@ -27,6 +27,9 @@ from typing import Dict, List, Any, Optional
 
 from .base import BaseParser, ParserRegistry, FieldLayout
 from .arinc429 import ARINC429Decoder
+from .arinc429_mixin import (
+    Arinc429Mixin, build_field_name_to_label, SKIP_FIELDS, TSN_HEADER_LEN,
+)
 
 
 def _to_octal_label(label_str: str) -> Optional[int]:
@@ -42,6 +45,10 @@ _LABEL_STRINGS = ["132", "175", "254", "255", "261", "324", "325", "150", "260"]
 _LABEL_MAP = {s: _to_octal_label(s) for s in _LABEL_STRINGS}
 KNOWN_LABELS = {v for v in _LABEL_MAP.values() if v is not None}
 
+_LABEL_DEFS: Dict[int, dict] = {v: {} for v in KNOWN_LABELS}
+
+_FIELD_NAME_TO_LABEL = build_field_name_to_label(_LABEL_DEFS)
+
 
 def _extract_label_from_field_name(field_name: str) -> Optional[int]:
     """从字段名中提取 Label（三位数字），如 CPE_Label_132 / Label132 / L132。"""
@@ -54,10 +61,14 @@ def _extract_label_from_field_name(field_name: str) -> Optional[int]:
 
 
 @ParserRegistry.register
-class ATGCPEParser(BaseParser):
+class ATGCPEParser(Arinc429Mixin, BaseParser):
     parser_key = "atg_cpe_v20260402"
     name = "ATG设备(CPE)"
     supported_ports: List[int] = []
+
+    _LABEL_DEFS = _LABEL_DEFS
+    _FIELD_NAME_TO_LABEL = _FIELD_NAME_TO_LABEL
+    _PORT_LABELS = None
 
     LABEL_TRACK_ANGLE = _LABEL_MAP["132"]
     LABEL_GROUND_SPEED = _LABEL_MAP["175"]
@@ -85,13 +96,19 @@ class ATGCPEParser(BaseParser):
         "ssm_status",
     ]
 
+    _OUTPUT_COLUMNS = OUTPUT_COLUMNS
+
     def __init__(self):
-        self.decoder = ARINC429Decoder()
+        self._mixin_init()
+        self._ssm_statuses: List[int] = []
 
     def can_parse_port(self, port: int) -> bool:
         if not self.supported_ports:
             return True
         return port in self.supported_ports
+
+    def get_output_columns(self, port: int) -> List[str]:
+        return self.OUTPUT_COLUMNS
 
     def parse_packet(
         self,
@@ -105,9 +122,11 @@ class ATGCPEParser(BaseParser):
         if len(payload) < 4:
             return None
 
+        self._ssm_statuses = []
+
         if field_layout:
-            return self._parse_with_layout(payload, timestamp, field_layout)
-        return self._parse_with_scan(payload, timestamp)
+            return self._parse_with_layout_atg(payload, timestamp, field_layout)
+        return self._parse_with_scan_atg(payload, timestamp)
 
     def _new_record(self, timestamp: float) -> Dict[str, Any]:
         out = {"timestamp": timestamp}
@@ -116,14 +135,13 @@ class ATGCPEParser(BaseParser):
                 out[col] = None
         return out
 
-    def _parse_with_layout(
+    def _parse_with_layout_atg(
         self,
         payload: bytes,
         timestamp: float,
         field_layout: List[FieldLayout],
     ) -> Optional[Dict[str, Any]]:
         record = self._new_record(timestamp)
-        ssm_statuses: List[int] = []
         hit = 0
 
         for field in field_layout:
@@ -138,39 +156,43 @@ class ATGCPEParser(BaseParser):
             word = struct.unpack(">I", raw[:4])[0]
             if word == 0:
                 continue
-            self._apply_word(record, label, word)
-            ssm_statuses.append(self.decoder.extract_ssm(word))
+            self._decode_word(record, word, label)
+            self._ssm_statuses.append(self.decoder.extract_ssm(word))
             hit += 1
 
         if hit == 0:
             return None
-        if ssm_statuses:
-            ok = ssm_statuses.count(0x03)
-            record["ssm_status"] = f"{ok}/{len(ssm_statuses)} normal"
+        self._post_process(record)
         return record
 
-    def _parse_with_scan(self, payload: bytes, timestamp: float) -> Optional[Dict[str, Any]]:
+    def _parse_with_scan_atg(self, payload: bytes, timestamp: float) -> Optional[Dict[str, Any]]:
+        if len(payload) < TSN_HEADER_LEN + 4:
+            return None
+
         record = self._new_record(timestamp)
-        ssm_statuses: List[int] = []
+        data = payload[TSN_HEADER_LEN:]
         hit = 0
 
-        for offset in range(0, len(payload) - 3, 4):
-            word = self.decoder.parse_word_from_bytes(payload, offset, "big")
+        for offset in range(0, len(data) - 3, 4):
+            word = struct.unpack(">I", data[offset:offset + 4])[0]
             if word == 0:
                 continue
             label = self.decoder.extract_label(word)
             if label not in KNOWN_LABELS:
                 continue
-            self._apply_word(record, label, word)
-            ssm_statuses.append(self.decoder.extract_ssm(word))
+            self._decode_word(record, word, label)
+            self._ssm_statuses.append(self.decoder.extract_ssm(word))
             hit += 1
 
         if hit == 0:
             return None
-        if ssm_statuses:
-            ok = ssm_statuses.count(0x03)
-            record["ssm_status"] = f"{ok}/{len(ssm_statuses)} normal"
+        self._post_process(record)
         return record
+
+    def _post_process(self, record: Dict[str, Any]) -> None:
+        if self._ssm_statuses:
+            ok = self._ssm_statuses.count(0x03)
+            record["ssm_status"] = f"{ok}/{len(self._ssm_statuses)} normal"
 
     def _decode_signed_value(self, word: int, lsb: float, lsb_bit: int, msb_bit: int) -> float:
         data = self.decoder.extract_data_bits(word, lsb_bit, msb_bit)
@@ -181,7 +203,6 @@ class ATGCPEParser(BaseParser):
         return value
 
     def _decode_utc(self, word: int) -> str:
-        # 协议为自定义二进制，按 HH:MM:SS 提取并做边界校验
         sec = self.decoder.extract_data_bits(word, 12, 17)
         minute = self.decoder.extract_data_bits(word, 18, 23)
         hour = self.decoder.extract_data_bits(word, 24, 28)
@@ -189,7 +210,7 @@ class ATGCPEParser(BaseParser):
             return f"{hour:02d}:{minute:02d}:{sec:02d}"
         return ""
 
-    def _apply_word(self, record: Dict[str, Any], label: int, word: int) -> None:
+    def _decode_word(self, record: Dict[str, Any], word: int, label: int) -> None:
         if label == self.LABEL_TRACK_ANGLE:
             record["true_track_angle_deg"] = self._decode_signed_value(word, 0.0054931640625, 14, 28)
         elif label == self.LABEL_GROUND_SPEED:
@@ -210,9 +231,5 @@ class ATGCPEParser(BaseParser):
             if utc:
                 record["utc_time"] = utc
         elif label == self.LABEL_DATE:
-            # Date 编码在文档中存在多位复用说明，保留原始值并给出可读占位文本
             record["date_raw"] = hex(word)
             record["date_text"] = "from_label_260"
-
-    def get_output_columns(self, port: int) -> List[str]:
-        return self.OUTPUT_COLUMNS

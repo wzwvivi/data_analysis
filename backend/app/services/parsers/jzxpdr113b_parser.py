@@ -68,9 +68,11 @@ import struct
 from typing import Dict, List, Any, Optional
 from .base import BaseParser, ParserRegistry, FieldLayout
 from .arinc429 import ARINC429Decoder
+from .arinc429_mixin import (
+    Arinc429Mixin, build_field_name_to_label, SKIP_FIELDS, TSN_HEADER_LEN,
+)
 
 
-# 标号八进制值的核心映射（使用标准 L+八进制 格式作为主键）
 _LABEL_OCTAL_MAP = {
     '306': 0o306,  '031': 0o031,  '331': 0o331,  '332': 0o332,
     '261': 0o261,  '235': 0o235,  '236': 0o236,  '203': 0o203,
@@ -87,29 +89,25 @@ _LABEL_OCTAL_MAP = {
     '234': 0o234,
 }
 
-# 兼容多种字段名格式：L306, 306, Label306, label_306, L031 等
-FIELD_NAME_TO_LABEL = {}
-for _num_str, _oct_val in _LABEL_OCTAL_MAP.items():
-    FIELD_NAME_TO_LABEL[f'L{_num_str}'] = _oct_val       # L306
-    FIELD_NAME_TO_LABEL[_num_str] = _oct_val              # 306
-    FIELD_NAME_TO_LABEL[f'Label{_num_str}'] = _oct_val    # Label306
-    FIELD_NAME_TO_LABEL[f'label_{_num_str}'] = _oct_val   # label_306
-    FIELD_NAME_TO_LABEL[f'LABEL{_num_str}'] = _oct_val    # LABEL306
+_LABEL_DEFS: Dict[int, dict] = {v: {} for v in _LABEL_OCTAL_MAP.values()}
 
-UNIQUE_LABEL_COUNT = len(_LABEL_OCTAL_MAP)
+_FIELD_NAME_TO_LABEL = build_field_name_to_label(_LABEL_DEFS)
 
-# 需要跳过的非业务字段
-SKIP_FIELDS = {'协议填充', '功能状态集'}
+ALL_KNOWN_LABELS = set(_LABEL_OCTAL_MAP.values())
 
 
 @ParserRegistry.register
-class JZXPDR113BParser(BaseParser):
+class JZXPDR113BParser(Arinc429Mixin, BaseParser):
     """S模式应答机解析器（内部标识 jzxpdr113b_v20260113）"""
-    
+
     parser_key = "jzxpdr113b_v20260113"
     name = "S模式应答机"
-    supported_ports = []  # 动态端口，从TSN网络配置读取
-    
+    supported_ports = []
+
+    _LABEL_DEFS = _LABEL_DEFS
+    _FIELD_NAME_TO_LABEL = _FIELD_NAME_TO_LABEL
+    _PORT_LABELS = None
+
     # ---- 输入标号 ----
     LABEL_WORK_STATUS = 0o306
     LABEL_SQUAWK_CODE = 0o031
@@ -134,7 +132,7 @@ class JZXPDR113BParser(BaseParser):
     LABEL_EAST_VELOCITY = 0o367
     LABEL_GEO_HEIGHT = 0o361
     LABEL_NAV_INTEGRITY = 0o267
-    
+
     # ---- 输出标号（ATC发出） ----
     LABEL_INTRUDER_HEADING = 0o133
     LABEL_INTRUDER_SQUAWK = 0o162
@@ -162,13 +160,8 @@ class JZXPDR113BParser(BaseParser):
     LABEL_SW_VERSION = 0o233
     LABEL_SW_DATE = 0o234
 
-    # 所有已知标号集合，用于扫描模式匹配
-    ALL_KNOWN_LABELS = set(_LABEL_OCTAL_MAP.values())
-    
-    # 输出列定义
     OUTPUT_COLUMNS = [
         'timestamp',
-        # 基本状态
         'work_status_raw',
         'squawk_code',
         'smode_addr_low_raw',
@@ -176,11 +169,9 @@ class JZXPDR113BParser(BaseParser):
         'flight_id_part1',
         'flight_id_part2',
         'flight_id_part3',
-        # ADC
         'baro_altitude_ft',
         'true_airspeed_kn',
         'vertical_rate_ftmin',
-        # 导航
         'beijing_time',
         'latitude',
         'longitude',
@@ -192,7 +183,6 @@ class JZXPDR113BParser(BaseParser):
         'east_velocity',
         'geometric_height',
         'nav_integrity_raw',
-        # 入侵机
         'intruder_heading',
         'intruder_squawk',
         'intruder_flt1_raw',
@@ -220,16 +210,26 @@ class JZXPDR113BParser(BaseParser):
         'sw_date',
         'ssm_status',
     ]
-    
+
+    _OUTPUT_COLUMNS = OUTPUT_COLUMNS
+
     def __init__(self):
-        self.decoder = ARINC429Decoder()
+        self._mixin_init()
         self._pending_data: Dict[str, Any] = {}
-    
+        self._lat_high_word: Optional[int] = None
+        self._lat_low_word: Optional[int] = None
+        self._lon_high_word: Optional[int] = None
+        self._lon_low_word: Optional[int] = None
+        self._ssm_statuses: List[int] = []
+
     def can_parse_port(self, port: int) -> bool:
         if not self.supported_ports:
             return True
         return port in self.supported_ports
-    
+
+    def get_output_columns(self, port: int) -> List[str]:
+        return self.OUTPUT_COLUMNS
+
     _layout_debug_logged = set()
 
     def parse_packet(
@@ -241,160 +241,108 @@ class JZXPDR113BParser(BaseParser):
     ) -> Optional[Dict[str, Any]]:
         if self.supported_ports and port not in self.supported_ports:
             return None
-        
+
         if len(payload) < 4:
             return None
-        
+
+        self._lat_high_word = None
+        self._lat_low_word = None
+        self._lon_high_word = None
+        self._lon_low_word = None
+        self._ssm_statuses = []
+
         if field_layout:
             if port not in self._layout_debug_logged:
                 self._layout_debug_logged.add(port)
-                all_field_names = [f.field_name for f in field_layout]
-                matched = [f.field_name for f in field_layout if f.field_name in FIELD_NAME_TO_LABEL]
+                matched = [f.field_name for f in field_layout if f.field_name in _FIELD_NAME_TO_LABEL]
                 print(f"[JZXPDR113B] 端口 {port}: 布局字段 {len(field_layout)} 个, "
-                      f"匹配 {len(matched)} 个, "
-                      f"字段名样例: {all_field_names[:8]}")
-            return self._parse_with_layout(payload, timestamp, field_layout)
+                      f"匹配 {len(matched)} 个")
+            return self._parse_with_layout(payload, port, timestamp, field_layout)
         else:
-            return self._parse_with_scan(payload, timestamp)
-    
-    def _parse_with_layout(
+            return self._parse_with_scan(payload, port, timestamp)
+
+    def _parse_with_scan(
         self,
         payload: bytes,
+        port: int,
         timestamp: float,
-        field_layout: List[FieldLayout]
     ) -> Optional[Dict[str, Any]]:
-        record = self._init_record(timestamp)
-        
-        lat_high_word = None
-        lat_low_word = None
-        lon_high_word = None
-        lon_low_word = None
-        valid_words = 0
-        ssm_statuses = []
-        
-        for field in field_layout:
-            if field.field_name in SKIP_FIELDS:
-                continue
-            
-            label_octal = FIELD_NAME_TO_LABEL.get(field.field_name)
-            if label_octal is None:
-                continue
-            
-            offset = field.field_offset
-            length = field.field_length
-            if offset + length > len(payload):
-                continue
-            
-            word_bytes = payload[offset:offset + length]
-            if len(word_bytes) < 4:
-                continue
-            
-            word = struct.unpack('>I', word_bytes[:4])[0]
-            
-            if word == 0:
-                continue
-            
-            ssm = self.decoder.extract_ssm(word)
-            ssm_statuses.append(ssm)
-            
-            decoded = self._decode_label(label_octal, word)
-            if decoded is not None:
-                valid_words += 1
-            
-            self._apply_decoded(record, label_octal, word, decoded,
-                                lat_high_word, lat_low_word,
-                                lon_high_word, lon_low_word)
-            # 需要收集高低位字
-            if label_octal == self.LABEL_LAT_HIGH:
-                lat_high_word = word
-            elif label_octal == self.LABEL_LAT_LOW:
-                lat_low_word = word
-            elif label_octal == self.LABEL_LON_HIGH:
-                lon_high_word = word
-            elif label_octal == self.LABEL_LON_LOW:
-                lon_low_word = word
-        
-        self._merge_lat_lon(record, lat_high_word, lat_low_word, lon_high_word, lon_low_word)
-        
-        if ssm_statuses:
-            normal_count = ssm_statuses.count(0x03)
-            record['ssm_status'] = f"{normal_count}/{len(ssm_statuses)} normal"
-        
-        if valid_words == 0:
+        if len(payload) < TSN_HEADER_LEN + 4:
             return None
-        
-        return record
-    
-    def _parse_with_scan(self, payload: bytes, timestamp: float) -> Optional[Dict[str, Any]]:
-        record = self._init_record(timestamp)
-        
-        lat_high_word = None
-        lat_low_word = None
-        lon_high_word = None
-        lon_low_word = None
-        valid_words = 0
-        ssm_statuses = []
-        
+
+        port_cols = self.get_output_columns(port)
+        data = payload[TSN_HEADER_LEN:]
+        record: Dict[str, Any] = {c: None for c in port_cols}
+        record["timestamp"] = timestamp
+        found_any = False
+
         offset = 0
-        while offset + 4 <= len(payload):
-            word = self.decoder.parse_word_from_bytes(payload, offset, 'big')
+        while offset + 4 <= len(data):
+            word = struct.unpack(">I", data[offset:offset + 4])[0]
             offset += 4
-            
+
             if word == 0:
                 continue
-            
+
             label = self.decoder.extract_label(word)
-            
-            if label not in self.ALL_KNOWN_LABELS:
+
+            if label not in ALL_KNOWN_LABELS:
                 continue
-            
-            ssm = self.decoder.extract_ssm(word)
-            ssm_statuses.append(ssm)
-            
-            decoded = self._decode_label(label, word)
-            if decoded is not None:
-                valid_words += 1
-            
-            self._apply_decoded(record, label, word, decoded,
-                                lat_high_word, lat_low_word,
-                                lon_high_word, lon_low_word)
+
+            self._ssm_statuses.append(self.decoder.extract_ssm(word))
+            found_any = True
+            self._decode_word(record, word, label)
+
             if label == self.LABEL_LAT_HIGH:
-                lat_high_word = word
-                valid_words += 1
+                self._lat_high_word = word
             elif label == self.LABEL_LAT_LOW:
-                lat_low_word = word
-                valid_words += 1
+                self._lat_low_word = word
             elif label == self.LABEL_LON_HIGH:
-                lon_high_word = word
-                valid_words += 1
+                self._lon_high_word = word
             elif label == self.LABEL_LON_LOW:
-                lon_low_word = word
-                valid_words += 1
-        
-        self._merge_lat_lon(record, lat_high_word, lat_low_word, lon_high_word, lon_low_word)
-        
-        if ssm_statuses:
-            normal_count = ssm_statuses.count(0x03)
-            record['ssm_status'] = f"{normal_count}/{len(ssm_statuses)} normal"
-        
-        if valid_words == 0:
-            return None
-        
-        return record
-    
+                self._lon_low_word = word
+
+        if found_any:
+            self._post_process(record)
+            return record
+        return None
+
+    def _post_process(self, record: Dict[str, Any]) -> None:
+        self._merge_lat_lon(record)
+        if self._ssm_statuses:
+            normal_count = self._ssm_statuses.count(0x03)
+            record['ssm_status'] = f"{normal_count}/{len(self._ssm_statuses)} normal"
+
     def _init_record(self, timestamp: float) -> Dict[str, Any]:
         record: Dict[str, Any] = {'timestamp': timestamp}
         for col in self.OUTPUT_COLUMNS:
             if col != 'timestamp':
                 record[col] = None
         return record
-    
-    def _apply_decoded(self, record, label_octal, word, decoded,
-                       lat_hw, lat_lw, lon_hw, lon_lw):
-        """将解码结果写入 record 的对应字段"""
+
+    def _decode_word(self, record: Dict[str, Any], word: int, label: int) -> None:
+        decoded = self._decode_label(label, word)
+
+        ssm = self.decoder.extract_ssm(word)
+        if label not in (self.LABEL_LAT_HIGH, self.LABEL_LAT_LOW,
+                         self.LABEL_LON_HIGH, self.LABEL_LON_LOW):
+            if ssm not in [s for s in self._ssm_statuses]:
+                pass
+
+        self._apply_decoded(record, label, word, decoded)
+
+        if label == self.LABEL_LAT_HIGH:
+            self._lat_high_word = word
+        elif label == self.LABEL_LAT_LOW:
+            self._lat_low_word = word
+        elif label == self.LABEL_LON_HIGH:
+            self._lon_high_word = word
+        elif label == self.LABEL_LON_LOW:
+            self._lon_low_word = word
+
+    def _apply_decoded(self, record, label_octal, word, decoded):
         d = self.decoder
 
-        # ---- 基本状态 ----
         if label_octal == self.LABEL_WORK_STATUS:
             record['work_status_raw'] = hex(word)
         elif label_octal == self.LABEL_SQUAWK_CODE:
@@ -409,16 +357,12 @@ class JZXPDR113BParser(BaseParser):
             record['flight_id_part2'] = decoded
         elif label_octal == self.LABEL_FLIGHT_ID3:
             record['flight_id_part3'] = decoded
-
-        # ---- ADC ----
         elif label_octal == self.LABEL_BARO_ALT:
             record['baro_altitude_ft'] = decoded
         elif label_octal == self.LABEL_TRUE_AIRSPEED:
             record['true_airspeed_kn'] = decoded
         elif label_octal == self.LABEL_VERT_RATE:
             record['vertical_rate_ftmin'] = decoded
-
-        # ---- 导航 ----
         elif label_octal == self.LABEL_BJT:
             record['beijing_time'] = decoded
         elif label_octal == self.LABEL_GROUND_SPEED:
@@ -437,8 +381,6 @@ class JZXPDR113BParser(BaseParser):
             record['geometric_height'] = decoded
         elif label_octal == self.LABEL_NAV_INTEGRITY:
             record['nav_integrity_raw'] = hex(word)
-
-        # ---- 入侵机 ----
         elif label_octal == self.LABEL_INTRUDER_HEADING:
             record['intruder_heading'] = decoded
         elif label_octal == self.LABEL_INTRUDER_SQUAWK:
@@ -489,12 +431,10 @@ class JZXPDR113BParser(BaseParser):
             record['sw_version'] = decoded
         elif label_octal == self.LABEL_SW_DATE:
             record['sw_date'] = decoded
-    
+
     def _decode_label(self, label_octal: int, word: int) -> Any:
-        """根据标号类型解码 ARINC 429 字"""
         d = self.decoder
 
-        # ---- 基本状态 ----
         if label_octal == self.LABEL_WORK_STATUS:
             return d.decode_work_status_306(word)
         elif label_octal == self.LABEL_SQUAWK_CODE:
@@ -509,16 +449,12 @@ class JZXPDR113BParser(BaseParser):
             return d.decode_flight_id_2(word)
         elif label_octal == self.LABEL_FLIGHT_ID3:
             return d.decode_flight_id_3(word)
-
-        # ---- ADC ----
         elif label_octal == self.LABEL_BARO_ALT:
             return d.decode_barometric_altitude(word)
         elif label_octal == self.LABEL_TRUE_AIRSPEED:
             return d.decode_true_airspeed(word)
         elif label_octal == self.LABEL_VERT_RATE:
             return d.decode_vertical_rate(word)
-
-        # ---- 导航 ----
         elif label_octal == self.LABEL_BJT:
             hours, minutes, seconds = d.decode_beijing_time(word)
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
@@ -538,13 +474,9 @@ class JZXPDR113BParser(BaseParser):
             return d.decode_geometric_height(word)
         elif label_octal == self.LABEL_NAV_INTEGRITY:
             return hex(word)
-
-        # ---- 经纬度高低位：返回原始字用于后续合并 ----
         elif label_octal in (self.LABEL_LAT_HIGH, self.LABEL_LAT_LOW,
                              self.LABEL_LON_HIGH, self.LABEL_LON_LOW):
             return word
-
-        # ---- 入侵机 ----
         elif label_octal == self.LABEL_INTRUDER_HEADING:
             return d.decode_intruder_heading(word)
         elif label_octal == self.LABEL_INTRUDER_SQUAWK:
@@ -580,52 +512,46 @@ class JZXPDR113BParser(BaseParser):
             return d.decode_software_date(word)
 
         return None
-    
-    def _merge_lat_lon(
-        self, record: Dict, lat_high_word, lat_low_word, lon_high_word, lon_low_word
-    ):
-        """合并经纬度高低位"""
-        if lat_high_word is not None and lat_low_word is not None:
-            record['latitude'] = self.decoder.combine_latitude(lat_high_word, lat_low_word)
-        elif lat_high_word is not None:
-            high_data, sign = self.decoder.decode_latitude_high(lat_high_word)
+
+    def _merge_lat_lon(self, record: Dict):
+        if self._lat_high_word is not None and self._lat_low_word is not None:
+            record['latitude'] = self.decoder.combine_latitude(self._lat_high_word, self._lat_low_word)
+        elif self._lat_high_word is not None:
+            high_data, sign = self.decoder.decode_latitude_high(self._lat_high_word)
             lsb = 0.0000000838 * (1 << 11)
             record['latitude'] = high_data * lsb * (-1 if sign else 1)
-        
-        if lon_high_word is not None and lon_low_word is not None:
-            record['longitude'] = self.decoder.combine_longitude(lon_high_word, lon_low_word)
-        elif lon_high_word is not None:
-            high_data, sign = self.decoder.decode_longitude_high(lon_high_word)
+
+        if self._lon_high_word is not None and self._lon_low_word is not None:
+            record['longitude'] = self.decoder.combine_longitude(self._lon_high_word, self._lon_low_word)
+        elif self._lon_high_word is not None:
+            high_data, sign = self.decoder.decode_longitude_high(self._lon_high_word)
             lsb = 0.0000000838 * (1 << 11)
             record['longitude'] = high_data * lsb * (-1 if sign else 1)
-    
-    def get_output_columns(self, port: int) -> List[str]:
-        return self.OUTPUT_COLUMNS
-    
+
     def parse_packet_raw(self, payload: bytes, port: int, timestamp: float) -> Optional[Dict[str, Any]]:
         """原始解析模式 - 输出每个ARINC 429字的详细信息，用于调试"""
         if self.supported_ports and port not in self.supported_ports:
             return None
-        
+
         record = {
             'timestamp': timestamp,
             'packet_size': len(payload),
             'words': []
         }
-        
+
         offset = 0
         while offset + 4 <= len(payload):
             word = self.decoder.parse_word_from_bytes(payload, offset, 'big')
             offset += 4
-            
+
             if word == 0:
                 continue
-            
+
             label = self.decoder.extract_label(word)
             label_octal = self.decoder.extract_label_octal(word)
             sdi = self.decoder.extract_sdi(word)
             ssm = self.decoder.extract_ssm(word)
-            
+
             word_info = {
                 'label': label,
                 'label_octal': label_octal,
@@ -634,21 +560,21 @@ class JZXPDR113BParser(BaseParser):
                 'raw_hex': hex(word),
             }
             record['words'].append(word_info)
-        
+
         return record
 
 
-@ParserRegistry.register  
+@ParserRegistry.register
 class RawDataParser(BaseParser):
     """原始数据解析器 - 输出十六进制原始数据"""
-    
+
     parser_key = "raw_data_parser"
     name = "原始数据解析器"
     supported_ports = []
-    
+
     def can_parse_port(self, port: int) -> bool:
         return True
-    
+
     def parse_packet(
         self,
         payload: bytes,
@@ -661,6 +587,6 @@ class RawDataParser(BaseParser):
             'raw_data': payload.hex(),
             'packet_size': len(payload),
         }
-    
+
     def get_output_columns(self, port: int) -> List[str]:
         return ['timestamp', 'raw_data', 'packet_size']

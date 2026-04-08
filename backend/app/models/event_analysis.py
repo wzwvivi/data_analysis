@@ -22,6 +22,7 @@ class EventAnalysisTask(Base):
     name = Column(String(200), comment="分析任务名称")
     rule_template = Column(String(100), default="default_v1", comment="使用的规则模板标识")
     status = Column(String(20), default="pending", comment="状态: pending/processing/completed/failed")
+    progress = Column(Integer, default=0, comment="进度 0-100")
     error_message = Column(Text, comment="错误信息")
     total_checks = Column(Integer, default=0, comment="检查项总数")
     passed_checks = Column(Integer, default=0, comment="通过的检查项数")

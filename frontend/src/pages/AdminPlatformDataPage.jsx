@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Card, Upload, Button, Table, message, Modal, Form, DatePicker, Input, Space, Tag, Popconfirm,
+  Card, Upload, Button, Table, message, Modal, Form, DatePicker, Input, Space, Tag, Popconfirm, Progress,
 } from 'antd'
 import { UploadOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -10,6 +10,7 @@ function AdminPlatformDataPage() {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [editRow, setEditRow] = useState(null)
   const [form] = Form.useForm()
 
@@ -33,14 +34,18 @@ function AdminPlatformDataPage() {
     const fd = new FormData()
     fd.append('file', file)
     setUploading(true)
+    setUploadProgress(0)
     try {
-      await sharedTsnApi.upload(fd)
+      await sharedTsnApi.upload(fd, (e) => {
+        if (e.total) setUploadProgress(Math.round((e.loaded * 100) / e.total))
+      })
       message.success('已上传到平台共享库（超过保留期的文件会在启动或下次上传时自动清理）')
       load()
     } catch (e) {
       message.error(e.response?.data?.detail || '上传失败')
     } finally {
       setUploading(false)
+      setUploadProgress(0)
     }
     return false
   }
@@ -134,9 +139,12 @@ function AdminPlatformDataPage() {
         </p>
         <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pcap,.pcapng,.cap">
           <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
-            上传 TSN 抓包到平台
+            {uploading ? `上传中 ${uploadProgress}%` : '上传 TSN 抓包到平台'}
           </Button>
         </Upload>
+        {uploading && uploadProgress > 0 && (
+          <Progress percent={uploadProgress} status="active" style={{ marginTop: 12, maxWidth: 400 }} />
+        )}
       </Card>
 
       <Card title="当前平台数据">
