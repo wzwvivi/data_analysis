@@ -24,6 +24,7 @@ const FAMILY_LABELS = {
   brake: '机轮刹车系统协议',
   bms800v: '800V 动力电池 BMS',
   bms270v: '270V&28V 动力电池 BMS',
+  mcu: 'MCU 电推电驱 CAN',
 }
 
 const DIRECTION_LABELS = {

@@ -80,6 +80,9 @@ PORT_FAMILY_MAP: Dict[int, str] = {
 
     # ── FCC 飞控发出数据 (fcc) ──
     7091: "fcc", 7092: "fcc",
+    # MCU 电推电驱相关 CAN 端口（按 ICD6.0.2）
+    7014: "mcu", 7016: "mcu",
+    7093: "mcu", 7094: "mcu", 7095: "mcu", 7096: "mcu",
     9001: "fcc", 9002: "fcc", 9003: "fcc", 9004: "fcc",
     9011: "fcc", 9012: "fcc", 9013: "fcc", 9014: "fcc",
     9021: "fcc", 9022: "fcc", 9023: "fcc",

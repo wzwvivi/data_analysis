@@ -570,6 +570,10 @@ async def init_parser_profiles(db: AsyncSession):
         select(ParserProfile).where(ParserProfile.parser_key == "bms_270v_v2.5")
     )
     bms270v_exists = result.scalar_one_or_none()
+    result = await db.execute(
+        select(ParserProfile).where(ParserProfile.parser_key == "mcu_v6.0")
+    )
+    mcu_exists = result.scalar_one_or_none()
 
     if not bms270v_exists:
         profiles_to_create.append(
@@ -591,6 +595,28 @@ async def init_parser_profiles(db: AsyncSession):
             bms270v_exists.protocol_family = "bms270v"
             print("[Init] 已更新 BMS270V protocol_family = bms270v")
         print("[Init] 270V&28V动力电池BMS 解析版本已存在，跳过创建")
+
+    # MCU 电推电驱 CAN 解析器
+    if not mcu_exists:
+        profiles_to_create.append(
+            ParserProfile(
+                name="MCU电推电驱",
+                version="V6.0",
+                device_model="MCU",
+                protocol_family="mcu",
+                parser_key="mcu_v6.0",
+                is_active=True,
+                description="CE25A电推-电驱CAN通信协议草案V6.0解析器。覆盖MCU相关8个TSN端口（7014/7016/7091-7096），支持指令帧与状态/信息/数据帧解析。",
+                supported_ports="7014,7016,7091,7092,7093,7094,7095,7096",
+                output_fields='["timestamp","source_port","can_id_hex","msg_name","msg_type"]',
+            )
+        )
+        print("[Init] 将创建 MCU电推电驱 解析器配置")
+    else:
+        if not mcu_exists.protocol_family:
+            mcu_exists.protocol_family = "mcu"
+            print("[Init] 已更新 MCU protocol_family = mcu")
+        print("[Init] MCU电推电驱 解析版本已存在，跳过创建")
 
     # 飞管给惯导转发数据解析器
     if not fms_irs_fwd_exists:

@@ -15,6 +15,7 @@ from .lgcu_parser import LGCUParser
 from .bms800v_parser import BMS800VParser
 from .bms270v_parser import BMS270VParser
 from .bpcu_empc_parser import BPCUEMPCParser
+from .mcu_parser import MCUParser
 from .fms_irs_fwd_parser import FMSIRSForwardParser
 from .base import BaseParser, ParserRegistry, FieldLayout
 
@@ -35,6 +36,7 @@ __all__ = [
     "BMS800VParser",
     "BMS270VParser",
     "BPCUEMPCParser",
+    "MCUParser",
     "FMSIRSForwardParser",
     "BaseParser",
     "ParserRegistry",
