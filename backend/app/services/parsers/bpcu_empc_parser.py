@@ -7,7 +7,7 @@ TSN 包结构:
   Byte 4-7 : 功能状态集 (4B)
   Byte 8+  : CAN_FRAME 序列, 每帧 16B, 每 4 帧后插入 4B 功能状态集
 
-CAN_FRAME (16B) = 4B CAN-ID (big-endian) + 4B DLC/状态 + 8B 数据
+CAN_FRAME (16B) = 4B CAN 仲裁域 (wire format) + 4B DLC/状态 + 8B 数据
 
 端口:
   7050, 7051 : LBPCU (左BPCU)

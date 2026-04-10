@@ -65,7 +65,14 @@ function AppRoutes() {
         <Route path="tasks/:taskId" element={<ResultPage />} />
         <Route path="tasks/:taskId/analysis" element={<ResultPage />} />
         <Route path="tasks/:taskId/event-analysis" element={<EventAnalysisPage />} />
-        <Route path="network-config" element={<ProtocolPage />} />
+        <Route
+          path="network-config"
+          element={(
+            <AdminRoute>
+              <ProtocolPage />
+            </AdminRoute>
+          )}
+        />
         <Route path="compare" element={<ComparePage />} />
         <Route path="compare/:taskId" element={<ComparePage />} />
         <Route path="event-analysis/task/:analysisTaskId" element={<StandaloneEventTaskPage />} />

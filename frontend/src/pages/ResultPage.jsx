@@ -38,6 +38,17 @@ const SKIP_FIELDS = new Set([
 
 const FIELD_EXACT_CN = {
   timestamp: '时间戳（秒）',
+  beijingdatetime: '北京时间',
+  beijing_time: '北京时间',
+  packet_size: '报文长度',
+  source_port: '源端口',
+  can_id_hex: 'CAN 标识',
+  msg_type: '消息类型',
+  msg_name: '消息名称',
+  pack_id: '电池包编号',
+  frame_count: '帧计数',
+  device_id: '设备编号',
+  device_name_enum: '设备名称',
   unit_id: '设备单元号',
   unit_id_cn: '设备单元中文标识',
   adru_id: 'ADRU 单元号',
@@ -50,6 +61,39 @@ const FIELD_EXACT_CN = {
   ssm: 'SSM 状态矩阵',
   ssm_enum: 'SSM 中文状态',
   parity: '奇偶校验',
+  latitude: '纬度',
+  longitude: '经度',
+  altitude: '高度',
+  heading: '航向',
+  pitch: '俯仰角',
+  roll: '横滚角',
+  ground_speed: '地速',
+  true_heading: '真航向',
+  track_angle: '航迹角',
+  vertical_velocity: '垂直速度',
+  north_velocity: '北向速度',
+  east_velocity: '东向速度',
+  geometric_height: '几何高度',
+  sw_version: '软件版本',
+  hw_version: '硬件版本',
+  crc_valid: 'CRC校验有效',
+  work_mode: '工作模式',
+  nav_mode: '导航模式',
+  align_status: '对准状态',
+  align_mode: '对准模式',
+  sat_source: '卫导来源',
+  utc_time: 'UTC 时间',
+  utc_date: 'UTC 日期',
+  hpl: '水平保护级',
+  vpl: '垂直保护级',
+  hdop: '水平精度因子',
+  vdop: '垂直精度因子',
+  hfom: '水平估计误差',
+  vfom: '垂直估计误差',
+  main_fcc: '主飞控',
+  source_fcc: '源飞控',
+  fcc_vote_bits: '飞控表决位',
+  irs_channel_name: 'IRS通道',
 }
 
 const FIELD_TOKEN_CN = {
@@ -101,6 +145,303 @@ const FIELD_TOKEN_CN = {
   word: '字',
   spare: '保留位',
   op: '反向/互补位',
+  label: '标签',
+  voted: '表决',
+  src: '源',
+  abs: '绝对',
+  alt: '高度',
+  qnh: 'QNH',
+  qfe: 'QFE',
+  mach: '马赫数',
+  ias: '指示空速',
+  cas: '校准空速',
+  tas: '真空速',
+  aoa: '迎角',
+  aos: '侧滑角',
+  speed: '速度',
+  wheel: '轮',
+  tire: '轮胎',
+  pressure: '压力',
+  temp: '温度',
+  force: '力',
+  feedback: '反馈',
+  throttle: '油门',
+  handwheel: '手轮',
+  angle: '角度',
+  offset: '偏移',
+  fail: '失效',
+  left: '左',
+  right: '右',
+  inside: '内侧',
+  outside: '外侧',
+  main: '主',
+  copilot: '副驾驶',
+  avg: '平均',
+  total: '总',
+  pwr: '功率',
+  vlt: '电压',
+  volt: '电压',
+  crnt: '电流',
+  curr: '电流',
+  current: '电流',
+  soc: '荷电状态',
+  soe: '能量状态',
+  energy: '能量',
+  charge: '充电',
+  chrg: '充电',
+  dschrg: '放电',
+  bus: '母线',
+  hv: '高压',
+  lv: '低压',
+  isol: '绝缘',
+  stat: '状态',
+  type: '类型',
+  code: '代码',
+  serial: '序列号',
+  number: '编号',
+  num: '编号',
+  count: '计数',
+  time: '时间',
+  date: '日期',
+  msg: '消息',
+  can: 'CAN',
+  id: 'ID',
+  source: '源端口',
+  port: '端口',
+  frame: '帧',
+  sdi: 'SDI',
+  ssm: 'SSM',
+  parity: '奇偶校验',
+  enum: '文本说明',
+  irs: '惯导',
+  rtk: 'RTK',
+  gps: 'GPS',
+  utc: 'UTC',
+  gyro: '陀螺',
+  accelerometer: '加速度计',
+  acceleration: '加速度',
+  angular: '角',
+  velocity: '速度',
+  heading: '航向',
+  pitch: '俯仰',
+  roll: '横滚',
+  latitude: '纬度',
+  longitude: '经度',
+  geometric: '几何',
+  height: '高度',
+  hpl: '水平保护级',
+  vpl: '垂直保护级',
+  hdop: '水平精度因子',
+  vdop: '垂直精度因子',
+  hfom: '水平估计误差',
+  vfom: '垂直估计误差',
+  sat: '卫星',
+  gnss: 'GNSS',
+  fix: '定位',
+  type: '类型',
+  pos: '位置',
+  position: '位置',
+  locate: '定位',
+  scene: '场景',
+  phase: '阶段',
+  runway: '跑道',
+  aircraft: '飞机',
+  weight: '重量',
+  leg: '航段',
+  fms: '飞管',
+  fcc: '飞控',
+  rwy: '跑道',
+  pbit: '上电自检',
+  cbit: '周期自检',
+  adc: '大气数据计算机',
+  adru: 'ADRU',
+  ra: '无线电高度表',
+  bms: 'BMS',
+  bmu: 'BMU',
+  cmu: 'CMU',
+  pcb: '电路板',
+  hvil: '高压互锁',
+  isol: '绝缘',
+  supl: '供电',
+  clnt: '冷却液',
+  cnctr: '接触器',
+  ckt: '电路',
+  opn: '开路',
+  short: '短路',
+  over: '过高',
+  under: '过低',
+  overtemp: '过温',
+  overvoltage: '过压',
+  undervoltage: '欠压',
+  timeout: '超时',
+}
+
+const ASCII_ONLY_RE = /^[\x00-\x7F]+$/
+const COMPACT_TOKEN_RE = /^[a-z0-9]+$/
+const COMPACT_SEGMENT_CN = {
+  bms: 'BMS',
+  bmu: 'BMU',
+  cmu: 'CMU',
+  can: 'CAN',
+  msg: '消息',
+  id: 'ID',
+  stat: '状态',
+  status: '状态',
+  valid: '有效',
+  invalid: '无效',
+  inv: '无效',
+  flt: '故障',
+  fault: '故障',
+  fail: '失效',
+  ckt: '电路',
+  circ: '回路',
+  cnctr: '接触器',
+  pwr: '电源',
+  supl: '供电',
+  supply: '供电',
+  volt: '电压',
+  vlt: '电压',
+  crnt: '电流',
+  curr: '电流',
+  temp: '温度',
+  tmpt: '温度',
+  cell: '电芯',
+  pack: '电池包',
+  soc: '荷电状态',
+  soe: '能量状态',
+  chrg: '充电',
+  dschrg: '放电',
+  hv: '高压',
+  lv: '低压',
+  bus: '母线',
+  hi: '高',
+  lo: '低',
+  max: '最大',
+  min: '最小',
+  avg: '平均',
+  num: '编号',
+  cnt: '计数',
+  cntctr: '接触器',
+  ext: '外部',
+  int: '内部',
+  clnt: '冷却液',
+  rcpt: '充电口',
+  station: '站',
+  aux: '辅助',
+  ext: '外部',
+  int: '内部',
+  brnch: '支路',
+  branch: '支路',
+  can1: 'CAN1',
+  can2: 'CAN2',
+  busoff: '总线关闭',
+  timeout: '超时',
+  overtemp: '过温',
+  overvolt: '过压',
+  undervolt: '欠压',
+  opn: '开路',
+  short: '短路',
+  cktopn: '电路开路',
+  cktstg: '电路短接',
+  pcb: '电路板',
+  cmu: 'CMU',
+  bmu: 'BMU',
+  hvil: '高压互锁',
+  dcdc: 'DCDC',
+  kl15: 'KL15',
+  fmc: '飞管计算机',
+  fcc: '飞控计算机',
+  irs: '惯导',
+  rtk: 'RTK',
+  gps: 'GPS',
+  utc: 'UTC',
+  hpl: '水平保护级',
+  vpl: '垂直保护级',
+  hdop: '水平精度因子',
+  vdop: '垂直精度因子',
+  hfom: '水平估计误差',
+  vfom: '垂直估计误差',
+  aoa: '迎角',
+  aos: '侧滑角',
+  ias: '指示空速',
+  cas: '校准空速',
+  tas: '真空速',
+  qnh: 'QNH',
+  qfe: 'QFE',
+  pbit: '上电自检',
+  cbit: '周期自检',
+  sdi: 'SDI',
+  ssm: 'SSM',
+  crc: 'CRC',
+  rwy: '跑道',
+  msg: '消息',
+  pack: '电池包',
+  cell: '电芯',
+  tempdiff: '温差',
+  soc: '荷电状态',
+  soe: '能量状态',
+  rem: '剩余',
+  enrgy: '能量',
+  pwrup: '上电',
+  wakeup: '唤醒',
+  dschrg: '放电',
+  chrg: '充电',
+  cntctr: '接触器',
+  pln: '飞机',
+  loc: '位置',
+  info: '信息',
+  over: '过高',
+  under: '过低',
+}
+const COMPACT_SEGMENT_KEYS = Object.keys(COMPACT_SEGMENT_CN).sort((a, b) => b.length - a.length)
+
+function splitFieldParts(coreName) {
+  if (!coreName) return []
+  const base = String(coreName)
+    .replace(/\./g, '_')
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+  return base.split('_').filter(Boolean)
+}
+
+function translateCompactToken(token) {
+  if (!token || !COMPACT_TOKEN_RE.test(token)) return null
+  const out = []
+  let i = 0
+  let mappedCount = 0
+  while (i < token.length) {
+    let hit = null
+    for (const key of COMPACT_SEGMENT_KEYS) {
+      if (token.startsWith(key, i)) {
+        hit = key
+        break
+      }
+    }
+    if (hit) {
+      out.push(COMPACT_SEGMENT_CN[hit])
+      mappedCount += 1
+      i += hit.length
+      continue
+    }
+    if (/\d/.test(token[i])) {
+      let j = i + 1
+      while (j < token.length && /\d/.test(token[j])) j += 1
+      out.push(token.slice(i, j))
+      i = j
+      continue
+    }
+    return null
+  }
+  if (mappedCount === 0) return null
+  return out.join(' ')
+}
+
+function isLikelyMeaningfulChinese(text) {
+  if (!text) return false
+  const s = String(text).trim()
+  if (!s) return false
+  return /[\u4e00-\u9fa5]/.test(s)
 }
 
 function binarySearchNearest(data, targetTime) {
@@ -136,14 +477,21 @@ function buildChineseHintFromField(fieldName) {
   const core = noLabelPrefix.replace(/\./g, '_').replace(/_enum$/, '')
   if (FIELD_EXACT_CN[core]) return FIELD_EXACT_CN[core]
 
-  const parts = core.split('_').filter(Boolean)
+  const parts = splitFieldParts(core)
   if (parts.length === 0) return '字段含义'
 
   const translated = parts.map((p) => {
     if (/^\d+$/.test(p)) return p
-    return FIELD_TOKEN_CN[p] || p.toUpperCase()
+    const compact = translateCompactToken(p)
+    if (compact) return compact
+    return FIELD_TOKEN_CN[p] || (ASCII_ONLY_RE.test(p) ? p.toUpperCase() : p)
   })
-  return translated.join(' ')
+  const joined = translated.join(' ')
+  // 若拆分后依然全是英文/缩写，给出中文提示，避免“复制字段名”体验
+  if (!/[\u4e00-\u9fa5]/.test(joined)) {
+    return '字段中文释义待补充'
+  }
+  return joined
 }
 
 function ResultPage() {
@@ -163,6 +511,7 @@ function ResultPage() {
   })
   const [selectedDevice, setSelectedDevice] = useState(null)
   const [selectedParser, setSelectedParser] = useState(null)
+  const [labelFilterValue, setLabelFilterValue] = useState(undefined)
 
   const [mainTab, setMainTab] = useState('table')
 
@@ -251,6 +600,58 @@ function ResultPage() {
     })
   }, [results, selectedDevice, selectedParser])
 
+  const labelFilterOptions = useMemo(() => {
+    const hasCanIdCol = allColumnNames.some(c => /^can[_\s-]*id/i.test(c))
+    if (hasCanIdCol) {
+      const idCol = allColumnNames.find(c => c === 'can_id_hex') || allColumnNames.find(c => /^can[_\s-]*id/i.test(c))
+      if (!idCol) return []
+      const unique = [...new Set(portData.map(r => r[idCol]).filter(Boolean).map(String))]
+      unique.sort()
+      return unique.map(v => ({ label: v, value: v }))
+    }
+    const labelNums = new Set()
+    allColumnNames.forEach(c => {
+      const m = c.match(/^label_(\d+)\./i)
+      if (m) labelNums.add(m[1])
+    })
+    if (labelNums.size === 0) return []
+    const sorted = [...labelNums].sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+    return sorted.map(n => ({ label: `Label ${n}`, value: n }))
+  }, [allColumnNames, portData])
+
+  const filteredPortData = useMemo(() => {
+    if (!labelFilterValue) return portData
+    const hasCanIdCol = allColumnNames.some(c => /^can[_\s-]*id/i.test(c))
+    if (!hasCanIdCol) return portData
+    const idCol = allColumnNames.find(c => c === 'can_id_hex') || allColumnNames.find(c => /^can[_\s-]*id/i.test(c))
+    if (!idCol) return portData
+    return portData.filter(row => String(row[idCol] ?? '') === labelFilterValue)
+  }, [portData, labelFilterValue, allColumnNames])
+
+  const displayColumnNames = useMemo(() => {
+    const visibleCols = allColumnNames.filter(c => !hiddenColumns.has(c))
+    if (!labelFilterValue) {
+      const pinned = visibleCols.filter(c => pinnedColumns.has(c))
+      const unpinned = visibleCols.filter(c => !pinnedColumns.has(c))
+      return [...pinned, ...unpinned]
+    }
+    const hasCanIdCol = allColumnNames.some(c => /^can[_\s-]*id/i.test(c))
+    if (hasCanIdCol) {
+      const pinned = visibleCols.filter(c => pinnedColumns.has(c))
+      const unpinned = visibleCols.filter(c => !pinnedColumns.has(c))
+      return [...pinned, ...unpinned]
+    }
+    const keepBase = new Set(['timestamp', 'BeijingDateTime'])
+    const matched = visibleCols.filter(c => {
+      if (keepBase.has(c)) return true
+      const m = c.match(/^label_(\d+)\./i)
+      return m && m[1] === labelFilterValue
+    })
+    const pinned = matched.filter(c => pinnedColumns.has(c))
+    const unpinned = matched.filter(c => !pinnedColumns.has(c))
+    return [...pinned, ...unpinned]
+  }, [allColumnNames, hiddenColumns, pinnedColumns, labelFilterValue])
+
   useEffect(() => {
     if (activeResult) loadPortData()
   }, [activeResult, pagination.current, pagination.pageSize])
@@ -288,11 +689,8 @@ function ResultPage() {
 
   useEffect(() => {
     if (allColumnNames.length === 0) return
-    const visibleCols = allColumnNames.filter(c => !hiddenColumns.has(c))
-    const pinned = visibleCols.filter(c => pinnedColumns.has(c))
-    const unpinned = visibleCols.filter(c => !pinnedColumns.has(c))
-    setPortColumns([...pinned, ...unpinned].map(buildColumnDef))
-  }, [hiddenColumns, pinnedColumns, allColumnNames])
+    setPortColumns(displayColumnNames.map(buildColumnDef))
+  }, [allColumnNames, displayColumnNames])
 
   // ======== Data loading ========
 
@@ -361,10 +759,7 @@ function ResultPage() {
       setPagination(prev => ({ ...prev, total: res.data.total_records }))
       const rawCols = res.data.columns || []
       setAllColumnNames(rawCols)
-      const visibleCols = rawCols.filter(c => !hiddenColumns.has(c))
-      const pinned = visibleCols.filter(c => pinnedColumns.has(c))
-      const unpinned = visibleCols.filter(c => !pinnedColumns.has(c))
-      setPortColumns([...pinned, ...unpinned].map(buildColumnDef))
+      // columns will be recomputed by the displayColumnNames effect
     } catch (err) {
       message.error('加载数据失败')
     } finally {
@@ -393,7 +788,7 @@ function ResultPage() {
       const link = document.createElement('a')
       link.href = url
       const suffix = activeResult.parser_profile_name ? `_${activeResult.parser_profile_name}` : ''
-      link.setAttribute('download', `port_${activeResult.port_number}${suffix}.${format === 'excel' ? 'xlsx' : format}`)
+      link.setAttribute('download', `port_${activeResult.port_number}${suffix}.${format}`)
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -459,13 +854,13 @@ function ResultPage() {
         const url = window.URL.createObjectURL(new Blob([res.data]))
         const link = document.createElement('a')
         link.href = url
-        link.setAttribute('download', `task_${taskId}_batch.xlsx`)
+        link.setAttribute('download', `task_${taskId}_batch.zip`)
         document.body.appendChild(link)
         link.click()
         link.remove()
         window.URL.revokeObjectURL(url)
         hide()
-        message.success(`已导出 ${ports.length} 个端口到 Excel`)
+        message.success(`已导出 ${ports.length} 个端口到 ZIP`)
       }
       setBatchExportOpen(false)
     } catch (err) {
@@ -502,6 +897,11 @@ function ResultPage() {
     if (newFiltered.length > 0) {
       setActiveResult(newFiltered[0])
     }
+  }
+
+  const handleLabelFilter = (value) => {
+    setLabelFilterValue(value)
+    setPagination(prev => ({ ...prev, current: 1 }))
   }
 
   const loadAnomalyDefaults = useCallback(async () => {
@@ -706,10 +1106,15 @@ function ResultPage() {
     const keyRaw = String(fieldName)
     const keyLower = keyRaw.toLowerCase()
     const suffix = keyLower.includes('.') ? keyLower.split('.').slice(1).join('.') : keyLower
-    const desc = activeFieldDescMap[keyRaw] || activeFieldDescMap[keyLower] || activeFieldDescMap[suffix]
-    if (!desc) return `${fieldName}: ${buildChineseHintFromField(fieldName)}`
-    const short = desc.length > 48 ? `${desc.slice(0, 48)}...` : desc
-    return `${fieldName}: ${short}`
+    const rawDesc = activeFieldDescMap[keyRaw] || activeFieldDescMap[keyLower] || activeFieldDescMap[suffix]
+    const desc = rawDesc ? String(rawDesc).trim() : ''
+    const normalizedField = keyLower.replace(/\s+/g, '')
+    const normalizedDesc = desc.toLowerCase().replace(/\s+/g, '')
+    const descLooksLikeFieldName = normalizedDesc === normalizedField || normalizedDesc === suffix
+    if (!desc || descLooksLikeFieldName || !isLikelyMeaningfulChinese(desc)) {
+      return buildChineseHintFromField(fieldName)
+    }
+    return desc.length > 64 ? `${desc.slice(0, 64)}...` : desc
   }
 
   const renderFieldWithTooltip = (fieldName) => (
@@ -2173,8 +2578,21 @@ function ResultPage() {
                         }
               }}
             />
+            {labelFilterOptions.length > 0 && (
+              <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center' }}>
+                <span style={{ color: '#8b949e', marginRight: 8 }}><FilterOutlined /> 当前视图内筛选:</span>
+                <Select
+                  placeholder="按 Label / CAN ID 筛选列/行"
+                  allowClear showSearch
+                  style={{ width: 240 }}
+                  value={labelFilterValue}
+                  onChange={handleLabelFilter}
+                  options={labelFilterOptions}
+                />
+              </div>
+            )}
             <Table
-                      columns={portColumns} dataSource={portData}
+                      columns={portColumns} dataSource={filteredPortData}
                       rowKey={(_, index) => index} loading={dataLoading}
                       scroll={{ x: 'max-content', y: 585 }} size="small"
               pagination={{
@@ -2311,8 +2729,8 @@ function ResultPage() {
         <div style={{ marginBottom: 16 }}>
           <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>导出格式</div>
           <Radio.Group value={batchExportFormat} onChange={e => setBatchExportFormat(e.target.value)}>
-            <Radio.Button value="csv">CSV（多个文件）</Radio.Button>
-            <Radio.Button value="excel">Excel（多 Sheet）</Radio.Button>
+            <Radio.Button value="csv">CSV（逐个下载）</Radio.Button>
+            <Radio.Button value="zip">ZIP（打包下载）</Radio.Button>
           </Radio.Group>
         </div>
         <div style={{ marginBottom: 16 }}>

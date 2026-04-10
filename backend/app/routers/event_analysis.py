@@ -21,6 +21,11 @@ from ..models import ParseTask
 from ..services import EventAnalysisService
 from ..services import shared_tsn_service as shared_tsn_svc
 from ..config import UPLOAD_DIR, MAX_UPLOAD_SIZE, ALLOWED_EXTENSIONS
+from ..background_jobs import (
+    run_event_analysis_task_job,
+    run_standalone_event_analysis_task_job,
+)
+from ..task_executor import submit_process_job
 
 
 router = APIRouter(
@@ -235,41 +240,6 @@ def _build_event_analysis_excel(results, timeline, overview_rows: List[tuple]) -
     return buf.read()
 
 
-# ========== 后台任务 ==========
-
-async def run_analysis_task(parse_task_id: int, rule_template: str):
-    """后台运行分析任务"""
-    import traceback
-    print(f"[事件分析] 开始执行任务 parse_task_id={parse_task_id}")
-    
-    try:
-        from ..database import async_session
-        
-        async with async_session() as db:
-            service = EventAnalysisService(db)
-            result = await service.run_analysis(parse_task_id, rule_template)
-            print(f"[事件分析] 任务完成，结果: {result}")
-    except Exception as e:
-        print(f"[事件分析] 任务失败: {e}")
-        traceback.print_exc()
-
-
-async def run_standalone_analysis_task(analysis_task_id: int):
-    """后台运行独立 pcap 事件分析"""
-    import traceback
-    print(f"[事件分析] 开始独立任务 analysis_task_id={analysis_task_id}")
-    try:
-        from ..database import async_session
-
-        async with async_session() as db:
-            service = EventAnalysisService(db)
-            result = await service.run_standalone_analysis(analysis_task_id)
-            print(f"[事件分析] 独立任务完成，结果: {result}")
-    except Exception as e:
-        print(f"[事件分析] 独立任务失败: {e}")
-        traceback.print_exc()
-
-
 # ========== 路由接口 ==========
 
 @router.post("/tasks/{parse_task_id}/run")
@@ -302,7 +272,9 @@ async def run_event_analysis(
         }
     
     # 在后台执行分析
-    background_tasks.add_task(run_analysis_task, parse_task_id, rule_template)
+    background_tasks.add_task(
+        submit_process_job, run_event_analysis_task_job, parse_task_id, rule_template
+    )
     
     return {
         "success": True,
@@ -377,7 +349,9 @@ async def upload_standalone_pcap(
         file_path=str(dest.resolve()),
         rule_template=rule_template,
     )
-    background_tasks.add_task(run_standalone_analysis_task, task.id)
+    background_tasks.add_task(
+        submit_process_job, run_standalone_event_analysis_task_job, task.id
+    )
 
     return {
         "success": True,
@@ -417,7 +391,9 @@ async def standalone_from_shared_pcap(
         file_path=str(dest.resolve()),
         rule_template=rule_template,
     )
-    background_tasks.add_task(run_standalone_analysis_task, task.id)
+    background_tasks.add_task(
+        submit_process_job, run_standalone_event_analysis_task_job, task.id
+    )
     return {
         "success": True,
         "task_id": task.id,

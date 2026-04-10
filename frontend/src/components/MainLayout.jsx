@@ -23,22 +23,7 @@ function MainLayout() {
   const { user, logout, isAdmin } = useAuth()
 
   const menuItems = useMemo(() => {
-    const sysChildren = [
-      { key: '/network-config', icon: <ApiOutlined />, label: '网络配置' },
-    ]
-    if (isAdmin) {
-      sysChildren.push({
-        key: '/admin/platform-data',
-        icon: <CloudUploadOutlined />,
-        label: '平台共享数据',
-      })
-      sysChildren.push({
-        key: '/admin/users',
-        icon: <TeamOutlined />,
-        label: '用户管理',
-      })
-    }
-    return [
+    const items = [
       {
         type: 'group',
         label: '网络数据分析',
@@ -61,13 +46,20 @@ function MainLayout() {
           { key: '/compare', icon: <SwapOutlined />, label: '异常检查' },
         ],
       },
-      { type: 'divider' },
-      {
+    ]
+    if (isAdmin) {
+      items.push({ type: 'divider' })
+      items.push({
         type: 'group',
         label: '系统配置',
-        children: sysChildren,
-      },
-    ]
+        children: [
+          { key: '/network-config', icon: <ApiOutlined />, label: '网络配置' },
+          { key: '/admin/platform-data', icon: <CloudUploadOutlined />, label: '平台共享数据' },
+          { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
+        ],
+      })
+    }
+    return items
   }, [isAdmin])
 
   const handleMenuClick = ({ key }) => {

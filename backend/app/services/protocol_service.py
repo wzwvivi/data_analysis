@@ -40,18 +40,26 @@ PORT_FAMILY_MAP: Dict[int, str] = {
     # ── ADC 大气数据系统 (adc) ──
     7001: "adc", 7002: "adc", 7003: "adc",
     7022: "adc", 7023: "adc", 7024: "adc", 7025: "adc", 7026: "adc", 7027: "adc",
+    # 下行（FMS → ADC/ADRU 指令）
+    8003: "adc", 8004: "adc", 8005: "adc", 8006: "adc", 8007: "adc", 8008: "adc",
 
     # ── 无线电高度表 (ra) ──
     7007: "ra", 7008: "ra", 7009: "ra", 7010: "ra", 7011: "ra", 7012: "ra",
 
     # ── 前轮转弯系统 (turn) ──
     7019: "turn", 7020: "turn",
+    # 下行（FCC → 转弯控制器）
+    8017: "turn", 8018: "turn", 8019: "turn",
 
     # ── 机轮刹车系统 (brake) ──
     7087: "brake", 7088: "brake", 7089: "brake", 7090: "brake",
+    # 下行（FCC → 正常刹车&备份刹车）
+    8032: "brake", 8033: "brake", 8034: "brake",
 
     # ── 电起落架收放控制单元 (lgcu) ──
     7077: "lgcu", 7078: "lgcu", 7079: "lgcu", 7080: "lgcu",
+    # 下行（FCC → 收放控制器）
+    8021: "lgcu", 8022: "lgcu", 8023: "lgcu", 8024: "lgcu",
 
     # ── IRS 惯导 (irs) ──
     7004: "irs", 7005: "irs", 7006: "irs",

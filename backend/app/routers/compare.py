@@ -16,6 +16,8 @@ from ..deps import get_current_user
 from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS
 from ..services import CompareService
 from ..services import shared_tsn_service as shared_tsn_svc
+from ..background_jobs import run_compare_task_job
+from ..task_executor import submit_process_job
 
 router = APIRouter(
     prefix="/api/compare",
@@ -246,29 +248,12 @@ async def upload_and_compare(
         protocol_version_id=protocol_version_id,
         jitter_threshold_pct=jitter_threshold_pct,
     )
-    background_tasks.add_task(run_compare_task, task.id)
+    background_tasks.add_task(submit_process_job, run_compare_task_job, task.id)
     return {
         "success": True,
         "task_id": task.id,
         "message": "比对任务已创建",
     }
-
-
-async def run_compare_task(task_id: int):
-    """后台运行比对任务"""
-    import traceback
-    print(f"[比对任务] 开始执行任务 {task_id}")
-    
-    try:
-        from ..database import async_session
-        
-        async with async_session() as db:
-            service = CompareService(db)
-            result = await service.run_compare(task_id)
-            print(f"[比对任务] 任务 {task_id} 完成，结果: {result}")
-    except Exception as e:
-        print(f"[比对任务] 任务 {task_id} 失败: {e}")
-        traceback.print_exc()
 
 
 @router.get("/tasks", response_model=CompareTaskListResponse)

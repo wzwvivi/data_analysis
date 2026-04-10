@@ -40,8 +40,7 @@ docker compose up --build -d
 
 数据目录（宿主机）：
 
-- `backend-data/`（数据库、解析结果、导出）
-- `backend-uploads/`（上传文件、协议文件）
+- `backend-runtime/`（统一承载数据库、解析结果、导出、上传文件、协议文件）
 
 容器停止后，以上目录数据仍可在宿主机直接访问。
 
@@ -158,5 +157,5 @@ tsn-log-analyzer/
 1. 解析大文件可能需要较长时间，请耐心等待
 2. 建议使用Chrome或Edge浏览器
 3. 导出大量数据时建议使用Parquet格式
-4. 迁移到新服务器时，必须同时迁移 `backend-data/tsn_analyzer.db` 与 `backend-data/results/`，否则会出现“任务列表有记录但详情无结果”。
+4. 迁移到新服务器时，必须迁移 `backend-runtime/data/tsn_analyzer.db` 与 `backend-runtime/data/results/`，否则会出现“任务列表有记录但详情无结果”。
 5. 详细迁移步骤见 `DEPLOY_MIGRATION.md`。

@@ -21,6 +21,12 @@ backend/uploads/*/
 # Docker bind mounts: large exports / raw uploads (do not commit)
 backend-data/exports/
 backend-uploads/
+backend-runtime/data/exports/
+backend-runtime/data/results/
+backend-runtime/uploads/
+backend-runtime/data/*.db-journal
+backend-runtime/data/*.db-wal
+backend-runtime/data/*.db-shm
 
 # Local scratch / accidental copies
 backend/debug_task57.py

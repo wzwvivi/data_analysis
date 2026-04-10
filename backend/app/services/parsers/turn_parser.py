@@ -48,6 +48,7 @@ _TOW_STATE_TEXT = {
 }
 
 _LABEL_DEFS: Dict[int, Dict[str, Any]] = {
+    # ── 上行 (SCU → RDIU) ──
     0o111: {"col": "nw_angle", "enc": "bnr", "lsb_bit": 17, "msb_bit": 28, "lsb_val": 0.014653, "signed": True},
     0o112: {"col": "left_handwheel", "enc": "bnr", "lsb_bit": 17, "msb_bit": 28, "lsb_val": 0.021978, "signed": True},
     0o113: {"col": "right_handwheel", "enc": "bnr", "lsb_bit": 17, "msb_bit": 28, "lsb_val": 0.021978, "signed": True},
@@ -56,11 +57,24 @@ _LABEL_DEFS: Dict[int, Dict[str, Any]] = {
     0o212: {"col": "pedal_cmd_echo", "enc": "bnr", "lsb_bit": 17, "msb_bit": 28, "lsb_val": 0.014653, "signed": True},
     0o244: {"col": "status", "enc": "discrete_244"},
     0o314: {"col": "fault_word", "enc": "discrete_314"},
+    # ── 下行 (FCM → SCU) ──
+    0o115: {"col": "nw_steer_cmd", "enc": "bnr", "lsb_bit": 17, "msb_bit": 28, "lsb_val": 0.014653, "signed": True},
+    0o116: {"col": "nw_steer_cmd", "enc": "bnr", "lsb_bit": 17, "msb_bit": 28, "lsb_val": 0.014653, "signed": True},
+    0o117: {"col": "nw_steer_cmd", "enc": "bnr", "lsb_bit": 17, "msb_bit": 28, "lsb_val": 0.014653, "signed": True},
+    0o354: {"col": "fcm_control", "enc": "discrete_354"},
+    0o355: {"col": "fcm_control", "enc": "discrete_354"},
+    0o356: {"col": "fcm_control", "enc": "discrete_354"},
+    0o374: {"col": "ground_speed", "enc": "bnr", "lsb_bit": 15, "msb_bit": 28, "lsb_val": 0.125, "signed": False},
+    0o375: {"col": "ground_speed", "enc": "bnr", "lsb_bit": 15, "msb_bit": 28, "lsb_val": 0.125, "signed": False},
+    0o376: {"col": "ground_speed", "enc": "bnr", "lsb_bit": 15, "msb_bit": 28, "lsb_val": 0.125, "signed": False},
 }
 
 _PORT_LABELS: Dict[int, List[int]] = {
     7019: [0o111, 0o112, 0o113, 0o114, 0o154, 0o212, 0o244, 0o314],
     7020: [0o111, 0o112, 0o113, 0o114, 0o154, 0o212, 0o244, 0o314],
+    8017: [0o115, 0o354, 0o374],
+    8018: [0o116, 0o355, 0o375],
+    8019: [0o117, 0o356, 0o376],
 }
 
 _FIELD_NAME_TO_LABEL = build_field_name_to_label(_LABEL_DEFS)
@@ -74,7 +88,8 @@ def _columns_for_label(label: int) -> List[str]:
     pfx = label_prefix(label)
     cols: List[str] = []
 
-    if label in (0o111, 0o112, 0o113, 0o114, 0o212):
+    if label in (0o111, 0o112, 0o113, 0o114, 0o212,
+                  0o115, 0o116, 0o117, 0o374, 0o375, 0o376):
         cols.append(f"{pfx}.{_LABEL_DEFS[label]['col']}")
     elif label == 0o154:
         cols.extend([
@@ -101,6 +116,12 @@ def _columns_for_label(label: int) -> List[str]:
             f"{pfx}.nw_work_fault", f"{pfx}.nw_work_fault_enum",
             f"{pfx}.tow_overtravel", f"{pfx}.tow_overtravel_enum",
         ])
+    elif label in (0o354, 0o355, 0o356):
+        cols.extend([
+            f"{pfx}.fcm_control", f"{pfx}.fcm_control_enum",
+            f"{pfx}.zero_cmd", f"{pfx}.zero_cmd_enum",
+            f"{pfx}.steer_disc", f"{pfx}.steer_disc_enum",
+        ])
 
     cols.extend([f"{pfx}.sdi", f"{pfx}.ssm", f"{pfx}.ssm_enum", f"{pfx}.parity"])
     return cols
@@ -120,7 +141,7 @@ _OUTPUT_COLUMNS = _build_output_columns()
 class TurnParser(Arinc429Mixin, BaseParser):
     parser_key = "turn_v2"
     name = "前轮转弯系统"
-    supported_ports = [7019, 7020]
+    supported_ports = [7019, 7020, 8017, 8018, 8019]
 
     _LABEL_DEFS = _LABEL_DEFS
     _FIELD_NAME_TO_LABEL = _FIELD_NAME_TO_LABEL
@@ -170,6 +191,17 @@ class TurnParser(Arinc429Mixin, BaseParser):
                 signed=defn.get("signed", True),
             )
             record[f"{pfx}.{defn['col']}"] = round(value, 8)
+
+        elif defn["enc"] == "discrete_354":
+            b14 = ARINC429Decoder.extract_data_bits(word, 14, 14)
+            b15 = ARINC429Decoder.extract_data_bits(word, 15, 15)
+            raw = (b15 << 1) | b14
+            record[f"{pfx}.fcm_control"] = raw
+            record[f"{pfx}.fcm_control_enum"] = f"调零={b14},转弯断开={b15}"
+            record[f"{pfx}.zero_cmd"] = b14
+            record[f"{pfx}.zero_cmd_enum"] = _yn(b14, "调零", "无效")
+            record[f"{pfx}.steer_disc"] = b15
+            record[f"{pfx}.steer_disc_enum"] = _yn(b15, "转弯断开", "无效")
 
         elif defn["enc"] == "discrete_154":
             b13 = ARINC429Decoder.extract_data_bits(word, 13, 13)

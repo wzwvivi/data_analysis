@@ -389,7 +389,7 @@ async def init_parser_profiles(db: AsyncSession):
     )
     adc_exists = result.scalar_one_or_none()
 
-    _ADC_PORTS = "7001,7002,7003,7022,7023,7024,7025,7026,7027"
+    _ADC_PORTS = "7001,7002,7003,7022,7023,7024,7025,7026,7027,8003,8004,8005,8006,8007,8008"
     if not adc_exists:
         profiles_to_create.append(
             ParserProfile(

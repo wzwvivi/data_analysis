@@ -11,5 +11,5 @@ RUN mkdir -p /app/data /app/uploads/pcap /app/uploads/protocols /app/data/result
 
 EXPOSE 8081
 
-# SQLite 不宜多进程并发写；单 worker 也避免启动时多进程竞态执行 init_users
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "1"]
+# 4 核默认：API workers=2；重任务通过独立进程池执行（TASK_PROCESS_WORKERS 默认 2）
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "2"]

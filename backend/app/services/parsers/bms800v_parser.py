@@ -1,13 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-800V 动力电池 BMS CAN 解析器 (V2.5.1)
+800V 动力电池 BMS CAN 解析器 (V2.6)
 
 TSN 包结构:
   Byte 0-3 : 协议填充 (4B)
   Byte 4-7 : 功能状态集 (4B)
   Byte 8+  : CAN_FRAME 序列, 每帧 16B, 每 4 帧后插入 4B 功能状态集
 
-CAN_FRAME (16B) = 4B CAN-ID (big-endian) + 4B DLC/状态 + 8B 数据
+CAN_FRAME (16B):
+  Byte 0-3 : CAN 仲裁域 (wire format, big-endian)
+              Extended frame: BaseID(11)|SRR(1)|IDE(1)|ExtID(18)|RTR(1)
+  Byte 4-7 : DLC / 状态
+  Byte 8-15: 8B CAN 数据
+
+TSN 存储的 4 字节是 CAN 总线线上格式 (wire format), 不是标准 29-bit CAN-ID.
+需要通过 decode_can_wire_id() 转换后才能与 ICD 定义的 CAN-ID 比较.
 
 信号: Motorola byte-order, Unsigned, 物理值 = raw * factor + offset
 输出: 通用列名 + pack_id 区分电池包
@@ -91,8 +98,35 @@ _GROUP_FRAMES = 4
 _GROUP_DATA_LEN = _STATUS_LEN + _FRAME_LEN * _GROUP_FRAMES  # 68
 
 
+def decode_can_wire_id(wire_32: int) -> int:
+    """Decode TSN CAN wire-format 32-bit value to standard 29-bit CAN-ID.
+
+    TSN stores the CAN extended frame arbitration field in bus wire order:
+      Bit[31:21] = Base ID  (ID[28:18], 11 bits)
+      Bit[20]    = SRR
+      Bit[19]    = IDE
+      Bit[18:1]  = Extended ID (ID[17:0], 18 bits)
+      Bit[0]     = RTR
+    """
+    base_id = (wire_32 >> 21) & 0x7FF
+    ext_id = (wire_32 >> 1) & 0x3FFFF
+    return (base_id << 18) | ext_id
+
+
+def encode_can_wire_id(can_id_29: int, rtr: int = 0) -> int:
+    """Encode standard 29-bit CAN-ID to TSN wire-format 32-bit value."""
+    base_id = (can_id_29 >> 18) & 0x7FF
+    ext_id = can_id_29 & 0x3FFFF
+    return (base_id << 21) | (1 << 20) | (1 << 19) | (ext_id << 1) | rtr
+
+
 def _can_frame_valid(payload: bytes, byte_offset: int, expected_cid: int) -> bool:
-    """Check status-set validity and CAN-ID match for a frame at byte_offset."""
+    """Check status-set validity and CAN-ID match for a frame at byte_offset.
+
+    The expected_cid is the standard 29-bit CAN-ID from the ICD.
+    The actual 4 bytes in the payload are in CAN wire format and must be
+    decoded before comparison.
+    """
     frame_idx_in_payload = byte_offset - _PROTOCOL_PAD_LEN - _STATUS_LEN
     if frame_idx_in_payload < 0:
         return True
@@ -105,8 +139,11 @@ def _can_frame_valid(payload: bytes, byte_offset: int, expected_cid: int) -> boo
         return True
     if payload[status_offset + slot_in_group] != _VALID_STATUS:
         return False
-    actual_cid = struct.unpack_from(">I", payload, byte_offset)[0]
-    if actual_cid != expected_cid and actual_cid != 0:
+    wire_val = struct.unpack_from(">I", payload, byte_offset)[0]
+    if wire_val == 0:
+        return False
+    actual_cid = decode_can_wire_id(wire_val)
+    if actual_cid != expected_cid:
         return False
     return True
 

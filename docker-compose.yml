@@ -4,11 +4,14 @@ services:
   backend:
     build: ./backend
     container_name: tsn-backend
+    environment:
+      - SERVER_CPU_CORES=4
+      - TASK_PROCESS_WORKERS=2
+      - APP_BASE_DIR=/app_runtime
     ports:
       - "8081:8081"
     volumes:
-      - ./backend-data:/app/data
-      - ./backend-uploads:/app/uploads
+      - ./backend-runtime:/app_runtime
     restart: unless-stopped
 
   frontend:

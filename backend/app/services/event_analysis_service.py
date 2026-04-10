@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import pandas as pd
+import pyarrow.dataset as ds
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -167,43 +168,52 @@ class EventAnalysisService:
             return False
     
     async def _load_parsed_data(self, parse_task_id: int) -> Dict[int, pd.DataFrame]:
-        """加载解析结果数据
-        
+        """加载解析结果数据（流式读取，降低峰值内存）
+
+        使用 pyarrow.dataset 按批读取 Parquet 再转 pandas，
+        避免 pd.read_parquet 内部同时持有 Arrow Table + DataFrame 的双倍内存。
+
         支持两种文件命名格式:
         - port_{port}.parquet (单解析器)
         - port_{port}_parser_{id}.parquet (多解析器)
-        
+
         对于多解析器情况，相同端口的数据会被合并
         """
         import re
         result_dir = DATA_DIR / "results" / str(parse_task_id)
-        
+
         if not result_dir.exists():
             return {}
-        
-        parsed_data = {}
-        
-        # 匹配两种格式: port_123.parquet 或 port_123_parser_456.parquet
+
+        parsed_data: Dict[int, pd.DataFrame] = {}
         pattern = re.compile(r"port_(\d+)(?:_parser_\d+)?\.parquet")
-        
+
         for parquet_file in result_dir.glob("port_*.parquet"):
             try:
                 match = pattern.match(parquet_file.name)
-                if match:
-                    port = int(match.group(1))
-                    df = pd.read_parquet(parquet_file)
-                    
-                    if port in parsed_data:
-                        # 多解析器同端口数据合并
-                        parsed_data[port] = pd.concat(
-                            [parsed_data[port], df],
-                            ignore_index=True
-                        ).sort_values('timestamp').reset_index(drop=True)
-                    else:
-                        parsed_data[port] = df
+                if not match:
+                    continue
+                port = int(match.group(1))
+
+                dataset = ds.dataset(str(parquet_file), format="parquet")
+                chunks: list[pd.DataFrame] = []
+                for batch in dataset.to_batches(batch_size=65536):
+                    if batch.num_rows > 0:
+                        chunks.append(batch.to_pandas())
+                if not chunks:
+                    continue
+                df = pd.concat(chunks, ignore_index=True) if len(chunks) > 1 else chunks[0]
+
+                if port in parsed_data:
+                    parsed_data[port] = pd.concat(
+                        [parsed_data[port], df],
+                        ignore_index=True
+                    ).sort_values('timestamp').reset_index(drop=True)
+                else:
+                    parsed_data[port] = df
             except Exception as e:
                 print(f"[EventAnalysis] 加载 {parquet_file} 失败: {e}")
-        
+
         return parsed_data
     
     async def _clear_old_results(self, analysis_task_id: int):

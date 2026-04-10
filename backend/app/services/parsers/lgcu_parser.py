@@ -35,6 +35,7 @@ _SDI_UNIT_TEXT = {
 }
 
 _LABEL_DEFS: Dict[int, Dict[str, Any]] = {
+    # ── 上行 (LGCU → 飞管) ──
     0o103: {"col": "lg_prox_lgcu1_mon", "enc": "discrete_103"},
     0o115: {"col": "lg_prox_lgcu2_mon", "enc": "discrete_115"},
     0o271: {"col": "lg_position_sensors", "enc": "discrete_271"},
@@ -50,6 +51,11 @@ _LABEL_DEFS: Dict[int, Dict[str, Any]] = {
     0o361: {"col": "maint_word9", "enc": "discrete_361"},
     0o364: {"col": "maint_word12", "enc": "discrete_364"},
     0o367: {"col": "maint_word13", "enc": "discrete_367"},
+    # ── 下行 (FCC → LGCU) ──
+    0o305: {"col": "fcc_lg_cmd", "enc": "discrete_305"},
+    0o306: {"col": "fcc_lg_cmd", "enc": "discrete_305"},
+    0o307: {"col": "fcc_lg_cmd", "enc": "discrete_305"},
+    0o310: {"col": "fcc_lg_cmd", "enc": "discrete_305"},
 }
 
 _ALL_LABELS = sorted(_LABEL_DEFS.keys())
@@ -175,9 +181,20 @@ _DISCRETE_FIELDS: Dict[int, List[str]] = {
         "spare_20", "spare_21", "spare_22", "spare_23",
         "rh_mlg_uplock_28v", "lh_mlg_uplock_28v", "nlg_uplock_28v",
     ],
+    0o305: [
+        "lg_retract_cmd", "lg_extend_cmd",
+        "auto_retract_cmd", "auto_extend_cmd",
+        "spare_15", "spare_16", "spare_17", "spare_18",
+        "spare_19", "spare_20", "spare_21", "spare_22",
+        "spare_23", "spare_24", "spare_25", "spare_26",
+        "spare_27", "spare_28", "spare_29",
+    ],
 }
 
 _DISCRETE_START_BIT: Dict[int, int] = {k: 11 for k in _LABEL_DEFS}
+_DISCRETE_FIELDS[0o306] = _DISCRETE_FIELDS[0o305]
+_DISCRETE_FIELDS[0o307] = _DISCRETE_FIELDS[0o305]
+_DISCRETE_FIELDS[0o310] = _DISCRETE_FIELDS[0o305]
 
 
 def _columns_for_label(label: int) -> List[str]:
@@ -204,17 +221,20 @@ _OUTPUT_COLUMNS = _build_output_columns()
 class LGCUParser(Arinc429Mixin, BaseParser):
     parser_key = "lgcu_v4.0"
     name = "电起落架收放控制单元"
-    supported_ports: List[int] = [7077, 7078, 7079, 7080]
+    supported_ports: List[int] = [7077, 7078, 7079, 7080, 8021, 8022, 8023, 8024]
 
     _LABEL_DEFS = _LABEL_DEFS
     _FIELD_NAME_TO_LABEL = _FIELD_NAME_TO_LABEL
     _OUTPUT_COLUMNS = _OUTPUT_COLUMNS
     _PORT_LABELS = {
-        # 按 ICD：7077/7079 为收放状态与维护字；7078 为 L103；7080 为 L115
         7077: [0o271, 0o273, 0o274, 0o275, 0o276, 0o350, 0o351, 0o354, 0o355, 0o360, 0o361, 0o364, 0o367],
         7078: [0o103],
         7079: [0o271, 0o273, 0o274, 0o275, 0o276, 0o350, 0o351, 0o354, 0o355, 0o360, 0o361, 0o364, 0o367],
         7080: [0o115],
+        8021: [0o305],
+        8022: [0o306],
+        8023: [0o307],
+        8024: [0o310],
     }
 
     OUTPUT_COLUMNS = _OUTPUT_COLUMNS

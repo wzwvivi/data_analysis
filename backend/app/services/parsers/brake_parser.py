@@ -42,9 +42,6 @@ _FCC_MASTER_TEXT = {
 _LABEL_DEFS: Dict[int, Dict[str, Any]] = {
     # 轮速 (km/h, 0-510, res=2)
     0o004: {"col": "left_inside_wheel_speed", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "左内主轮速"},
-    0o005: {"col": "left_outside_wheel_speed", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "左外主轮速"},
-    0o006: {"col": "right_inside_wheel_speed", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "右内主轮速"},
-    0o007: {"col": "right_outside_wheel_speed", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "右外主轮速"},
     0o002: {"col": "left_avg_wheel_speed", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "左起落架平均轮速"},
     0o003: {"col": "right_avg_wheel_speed", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "右起落架平均轮速"},
     # 胎压 (psi, 0-655.35, res=0.01)
@@ -78,6 +75,28 @@ _LABEL_DEFS: Dict[int, Dict[str, Any]] = {
     0o051: {"col": "cas2", "enc": "discrete_051"},
     0o352: {"col": "antiskid_brk_mode", "enc": "discrete_352"},
     0o353: {"col": "autoflight_echo", "enc": "discrete_353"},
+    # ── 下行 (FCC → 刹车) ──
+    # L312/313/314: 基准轮速 (km/h, 0-510, res=2)
+    0o312: {"col": "ref_wheel_speed", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "基准轮速"},
+    0o313: {"col": "ref_wheel_speed", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "基准轮速"},
+    0o314: {"col": "ref_wheel_speed", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "基准轮速"},
+    # L362/363/364: 减速度 (m/s/s, -327.68~327.67, res=0.01)
+    0o362: {"col": "deceleration", "enc": "bnr", "lsb_bit": 11, "msb_bit": 25, "lsb_val": 0.01, "signed": True, "unit": "m/s/s", "cn": "减速度"},
+    0o363: {"col": "deceleration", "enc": "bnr", "lsb_bit": 11, "msb_bit": 25, "lsb_val": 0.01, "signed": True, "unit": "m/s/s", "cn": "减速度"},
+    0o364: {"col": "deceleration", "enc": "bnr", "lsb_bit": 11, "msb_bit": 25, "lsb_val": 0.01, "signed": True, "unit": "m/s/s", "cn": "减速度"},
+    # L001/002/003: 自动飞行刹车离散指令 (FCC → BCMU, 离散量)
+    0o001: {"col": "autoflight_brake_cmd", "enc": "discrete_001"},
+    # L005/006/007 在上行与下行复用同一 Label：
+    # - 上行(7087/7088/7089/7090)：轮速
+    # - 下行(8032/8033/8034)：刹车量指令
+    # 通过 downlink_col 做端口级语义区分，避免同键覆盖。
+    0o005: {"col": "left_outside_wheel_speed", "downlink_col": "brake_cmd_pct", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "左外主轮速/刹车量指令"},
+    0o006: {"col": "right_inside_wheel_speed", "downlink_col": "brake_cmd_pct", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "右内主轮速/刹车量指令"},
+    0o007: {"col": "right_outside_wheel_speed", "downlink_col": "brake_cmd_pct", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 2.0, "signed": False, "unit": "km/h", "cn": "右外主轮速/刹车量指令"},
+    # L011/012/013: 刹车量指令2 (%, BNR, 0-100%, res=1)
+    0o011: {"col": "brake_cmd2_pct", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 1.0, "signed": False, "unit": "%", "cn": "刹车量指令2"},
+    0o012: {"col": "brake_cmd2_pct", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 1.0, "signed": False, "unit": "%", "cn": "刹车量指令2"},
+    0o013: {"col": "brake_cmd2_pct", "enc": "bnr", "lsb_bit": 11, "msb_bit": 18, "lsb_val": 1.0, "signed": False, "unit": "%", "cn": "刹车量指令2"},
 }
 
 _ALL_LABELS = sorted(_LABEL_DEFS.keys())
@@ -97,6 +116,10 @@ def _columns_for_label(label: int) -> List[str]:
     enc = defn["enc"]
     if enc == "bnr":
         cols.append(f"{pfx}.{defn['col']}")
+        # 对于上下行复用 Label，额外补充下行字段列。
+        dl_col = defn.get("downlink_col")
+        if dl_col:
+            cols.append(f"{pfx}.{dl_col}")
     elif enc == "discrete_351":
         for field in [
             "park_brk_fail", "park_brk_on", "park_brk_apply",
@@ -139,6 +162,12 @@ def _columns_for_label(label: int) -> List[str]:
             "left_throttle_cmd", "right_throttle_cmd",
         ]:
             cols.append(f"{pfx}.{field}")
+    elif enc == "discrete_001":
+        for field in [
+            "autoflight_autobrake_hi", "autoflight_autobrake_rto",
+            "left_brake_cmd", "right_brake_cmd",
+        ]:
+            cols.append(f"{pfx}.{field}")
 
     cols.extend([f"{pfx}.sdi", f"{pfx}.ssm", f"{pfx}.ssm_enum", f"{pfx}.parity"])
     return cols
@@ -158,17 +187,32 @@ _OUTPUT_COLUMNS = _build_output_columns()
 class BrakeParser(Arinc429Mixin, BaseParser):
     parser_key = "brake_v7.3"
     name = "机轮刹车系统"
-    supported_ports: List[int] = [7087, 7088, 7089, 7090]
+    supported_ports: List[int] = [7087, 7088, 7089, 7090, 8032, 8033, 8034]
 
     _LABEL_DEFS = _LABEL_DEFS
     _FIELD_NAME_TO_LABEL = _FIELD_NAME_TO_LABEL
     _OUTPUT_COLUMNS = _OUTPUT_COLUMNS
-    _PORT_LABELS = None
+    _PORT_LABELS = {
+        8032: [0o312, 0o362, 0o001, 0o005, 0o011],
+        8033: [0o313, 0o363, 0o001, 0o002, 0o006, 0o012],
+        8034: [0o314, 0o364, 0o001, 0o003, 0o007, 0o013],
+    }
 
     OUTPUT_COLUMNS = _OUTPUT_COLUMNS
 
     def __init__(self):
         self._mixin_init()
+        self._current_port: Optional[int] = None
+
+    def parse_packet(
+        self,
+        payload: bytes,
+        port: int,
+        timestamp: float,
+        field_layout: Optional[List[FieldLayout]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        self._current_port = port
+        return super().parse_packet(payload, port, timestamp, field_layout)
 
     def can_parse_port(self, port: int) -> bool:
         return port in self.supported_ports if self.supported_ports else False
@@ -209,7 +253,19 @@ class BrakeParser(Arinc429Mixin, BaseParser):
                 lsb_value=defn["lsb_val"],
                 signed=defn.get("signed", False),
             )
-            record[f"{pfx}.{defn['col']}"] = round(value, 8)
+            target_col = defn["col"]
+            # L005/006/007 在下行端口使用指令语义字段名。
+            if self._current_port in {8032, 8033, 8034} and defn.get("downlink_col"):
+                target_col = defn["downlink_col"]
+                # 下行定义按百分比解析，分辨率 1.0（与 ICD 刹车量指令一致）。
+                value = self.decoder.decode_bnr_with_lsb(
+                    word,
+                    msb_bit=defn["msb_bit"],
+                    lsb_bit=defn["lsb_bit"],
+                    lsb_value=1.0,
+                    signed=False,
+                )
+            record[f"{pfx}.{target_col}"] = round(value, 8)
 
         elif enc == "discrete_351":
             self._decode_cas1(word, pfx, record)
@@ -222,6 +278,17 @@ class BrakeParser(Arinc429Mixin, BaseParser):
 
         elif enc == "discrete_353":
             self._decode_autoflight_echo(word, pfx, record)
+
+        elif enc == "discrete_001":
+            self._decode_autoflight_brake_cmd(word, pfx, record)
+
+    @staticmethod
+    def _decode_autoflight_brake_cmd(word: int, pfx: str, record: Dict[str, Any]):
+        eb = ARINC429Decoder.extract_data_bits
+        record[f"{pfx}.autoflight_autobrake_hi"] = eb(word, 17, 17)
+        record[f"{pfx}.autoflight_autobrake_rto"] = eb(word, 18, 18)
+        record[f"{pfx}.left_brake_cmd"] = eb(word, 19, 19)
+        record[f"{pfx}.right_brake_cmd"] = eb(word, 20, 20)
 
     @staticmethod
     def _decode_cas1(word: int, pfx: str, record: Dict[str, Any]):

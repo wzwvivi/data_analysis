@@ -37,6 +37,8 @@ def build_field_name_to_label(label_defs: Dict[int, dict]) -> Dict[str, int]:
     """
     从 _LABEL_DEFS 自动生成 FIELD_NAME_TO_LABEL 映射。
     兼容 L306 / 306 / Label306 / label_306 四种格式。
+    同时为每个 Label 生成 N 后缀映射（如 L306N），
+    用于匹配 ICD 中的冗余/反相字段名。
     """
     mapping: Dict[str, int] = {}
     for oct_val in label_defs:
@@ -45,6 +47,8 @@ def build_field_name_to_label(label_defs: Dict[int, dict]) -> Dict[str, int]:
         mapping[num_str] = oct_val
         mapping[f"Label{num_str}"] = oct_val
         mapping[f"label_{num_str}"] = oct_val
+        mapping[f"L{num_str}N"] = oct_val
+        mapping[f"{num_str}N"] = oct_val
     return mapping
 
 

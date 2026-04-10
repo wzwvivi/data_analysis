@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 """解析任务路由"""
-import os
 import json
 import math
 import shutil
-import asyncio
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query
@@ -17,6 +15,8 @@ from ..deps import get_current_user
 from ..services import ParserService
 from ..services import shared_tsn_service as shared_tsn_svc
 from ..services.port_anomaly_service import PortAnomalyService, STUCK_CONSECUTIVE_FRAMES
+from ..background_jobs import run_parse_task_job
+from ..task_executor import submit_process_job
 from ..schemas import (
     ParseTaskResponse, ParseTaskListResponse,
     ParseResultResponse, ParsedDataResponse
@@ -259,7 +259,7 @@ async def upload_and_parse(
         selected_ports=ports,
         selected_devices=devices,
     )
-    background_tasks.add_task(run_parse_task, task.id)
+    background_tasks.add_task(submit_process_job, run_parse_task_job, task.id)
     return {
         "success": True,
         "task_id": task.id,
@@ -307,31 +307,13 @@ async def upload_from_shared_pcap(
         selected_ports=ports,
         selected_devices=devices,
     )
-    background_tasks.add_task(run_parse_task, task.id)
+    background_tasks.add_task(submit_process_job, run_parse_task_job, task.id)
     return {
         "success": True,
         "task_id": task.id,
         "parser_profiles": profile_names,
         "message": "已使用平台共享数据创建解析任务",
     }
-
-
-async def run_parse_task(task_id: int):
-    """后台运行解析任务"""
-    import traceback
-    print(f"[解析任务] 开始执行任务 {task_id}")
-    
-    try:
-        from ..database import async_session
-        
-        async with async_session() as db:
-            service = ParserService(db)
-            print(f"[解析任务] 开始解析文件...")
-            result = await service.parse_pcapng(task_id)
-            print(f"[解析任务] 任务 {task_id} 完成，结果: {result}")
-    except Exception as e:
-        print(f"[解析任务] 任务 {task_id} 失败: {e}")
-        traceback.print_exc()
 
 
 @router.get("/tasks", response_model=ParseTaskListResponse)
@@ -671,7 +653,7 @@ async def get_time_series(
 async def export_data(
     task_id: int,
     port_number: int,
-    format: str = "csv",  # csv, excel, parquet
+    format: str = "csv",  # csv, parquet
     time_start: float = None,
     time_end: float = None,
     include_text_columns: bool = True,
@@ -683,14 +665,14 @@ async def export_data(
     Args:
         task_id: 任务ID
         port_number: 端口号
-        format: 导出格式(csv/excel/parquet)
+        format: 导出格式(csv/parquet)
         time_start: 开始时间戳(可选)
         time_end: 结束时间戳(可选)
         include_text_columns: 是否导出文字列(可选, 默认导出)
         parser_id: 解析器ID(可选, 多解析器时区分结果)
     """
-    if format not in ("csv", "excel", "parquet"):
-        raise HTTPException(status_code=400, detail="不支持的导出格式")
+    if format not in ("csv", "parquet"):
+        raise HTTPException(status_code=400, detail="不支持的导出格式，仅支持 csv 和 parquet")
     
     print(f"[Export] task={task_id} port={port_number} format={format} parser_id={parser_id}")
     
@@ -711,7 +693,7 @@ async def export_data(
     
     print(f"[Export] OK: {file_path}")
     
-    ext_map = {"csv": ".csv", "excel": ".xlsx", "parquet": ".parquet"}
+    ext_map = {"csv": ".csv", "parquet": ".parquet"}
     suffix = f"_parser_{parser_id}" if parser_id else ""
     filename = f"port_{port_number}{suffix}{ext_map[format]}"
     
@@ -730,8 +712,10 @@ async def export_batch(
     include_text_columns: bool = Query(True, description="是否导出文字列"),
     db: AsyncSession = Depends(get_db)
 ):
-    """批量导出多个端口到一个Excel文件（每个端口一个Sheet）"""
-    import pandas as pd
+    """批量导出多个端口到一个 ZIP 文件（每个端口一个 CSV，流式写入避免全量加载内存）"""
+    import zipfile
+    import pyarrow.dataset as ds
+    import pyarrow.csv as pacsv
     from ..config import DATA_DIR
 
     def _is_cn_description_col(name: str) -> bool:
@@ -746,52 +730,85 @@ async def export_batch(
         if name.endswith(".parity"):
             return True
         return False
-    
+
     port_list = [int(p.strip()) for p in ports.split(",") if p.strip()]
     pid_list = [s.strip() for s in parser_ids.split(",")]  if parser_ids else []
-    
+
     if not port_list:
         raise HTTPException(status_code=400, detail="请指定至少一个端口")
-    
+
     service = ParserService(db)
-    
+
     export_dir = DATA_DIR / "exports" / str(task_id)
     export_dir.mkdir(parents=True, exist_ok=True)
-    export_file = export_dir / f"task_{task_id}_batch.xlsx"
-    
-    with pd.ExcelWriter(str(export_file), engine="openpyxl") as writer:
-        sheets_written = 0
+    zip_path = export_dir / f"task_{task_id}_batch.zip"
+
+    files_written = 0
+    with zipfile.ZipFile(str(zip_path), "w", zipfile.ZIP_DEFLATED) as zf:
         for i, port in enumerate(port_list):
             pid = int(pid_list[i]) if i < len(pid_list) and pid_list[i] else None
             result_dir = DATA_DIR / "results" / str(task_id)
             result_file = service._find_parquet_file(result_dir, port, pid)
             if not result_file:
                 continue
-            df = pd.read_parquet(result_file)
-            service._keep_datetime_as_str(df)
-            df.rename(columns={"timestamp": "time"}, inplace=True)
+
+            dataset = ds.dataset(str(result_file), format="parquet")
+            source_schema = dataset.schema
+            selected_columns = None
             if not include_text_columns:
-                drop_cols = [c for c in df.columns if _is_cn_description_col(c)]
-                if drop_cols:
-                    df = df.drop(columns=drop_cols)
-            sheet_name = f"port_{port}"
+                selected_columns = [
+                    f.name for f in source_schema
+                    if not _is_cn_description_col(f.name)
+                ]
+            export_schema_names = selected_columns if selected_columns is not None else list(source_schema.names)
+
+            csv_name = f"port_{port}"
             if pid:
-                sheet_name = f"port_{port}_p{pid}"
-            if len(sheet_name) > 31:
-                sheet_name = sheet_name[:31]
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-            sheets_written += 1
-    
-    if sheets_written == 0:
+                csv_name = f"port_{port}_p{pid}"
+            csv_filename = f"{csv_name}.csv"
+            csv_path = export_dir / csv_filename
+
+            def _rename(names):
+                return ["time" if n == "timestamp" else n for n in names]
+
+            writer = None
+            wrote_rows = False
+            with open(csv_path, "wb") as sink:
+                sink.write(b"\xef\xbb\xbf")
+                scanner = dataset.scanner(columns=selected_columns, batch_size=65536)
+                for batch in scanner.to_batches():
+                    if batch.num_rows <= 0:
+                        continue
+                    new_names = _rename(list(batch.schema.names))
+                    import pyarrow as pa
+                    renamed = pa.RecordBatch.from_arrays(
+                        [batch.column(j) for j in range(batch.num_columns)],
+                        names=new_names,
+                    )
+                    if writer is None:
+                        writer = pacsv.CSVWriter(sink, renamed.schema)
+                    writer.write_batch(renamed)
+                    wrote_rows = True
+                if writer is not None:
+                    writer.close()
+                if not wrote_rows:
+                    sink.write((",".join(_rename(export_schema_names)) + "\n").encode("utf-8"))
+
+            zf.write(str(csv_path), csv_filename)
+            csv_path.unlink(missing_ok=True)
+            files_written += 1
+
+    if files_written == 0:
+        zip_path.unlink(missing_ok=True)
         raise HTTPException(status_code=404, detail="未找到任何可导出的数据")
-    
+
     port_str = "_".join(str(p) for p in port_list)
-    filename = f"task_{task_id}_ports_{port_str}.xlsx"
-    
+    filename = f"task_{task_id}_ports_{port_str}.zip"
+
     return FileResponse(
-        str(export_file),
+        str(zip_path),
         filename=filename,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        media_type="application/zip"
     )
 
 

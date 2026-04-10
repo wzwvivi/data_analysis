@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """TSN数据包解析服务"""
 import os
-import struct
-import asyncio
 import time
 import re
 import math
@@ -10,17 +8,14 @@ import bisect
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.dataset as ds
 import pyarrow.csv as pacsv
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-
 from ..config import DATA_DIR, UPLOAD_DIR
-from ..models import ParseTask, ParseResult, PortDefinition, FieldDefinition, ParserProfile
+from ..models import ParseTask, ParseResult, ParserProfile
 from .protocol_service import ProtocolService
 from .parsers import ParserRegistry, BaseParser, FieldLayout
 from .fcc_context_service import build_fcc_irs_context
@@ -1103,15 +1098,6 @@ class ParserService:
         )
         return result.scalars().all()
 
-    @staticmethod
-    def _keep_datetime_as_str(df: pd.DataFrame) -> pd.DataFrame:
-        """防止 pandas 把 BeijingDateTime 等时间字符串列自动推断为 datetime64，
-        确保导出 CSV/Excel 时毫秒精度不丢失。"""
-        for col in ("BeijingDateTime",):
-            if col in df.columns and hasattr(df[col], "dt"):
-                df[col] = df[col].astype(str)
-        return df
-
     def _build_time_filter(
         self,
         schema_names: List[str],
@@ -1371,20 +1357,8 @@ class ParserService:
                 if writer is not None:
                     writer.close()
             if not wrote_rows:
-                pd.DataFrame(columns=_rename_export_time_col(export_schema_names)).to_csv(
-                    export_file, index=False, encoding="utf-8-sig"
-                )
-        elif format == "excel":
-            export_file = export_dir / f"port_{port_number}{suffix}.xlsx"
-            table = dataset.scanner(
-                columns=selected_columns,
-                filter=self._build_time_filter(schema_names, time_start, time_end),
-                batch_size=65536,
-            ).to_table()
-            df = table.to_pandas()
-            self._keep_datetime_as_str(df)
-            df.rename(columns={"timestamp": "time"}, inplace=True)
-            df.to_excel(export_file, index=False)
+                with open(export_file, "w", encoding="utf-8-sig", newline="") as f:
+                    f.write(",".join(_rename_export_time_col(export_schema_names)) + "\n")
         elif format == "parquet":
             export_file = export_dir / f"port_{port_number}{suffix}.parquet"
             writer = None

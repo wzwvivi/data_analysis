@@ -137,7 +137,7 @@ export const parseApi = {
       timeout: 300000,
     }),
 
-  // 批量导出多端口到一个Excel
+  // 批量导出多端口到一个 ZIP（每端口一个 CSV）
   exportBatch: (taskId, ports, parserIds = [], includeTextColumns = true) =>
     api.get(`/parse/tasks/${taskId}/export-batch`, {
       params: {
