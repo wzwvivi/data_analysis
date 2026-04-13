@@ -5,7 +5,6 @@ import {
   CloudUploadOutlined,
   UnorderedListOutlined,
   DatabaseOutlined,
-  ApiOutlined,
   SwapOutlined,
   FileSearchOutlined,
   TeamOutlined,
@@ -36,7 +35,8 @@ function MainLayout() {
         type: 'group',
         label: '飞机行为事件分析',
         children: [
-          { key: '/event-analysis', icon: <FileSearchOutlined />, label: '事件分析' },
+          { key: '/event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' },
+          { key: '/fcc-event-analysis', icon: <FileSearchOutlined />, label: '飞控事件分析' },
         ],
       },
       {
@@ -53,7 +53,6 @@ function MainLayout() {
         type: 'group',
         label: '系统配置',
         children: [
-          { key: '/network-config', icon: <ApiOutlined />, label: '网络配置' },
           { key: '/admin/platform-data', icon: <CloudUploadOutlined />, label: '平台共享数据' },
           { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
         ],
@@ -71,6 +70,7 @@ function MainLayout() {
     const path = location.pathname
     if (path.startsWith('/tasks/')) return '/tasks'
     if (path.startsWith('/compare')) return '/compare'
+    if (path.startsWith('/fcc-event-analysis')) return '/fcc-event-analysis'
     if (path.startsWith('/event-analysis')) return '/event-analysis'
     if (path.startsWith('/admin/platform-data')) return '/admin/platform-data'
     if (path.startsWith('/admin/users')) return '/admin/users'
@@ -131,10 +131,10 @@ function MainLayout() {
             {location.pathname === '/upload' && '网络数据分析 / 上传TSN数据包进行解析'}
             {location.pathname === '/tasks' && '网络数据分析 / 查看所有解析任务'}
             {location.pathname.startsWith('/compare') && 'TSN数据异常检查'}
-            {location.pathname.includes('/event-analysis') && '飞机行为事件分析'}
+            {location.pathname.includes('/fcc-event-analysis') && '飞机行为事件分析 / 飞控事件分析'}
+            {location.pathname.includes('/event-analysis') && !location.pathname.includes('/fcc-event-analysis') && '飞机行为事件分析 / 飞管事件分析'}
             {location.pathname.includes('/analysis') && !location.pathname.includes('/event-analysis') && '网络数据分析 / 时序数据分析与可视化'}
             {location.pathname.startsWith('/tasks/') && !location.pathname.includes('/analysis') && '网络数据分析 / 解析结果查看'}
-            {location.pathname === '/network-config' && '系统配置 / 网络配置'}
             {location.pathname.startsWith('/admin/platform-data') && '系统配置 / 平台共享数据'}
             {location.pathname.startsWith('/admin/users') && '系统配置 / 用户管理'}
           </div>

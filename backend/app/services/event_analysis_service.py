@@ -328,7 +328,10 @@ class EventAnalysisService:
         page_size: int = 20,
     ) -> Tuple[List[EventAnalysisTask], int]:
         """列出独立事件分析任务（有 pcap_file_path 的记录）。"""
-        filt = EventAnalysisTask.pcap_file_path.isnot(None)
+        filt = (
+            EventAnalysisTask.pcap_file_path.isnot(None)
+            & (EventAnalysisTask.rule_template == "default_v1")
+        )
         total = (await self.db.execute(
             select(func.count()).select_from(EventAnalysisTask).where(filt)
         )).scalar() or 0
@@ -347,7 +350,11 @@ class EventAnalysisService:
     async def get_standalone_task(self, task_id: int) -> Optional[EventAnalysisTask]:
         """按主键获取独立任务；若记录无 pcap 路径则视为非独立任务。"""
         task = await self.get_analysis_task_by_id(task_id)
-        if not task or not task.pcap_file_path:
+        if (
+            not task
+            or not task.pcap_file_path
+            or (task.rule_template or "default_v1") != "default_v1"
+        ):
             return None
         return task
 

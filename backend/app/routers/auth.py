@@ -6,7 +6,7 @@ from typing import Literal, Optional
 import jwt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_HOURS
@@ -124,3 +124,30 @@ async def create_user(
     await db.refresh(user)
 
     return UserBrief(id=user.id, username=user.username, role=user.role or "user")
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+
+    r = await db.execute(select(User).where(User.id == user_id))
+    target = r.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    if (target.role or "user") == "admin":
+        cnt_r = await db.execute(
+            select(func.count()).select_from(User).where(User.role == "admin")
+        )
+        admin_count = int(cnt_r.scalar_one() or 0)
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="不能删除最后一个管理员")
+
+    await db.execute(delete(User).where(User.id == user_id))
+    await db.commit()
+    return {"ok": True, "id": user_id}

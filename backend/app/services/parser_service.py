@@ -558,8 +558,15 @@ class ParserService:
             )
             
             if not all_parsed_data:
-                await self.update_task_status(task_id, "failed", error_message="未能解析出任何数据，请确认数据文件和解析器选择是否正确")
-                return False
+                # 没有命中任何目标端口时，视为“解析完成但无匹配数据”，避免前端误判为失败。
+                await self.update_task_status(
+                    task_id,
+                    "completed",
+                    parsed_packets=0,
+                    error_message="未找到匹配端口数据，请确认端口选择或数据内容",
+                )
+                self._cleanup_pcap(task.file_path)
+                return True
             
             await self.update_task_status(task_id, "processing", progress=95)
 

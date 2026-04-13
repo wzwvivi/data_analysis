@@ -102,11 +102,12 @@ function StandaloneEventPage() {
 
   const historyColumns = [
     {
-      title: '任务ID',
-      dataIndex: 'id',
-      key: 'id',
+      title: '任务编号',
+      key: 'task_no',
       width: 90,
-      render: (id) => <span style={{ fontFamily: 'monospace' }}>{id}</span>,
+      render: (_, __, index) => (
+        <span style={{ fontFamily: 'monospace' }}>{index + 1}</span>
+      ),
     },
     { title: '文件', dataIndex: 'pcap_filename', key: 'pcap_filename', ellipsis: true },
     {
@@ -146,7 +147,7 @@ function StandaloneEventPage() {
 
   return (
     <div className="fade-in">
-      <Card title="上传 pcap / pcapng 进行事件分析" style={{ marginBottom: 24 }}>
+      <Card title="上传 pcap / pcapng 进行飞管事件分析" style={{ marginBottom: 24 }}>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <div>
             <span style={{ color: '#8b949e', marginRight: 12 }}>数据来源</span>

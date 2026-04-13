@@ -25,6 +25,7 @@ const FAMILY_LABELS = {
   bms800v: '800V 动力电池 BMS',
   bms270v: '270V&28V 动力电池 BMS',
   mcu: 'MCU 电推电驱 CAN',
+  bpcu_empc: 'BPCU/EMPC 配电系统 CAN',
 }
 
 const DIRECTION_LABELS = {

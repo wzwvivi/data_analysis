@@ -37,7 +37,7 @@ _RA_SDI_TEXT = {
 
 
 _LABEL_DEFS: Dict[int, Dict[str, Any]] = {
-    0o164: {"col": "alt_bnr", "enc": "bnr", "lsb_bit": 13, "msb_bit": 28, "lsb_val": 0.125, "signed": True},
+    0o164: {"col": "alt_bnr", "enc": "bnr", "lsb_bit": 13, "msb_bit": 29, "lsb_val": 0.125, "signed": True},
     0o165: {"col": "alt_bcd", "enc": "bcd_alt"},
     0o270: {"col": "discrete", "enc": "discrete_270"},
     0o350: {"col": "bit_status", "enc": "discrete_350"},
@@ -71,6 +71,16 @@ def _decode_bcd_alt(word: int) -> float:
     if ssm == 3:
         value = -value
     return value
+
+
+def _decode_bnr_twos_complement(word: int, lsb_bit: int, msb_bit: int, lsb_value: float) -> float:
+    """Decode signed BNR field using in-field two's complement."""
+    raw = ARINC429Decoder.extract_data_bits(word, lsb_bit, msb_bit)
+    nbits = msb_bit - lsb_bit + 1
+    sign_mask = 1 << (nbits - 1)
+    if raw & sign_mask:
+        raw -= (1 << nbits)
+    return raw * lsb_value
 
 
 def _columns_for_label(label: int) -> List[str]:
@@ -170,12 +180,12 @@ class RAParser(Arinc429Mixin, BaseParser):
         record[f"{pfx}.parity"] = parity_ok(word)
 
         if label == 0o164:
-            alt = self.decoder.decode_bnr_with_lsb(
-                word,
+            # RA 的 BNR 高度字段按字段位宽二补码解码（避免“独立符号位”误判导致大负值）。
+            alt = _decode_bnr_twos_complement(
+                word=word,
                 msb_bit=defn["msb_bit"],
                 lsb_bit=defn["lsb_bit"],
                 lsb_value=defn["lsb_val"],
-                signed=defn["signed"],
             )
             inhibit = ARINC429Decoder.extract_data_bits(word, 11, 11)
             record[f"{pfx}.alt_bnr"] = round(alt, 6)

@@ -14,7 +14,9 @@ CAN_FRAME (16B) = 4B CAN 仲裁域 (wire format) + 4B DLC/状态 + 8B 数据
   7052, 7053 : RBPCU (右BPCU)
   7054, 7055 : EMPC
 
-信号: Motorola byte-order, Unsigned, 物理值 = raw * factor + offset
+信号: Intel byte-order, Unsigned, 物理值 = raw * factor + offset
+      bpcu_empc_data.json 中 startbit 存储的是 MSB 位置,
+      Intel 提取时 LSB = MSB - length + 1.
 """
 import json
 import struct
@@ -22,7 +24,19 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
 from .base import BaseParser, ParserRegistry, FieldLayout
-from .bms800v_parser import _extract_motorola, _can_frame_valid
+from .bms800v_parser import _can_frame_valid
+
+
+def _extract_intel(data: bytes, startbit: int, length: int) -> int:
+    """Extract unsigned value from 8-byte CAN data using Intel bit numbering.
+
+    startbit is the LSB position.
+    """
+    if len(data) < 8:
+        data = data + b"\x00" * (8 - len(data))
+    raw = int.from_bytes(data[:8], "little", signed=False)
+    mask = (1 << length) - 1
+    return (raw >> startbit) & mask
 
 _DATA_DIR = Path(__file__).parent
 
@@ -108,8 +122,9 @@ class BPCUEMPCParser(BaseParser):
                 "msg_name": info["name"],
             }
 
-            for sig_name, startbit, bitlen, factor, offset in info["signals"]:
-                raw = _extract_motorola(can_data, startbit, bitlen)
+            for sig_name, msb_bit, bitlen, factor, offset in info["signals"]:
+                lsb_bit = msb_bit - bitlen + 1
+                raw = _extract_intel(can_data, lsb_bit, bitlen)
                 if factor != 1.0 or offset != 0.0:
                     row[sig_name] = round(raw * factor + offset, 6)
                 else:

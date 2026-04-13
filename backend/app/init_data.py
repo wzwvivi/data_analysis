@@ -596,6 +596,37 @@ async def init_parser_profiles(db: AsyncSession):
             print("[Init] 已更新 BMS270V protocol_family = bms270v")
         print("[Init] 270V&28V动力电池BMS 解析版本已存在，跳过创建")
 
+    # BPCU/EMPC 配电系统 CAN 解析器
+    result = await db.execute(
+        select(ParserProfile).where(ParserProfile.parser_key == "bpcu_empc_v1")
+    )
+    bpcu_exists = result.scalar_one_or_none()
+
+    _BPCU_PORTS = "7050,7051,7052,7053,7054,7055,8035,8042"
+    if not bpcu_exists:
+        profiles_to_create.append(
+            ParserProfile(
+                name="BPCU/EMPC配电系统",
+                version="A.06",
+                device_model="BPCU/EMPC",
+                protocol_family="bpcu_empc",
+                parser_key="bpcu_empc_v1",
+                is_active=True,
+                description="CE-25A电源系统配电盘箱CAN总线ICD A.06解析器。覆盖LBPCU(7050/7051)、RBPCU(7052/7053)、EMPC(7054/7055)及下行灯控(8035/8042)端口，解码电源状态参数、SSPC负载状态、故障信息等。",
+                supported_ports=_BPCU_PORTS,
+                output_fields='["timestamp","source_port","can_id_hex","msg_name"]',
+            )
+        )
+        print("[Init] 将创建 BPCU/EMPC配电系统 解析器配置")
+    else:
+        if not bpcu_exists.protocol_family:
+            bpcu_exists.protocol_family = "bpcu_empc"
+            print("[Init] 已更新 BPCU/EMPC protocol_family = bpcu_empc")
+        if (bpcu_exists.supported_ports or "") != _BPCU_PORTS:
+            bpcu_exists.supported_ports = _BPCU_PORTS
+            print("[Init] 已更新 BPCU/EMPC supported_ports")
+        print("[Init] BPCU/EMPC配电系统 解析版本已存在，跳过创建")
+
     # MCU 电推电驱 CAN 解析器
     if not mcu_exists:
         profiles_to_create.append(
@@ -662,7 +693,8 @@ async def init_parser_profiles(db: AsyncSession):
     if profiles_to_create:
         for profile in profiles_to_create:
             db.add(profile)
-        await db.commit()
+    await db.commit()
+    if profiles_to_create:
         print(f"[Init] 已创建 {len(profiles_to_create)} 个解析版本配置")
     else:
         print("[Init] 所有解析器配置已存在，无需创建")

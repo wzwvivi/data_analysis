@@ -68,6 +68,37 @@ def run_standalone_event_analysis_task_job(analysis_task_id: int) -> None:
         traceback.print_exc()
 
 
+def run_fcc_event_analysis_task_job(
+    analysis_task_id: int,
+    divergence_tolerance_ms: int = 100,
+) -> None:
+    """飞控事件分析子进程入口。"""
+    print(
+        "[飞控事件分析/子进程] 开始执行 "
+        f"analysis_task_id={analysis_task_id}, "
+        f"divergence_tolerance_ms={divergence_tolerance_ms}"
+    )
+    try:
+        from .database import async_session
+        from .services import FccEventAnalysisService
+
+        async def _run() -> None:
+            async with async_session() as db:
+                service = FccEventAnalysisService(db)
+                ok = await service.run_standalone_analysis(
+                    analysis_task_id,
+                    divergence_tolerance_ms=divergence_tolerance_ms,
+                )
+                print(
+                    f"[飞控事件分析/子进程] 完成 analysis_task_id={analysis_task_id}, result={ok}"
+                )
+
+        asyncio.run(_run())
+    except Exception as exc:
+        print(f"[飞控事件分析/子进程] 失败 analysis_task_id={analysis_task_id}: {exc}")
+        traceback.print_exc()
+
+
 def run_compare_task_job(task_id: int) -> None:
     """双交换机比对子进程入口。"""
     print(f"[比对任务/子进程] 开始执行 task_id={task_id}")

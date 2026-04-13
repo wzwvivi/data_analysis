@@ -46,6 +46,7 @@ export const authApi = {
   me: () => api.get('/auth/me'),
   listUsers: () => api.get('/auth/users'),
   createUser: (data) => api.post('/auth/users', data),
+  deleteUser: (userId) => api.delete(`/auth/users/${userId}`),
 }
 
 /** 平台共享 TSN（管理员上传，全员可选用） */
@@ -220,6 +221,45 @@ export const standaloneEventApi = {
 
   exportResults: (analysisTaskId) =>
     api.get(`/event-analysis/standalone/tasks/${analysisTaskId}/export`, {
+      responseType: 'blob',
+      timeout: 120000,
+    }),
+}
+
+/** 飞控事件分析（FCC Event Analysis） */
+export const fccEventAnalysisApi = {
+  upload: (formData, onUploadProgress) =>
+    api.post('/fcc-event-analysis/standalone/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+      onUploadProgress,
+    }),
+
+  fromShared: (formData) =>
+    api.post('/fcc-event-analysis/standalone/from-shared', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    }),
+
+  listTasks: (page = 1, pageSize = 20) =>
+    api.get('/fcc-event-analysis/standalone/tasks', {
+      params: { page, page_size: pageSize },
+    }),
+
+  getTask: (taskId) =>
+    api.get(`/fcc-event-analysis/standalone/tasks/${taskId}`),
+
+  getCheckResults: (taskId) =>
+    api.get(`/fcc-event-analysis/standalone/tasks/${taskId}/check-results`),
+
+  getCheckDetail: (taskId, checkId) =>
+    api.get(`/fcc-event-analysis/standalone/tasks/${taskId}/check-results/${checkId}`),
+
+  getTimeline: (taskId) =>
+    api.get(`/fcc-event-analysis/standalone/tasks/${taskId}/timeline`),
+
+  exportResults: (taskId) =>
+    api.get(`/fcc-event-analysis/standalone/tasks/${taskId}/export`, {
       responseType: 'blob',
       timeout: 120000,
     }),

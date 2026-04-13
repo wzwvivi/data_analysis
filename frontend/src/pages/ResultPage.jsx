@@ -238,7 +238,6 @@ const FIELD_TOKEN_CN = {
   sat: '卫星',
   gnss: 'GNSS',
   fix: '定位',
-  type: '类型',
   pos: '位置',
   position: '位置',
   locate: '定位',
@@ -261,7 +260,6 @@ const FIELD_TOKEN_CN = {
   cmu: 'CMU',
   pcb: '电路板',
   hvil: '高压互锁',
-  isol: '绝缘',
   supl: '供电',
   clnt: '冷却液',
   cnctr: '接触器',
@@ -328,8 +326,6 @@ const COMPACT_SEGMENT_CN = {
   rcpt: '充电口',
   station: '站',
   aux: '辅助',
-  ext: '外部',
-  int: '内部',
   brnch: '支路',
   branch: '支路',
   can1: 'CAN1',
@@ -344,8 +340,6 @@ const COMPACT_SEGMENT_CN = {
   cktopn: '电路开路',
   cktstg: '电路短接',
   pcb: '电路板',
-  cmu: 'CMU',
-  bmu: 'BMU',
   hvil: '高压互锁',
   dcdc: 'DCDC',
   kl15: 'KL15',
@@ -374,19 +368,11 @@ const COMPACT_SEGMENT_CN = {
   ssm: 'SSM',
   crc: 'CRC',
   rwy: '跑道',
-  msg: '消息',
-  pack: '电池包',
-  cell: '电芯',
   tempdiff: '温差',
-  soc: '荷电状态',
-  soe: '能量状态',
   rem: '剩余',
   enrgy: '能量',
   pwrup: '上电',
   wakeup: '唤醒',
-  dschrg: '放电',
-  chrg: '充电',
-  cntctr: '接触器',
   pln: '飞机',
   loc: '位置',
   info: '信息',
@@ -703,6 +689,8 @@ function ResultPage() {
       if (res.data.results?.length > 0) {
         const first = res.data.results[0]
         setActiveResult(first)
+      } else {
+        setActiveResult(null)
       }
     } catch (err) {
       if (!silent) message.error('加载任务详情失败')
@@ -2121,7 +2109,13 @@ function ResultPage() {
       )
     }
     if (filteredResults.length === 0) {
-      return <Empty description="暂无解析结果" />
+      const isNoMatchedPorts = results.length === 0
+        && task.status === 'completed'
+        && (
+          Number(task.parsed_packets || 0) === 0
+          || String(task.error_message || '').includes('未找到匹配端口')
+        )
+      return <Empty description={isNoMatchedPorts ? '未找到匹配端口数据' : '暂无解析结果'} />
     }
     return (
       <div>
@@ -2413,6 +2407,13 @@ function ResultPage() {
     )
   }
 
+  const noMatchedPortData = task.status === 'completed'
+    && results.length === 0
+    && (
+      Number(task.parsed_packets || 0) === 0
+      || String(task.error_message || '').includes('未找到匹配端口')
+    )
+
   const tabItems = filteredResults.map(result => ({
     key: getResultKey(result),
     label: (
@@ -2505,6 +2506,16 @@ function ResultPage() {
           </>
         )}
       </Card>
+
+      {noMatchedPortData && (
+        <Alert
+          type="info"
+          showIcon
+          message="未找到匹配端口数据"
+          description={task.error_message || '当前文件未命中所选端口，请检查端口选择或数据内容。'}
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
       <Tabs
         activeKey={mainTab}
@@ -2604,7 +2615,7 @@ function ResultPage() {
             />
           </>
         ) : (
-          <Empty description="暂无解析结果" />
+          <Empty description={noMatchedPortData ? '未找到匹配端口数据' : '暂无解析结果'} />
         )}
       </Card>
             )

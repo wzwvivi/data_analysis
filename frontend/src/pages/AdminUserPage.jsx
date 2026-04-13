@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Card, Form, Input, Button, Select, Table, Tag, message } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { Card, Form, Input, Button, Select, Table, Tag, message, Popconfirm, Tooltip } from 'antd'
+import { ReloadOutlined, DeleteOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { authApi } from '../services/api'
+import { useAuth } from '../context/AuthContext'
 
 function AdminUserPage() {
+  const { user: currentUser } = useAuth()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
   const [form] = Form.useForm()
 
   const loadUsers = useCallback(async () => {
@@ -47,6 +50,19 @@ function AdminUserPage() {
     }
   }
 
+  const handleDelete = async (record) => {
+    setDeletingId(record.id)
+    try {
+      await authApi.deleteUser(record.id)
+      message.success('已删除用户')
+      loadUsers()
+    } catch (e) {
+      message.error(e.response?.data?.detail || '删除用户失败')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 70 },
     { title: '用户名', dataIndex: 'username', width: 180 },
@@ -62,6 +78,44 @@ function AdminUserPage() {
       width: 180,
       render: (v) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '—'),
     },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 100,
+      fixed: 'right',
+      render: (_, record) => {
+        const isSelf = currentUser?.id === record.id
+        if (isSelf) {
+          return (
+            <Tooltip title="不能删除当前登录账号">
+              <Button type="link" danger size="small" icon={<DeleteOutlined />} disabled>
+                删除
+              </Button>
+            </Tooltip>
+          )
+        }
+        return (
+          <Popconfirm
+            title="确定删除该用户？"
+            description="删除后该账号将无法登录"
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true, loading: deletingId === record.id }}
+            onConfirm={() => handleDelete(record)}
+          >
+            <Button
+              type="link"
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              loading={deletingId === record.id}
+            >
+              删除
+            </Button>
+          </Popconfirm>
+        )
+      },
+    },
   ]
 
   return (
@@ -76,7 +130,7 @@ function AdminUserPage() {
         style={{ marginBottom: 24 }}
       >
         <div style={{ color: '#8b949e', marginBottom: 16 }}>
-          仅管理员可创建账号。新建后可直接使用用户名和密码登录。
+          仅管理员可创建或删除账号。不能删除当前登录用户及最后一个管理员。
         </div>
         <Form
           form={form}
@@ -128,7 +182,7 @@ function AdminUserPage() {
           columns={columns}
           dataSource={users}
           pagination={{ pageSize: 10, showSizeChanger: false }}
-          scroll={{ x: 650 }}
+          scroll={{ x: 760 }}
         />
       </Card>
     </div>

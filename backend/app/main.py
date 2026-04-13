@@ -10,6 +10,7 @@ from .routers import (
     protocol_router,
     parse_router,
     event_analysis_router,
+    fcc_event_analysis_router,
     compare_router,
     auth_router,
     shared_tsn_router,
@@ -64,6 +65,7 @@ app.include_router(shared_tsn_router)
 app.include_router(protocol_router)
 app.include_router(parse_router)
 app.include_router(event_analysis_router)
+app.include_router(fcc_event_analysis_router)
 app.include_router(compare_router)
 
 
