@@ -30,6 +30,9 @@ ATG_RTK_ONLY_PORTS = frozenset({8051, 8053})
 _ATG_IRS_ALT_M_TO_FT = 3.280839895  # m → ft
 _ATG_IRS_MPS_TO_KN = 1.943844492  # m/s → kt (1 kt = 0.514444… m/s)
 
+# 单端口记录数超过此阈值时溢出到临时 Parquet，降低峰值内存
+_SPILL_THRESHOLD = int(os.environ.get("PARSE_SPILL_THRESHOLD", "50000"))
+
 
 def _atg_irs_angle_diff(atg_deg: float, irs_deg: float) -> float:
     """ATG 与 IRS 角度差值。
@@ -552,13 +555,17 @@ class ParserService:
             
             # =============== 单次遍历解析（所有解析器共享一次文件读取） ===============
             total_records = 0
-            
-            all_parsed_data = await self._parse_single_pass(
+            spill_dir: Optional[Path] = None
+
+            all_parsed_data, spill_dir = await self._parse_single_pass(
                 task.file_path, merged_plan, network_layout, task_id=task_id
             )
-            
+
             if not all_parsed_data:
                 # 没有命中任何目标端口时，视为“解析完成但无匹配数据”，避免前端误判为失败。
+                if spill_dir and spill_dir.exists():
+                    import shutil
+                    shutil.rmtree(spill_dir, ignore_errors=True)
                 await self.update_task_status(
                     task_id,
                     "completed",
@@ -569,6 +576,25 @@ class ParserService:
                 return True
             
             await self.update_task_status(task_id, "processing", progress=95)
+
+            # --- 辅助：从溢出文件 + 内存中合并某个 (pid, port) 的全部记录 ---
+            def _load_full_port(pid_: int, port_: int) -> List[Dict]:
+                """将溢出文件中的记录读回并与内存记录合并，替换 all_parsed_data 中的列表。
+                读回后删除溢出文件，避免 _save_results 重复读取。"""
+                mem_recs = all_parsed_data.get(pid_, {}).get(port_, [])
+                if not spill_dir:
+                    return mem_recs
+                s_files = sorted(spill_dir.glob(f"spill_{pid_}_{port_}_*.parquet"))
+                if not s_files:
+                    return mem_recs
+                reloaded: List[Dict] = []
+                for sf in s_files:
+                    t = pq.read_table(str(sf))
+                    reloaded.extend(t.to_pylist())
+                    sf.unlink(missing_ok=True)
+                reloaded.extend(mem_recs)
+                all_parsed_data.setdefault(pid_, {})[port_] = reloaded
+                return reloaded
 
             # FCC 后处理：为每行 FCC 记录回填当前主飞控，同时构建 ATG 核对所需的事件列表
             fcc_pid = None
@@ -584,7 +610,8 @@ class ParserService:
 
             if fcc_pid and fcc_pid in all_parsed_data:
                 fcc_all_rows: List[Dict[str, Any]] = []
-                for port_fcc, recs_fcc in all_parsed_data[fcc_pid].items():
+                for port_fcc in list(all_parsed_data[fcc_pid].keys()):
+                    recs_fcc = _load_full_port(fcc_pid, port_fcc)
                     fcc_all_rows.extend(recs_fcc)
                 fcc_all_rows.sort(key=lambda x: x.get("timestamp", 0))
 
@@ -609,7 +636,8 @@ class ParserService:
                             })
                     row_fcc["main_fcc"] = current_main_fcc
 
-                print(f"[Parser] FCC 后处理: 回填 main_fcc 完成 ({len(fcc_all_rows)} 行), "
+                del fcc_all_rows
+                print(f"[Parser] FCC 后处理: 回填 main_fcc 完成, "
                       f"{len(main_fcc_changes)} 次主飞控变更, {len(irs_selection_events)} 次 IRS 通道事件")
 
             # ATG 核对列
@@ -628,7 +656,8 @@ class ParserService:
                         continue
                     if pid2 not in all_parsed_data:
                         continue
-                    for port2, recs2 in all_parsed_data[pid2].items():
+                    for port2 in list(all_parsed_data[pid2].keys()):
+                        recs2 = _load_full_port(pid2, port2)
                         if not recs2:
                             continue
                         sorted_recs = sorted(recs2, key=lambda x: x.get("timestamp", 0))
@@ -643,7 +672,8 @@ class ParserService:
                     irs_data_by_key[k] = sorted(irs_data_by_key[k], key=lambda x: x.get("timestamp", 0))
                 rtk_data_all = sorted(rtk_data_all, key=lambda x: x.get("timestamp", 0))
 
-                for port_number, records in all_parsed_data[atg_pid].items():
+                for port_number in list(all_parsed_data[atg_pid].keys()):
+                    records = _load_full_port(atg_pid, port_number)
                     if records:
                         print(f"[Parser] ATG 端口 {port_number}: 计算核对列 ({len(records)} 行)...")
                         self.build_atg_check_column(
@@ -654,6 +684,7 @@ class ParserService:
                             rtk_data_all,
                             atg_port=port_number,
                         )
+                del irs_data_by_key, rtk_data_all
                 print(f"[Parser] ATG 核对列计算完成")
 
             # 保存结果（进度 96% → 99%）
@@ -661,7 +692,7 @@ class ParserService:
                 (pid, port_number, records)
                 for pid, parsed_data in all_parsed_data.items()
                 for port_number, records in parsed_data.items()
-                if records
+                if records or (spill_dir and list(spill_dir.glob(f"spill_{pid}_{port_number}_*.parquet")))
             ]
             save_total = len(save_items) or 1
 
@@ -670,9 +701,10 @@ class ParserService:
                 profile_name = profile.name if profile else f"Parser-{pid}"
                 parser_inst = merged_plan[pid][0] if pid in merged_plan else None
 
-                result_file = await self._save_results(
+                result_file, row_count = await self._save_results(
                     task_id, port_number, records,
                     parser_id=pid, parser=parser_inst,
+                    spill_dir=spill_dir,
                 )
 
                 source_device = port_device_map.get(port_number)
@@ -684,26 +716,40 @@ class ParserService:
                     parser_profile_id=pid,
                     parser_profile_name=profile_name,
                     source_device=source_device,
-                    record_count=len(records),
+                    record_count=row_count,
                     result_file=result_file,
                     time_start=datetime.fromtimestamp(records[0].get('timestamp', 0)) if records else None,
                     time_end=datetime.fromtimestamp(records[-1].get('timestamp', 0)) if records else None,
                 )
                 self.db.add(parse_result)
-                total_records += len(records)
+                total_records += row_count
+
+                # 释放已保存端口的内存，让 GC 尽早回收
+                del records
+                if pid in all_parsed_data and port_number in all_parsed_data[pid]:
+                    del all_parsed_data[pid][port_number]
 
                 save_pct = 96 + int((save_idx + 1) / save_total * 3)
                 await self.update_task_status(task_id, "processing", progress=min(save_pct, 99))
+
+            del save_items
+            # 清理溢出临时目录
+            if spill_dir and spill_dir.exists():
+                import shutil
+                shutil.rmtree(spill_dir, ignore_errors=True)
 
             await self.db.commit()
             await self.update_task_status(task_id, "completed", parsed_packets=total_records)
             print(f"[Parser] 解析完成，共 {total_records} 条记录")
             self._cleanup_pcap(task.file_path)
             return True
-            
+
         except Exception as e:
             import traceback
             traceback.print_exc()
+            if spill_dir and spill_dir.exists():
+                import shutil
+                shutil.rmtree(spill_dir, ignore_errors=True)
             await self.update_task_status(task_id, "failed", error_message=str(e))
             self._cleanup_pcap(task.file_path)
             return False
@@ -848,17 +894,29 @@ class ParserService:
             traceback.print_exc()
             return {}
     
+    @staticmethod
+    def _spill_records(records: List[Dict], spill_dir: Path, pid: int, port: int,
+                       spill_counts: Dict[Tuple[int, int], int]) -> None:
+        """将内存中的记录溢出到临时 Parquet 文件，然后清空列表。"""
+        key = (pid, port)
+        idx = spill_counts.get(key, 0)
+        spill_counts[key] = idx + 1
+        spill_path = spill_dir / f"spill_{pid}_{port}_{idx}.parquet"
+        table = pa.Table.from_pylist(records)
+        pq.write_table(table, str(spill_path))
+        records.clear()
+
     async def _parse_single_pass(
         self,
         file_path: str,
         merged_plan: Dict[int, tuple],
         network_layout: Dict[int, List[FieldLayout]],
         task_id: Optional[int] = None,
-    ) -> Dict[int, Dict[int, List[Dict]]]:
+    ) -> Tuple[Dict[int, Dict[int, List[Dict]]], Optional[Path]]:
         """单次遍历解析：所有解析器共享一次文件遍历，按端口分发到对应解析器。
         
-        相比 _parse_with_custom_parser（每个解析器各遍历一次文件），
-        此方法只读取文件一次，通过字节级预过滤快速跳过非目标包。
+        当单端口记录数超过 _SPILL_THRESHOLD 时，自动溢出到临时 Parquet 文件
+        以控制峰值内存。
         
         Args:
             file_path: pcapng/pcap 文件路径
@@ -866,7 +924,9 @@ class ParserService:
             network_layout: {port: [FieldLayout, ...]}
             
         Returns:
-            {parser_id: {port: [record_dict, ...]}}
+            (data_dict, spill_dir_or_None)
+            data_dict: {parser_id: {port: [record_dict, ...]}}  -- 内存中剩余记录
+            spill_dir: 溢出临时目录（None 表示无溢出）
         """
         try:
             import dpkt
@@ -923,7 +983,20 @@ class ParserService:
                 file_size = 0
         last_pct = [0]
         last_parsed_committed = [0]
-        
+
+        # 溢出落盘：当单端口记录数超过阈值时写入临时 Parquet
+        import tempfile
+        spill_dir: Optional[Path] = None
+        spill_counts: Dict[Tuple[int, int], int] = {}
+
+        def _maybe_spill(pid_: int, port_: int) -> None:
+            nonlocal spill_dir
+            recs = all_parsed_data[pid_][port_]
+            if len(recs) >= _SPILL_THRESHOLD:
+                if spill_dir is None:
+                    spill_dir = Path(tempfile.mkdtemp(prefix="tsn_spill_"))
+                self._spill_records(recs, spill_dir, pid_, port_, spill_counts)
+
         try:
             with open(file_path, 'rb') as f:
                 try:
@@ -986,6 +1059,7 @@ class ParserService:
                             for record in records:
                                 all_parsed_data[pid][dst_port].append(record)
                                 matched_count += 1
+                            _maybe_spill(pid, dst_port)
                         else:
                             record = parser.parse_packet(payload, dst_port, timestamp, layout)
                             if record:
@@ -998,6 +1072,7 @@ class ParserService:
                                 else:
                                     all_parsed_data[pid][dst_port].append(record)
                                     matched_count += 1
+                                _maybe_spill(pid, dst_port)
                     except Exception:
                         continue
                 
@@ -1010,29 +1085,42 @@ class ParserService:
                             for record in parser_obj.flush_buffer(port):
                                 all_parsed_data[pid][port].append(record)
                                 matched_count += 1
+                            _maybe_spill(pid, port)
             
             print(f"[Parser] 单次遍历完成: 共 {packet_count} 包, "
                   f"匹配 {matched_count}, 预过滤跳过 {skipped_by_prefilter}")
-            
+            if spill_counts:
+                total_spills = sum(spill_counts.values())
+                print(f"[Parser] 溢出落盘: {total_spills} 个临时文件 -> {spill_dir}")
+
             for pid, port_data in all_parsed_data.items():
                 for port, records in port_data.items():
-                    if records:
-                        print(f"[Parser]   解析器{pid} 端口{port}: {len(records)} 条记录")
-            
-            # 清理空端口
-            result = {}
+                    spill_n = spill_counts.get((pid, port), 0)
+                    mem_n = len(records)
+                    if mem_n or spill_n:
+                        extra = f" + {spill_n} 个溢出文件" if spill_n else ""
+                        print(f"[Parser]   解析器{pid} 端口{port}: 内存 {mem_n} 条{extra}")
+
+            # 清理空端口（内存中无记录且无溢出文件的端口）
+            result: Dict[int, Dict[int, List[Dict]]] = {}
             for pid, port_data in all_parsed_data.items():
-                cleaned = {p: recs for p, recs in port_data.items() if recs}
+                cleaned = {}
+                for p, recs in port_data.items():
+                    if recs or (pid, p) in spill_counts:
+                        cleaned[p] = recs
                 if cleaned:
                     result[pid] = cleaned
-            
-            return result
-            
+
+            return result, spill_dir
+
         except Exception as e:
             print(f"[Parser] 单次遍历解析错误: {e}")
             import traceback
             traceback.print_exc()
-            return {}
+            if spill_dir and spill_dir.exists():
+                import shutil
+                shutil.rmtree(spill_dir, ignore_errors=True)
+            return {}, None
     
     async def _save_results(
         self,
@@ -1041,12 +1129,15 @@ class ParserService:
         records: List[Dict],
         parser_id: int = None,
         parser: Any = None,
-    ) -> str:
+        spill_dir: Optional[Path] = None,
+    ) -> Tuple[str, int]:
         """保存解析结果为Parquet文件，按端口裁剪列。
 
-        如果 parser 提供了 get_output_columns(port)，则只保留该端口
-        对应的列，去除其它 CAN 帧/消息类型产生的多余列。
-        使用 pyarrow 直接写入以减少大表场景的内存和 CPU 开销。
+        如果存在溢出临时文件，先将内存中剩余记录写为临时 Parquet，
+        再用 pyarrow.dataset 合并所有分片为最终文件。
+
+        Returns:
+            (result_file_path, total_row_count)
         """
         result_dir = DATA_DIR / "results" / str(task_id)
         result_dir.mkdir(parents=True, exist_ok=True)
@@ -1064,23 +1155,65 @@ class ParserService:
             except Exception:
                 target_cols = None
 
-        if target_cols:
-            trimmed = [{k: r.get(k) for k in target_cols} for r in records]
-        else:
-            trimmed = records
+        # 收集溢出文件
+        spill_files: List[Path] = []
+        if spill_dir and spill_dir.exists():
+            prefix = f"spill_{parser_id}_{port_number}_"
+            spill_files = sorted(spill_dir.glob(f"{prefix}*.parquet"))
 
-        print(f"[Parser] 保存端口 {port_number}: {len(trimmed)} 行"
+        if not spill_files:
+            # 无溢出：直接从内存写入（原有路径）
+            if target_cols:
+                trimmed = [{k: r.get(k) for k in target_cols} for r in records]
+            else:
+                trimmed = records
+            row_count = len(trimmed)
+            print(f"[Parser] 保存端口 {port_number}: {row_count} 行"
+                  + (f", {len(target_cols)} 列" if target_cols else ""))
+            table = pa.Table.from_pylist(trimmed)
+            table = self._cast_datetime_col(table)
+            pq.write_table(table, str(result_file))
+            return str(result_file), row_count
+
+        # 有溢出：合并溢出文件 + 内存中剩余记录
+        all_tables: List[pa.Table] = []
+        for sf in spill_files:
+            t = pq.read_table(str(sf))
+            if target_cols:
+                keep = [c for c in target_cols if c in t.schema.names]
+                t = t.select(keep) if keep else t
+            all_tables.append(t)
+
+        if records:
+            if target_cols:
+                trimmed = [{k: r.get(k) for k in target_cols} for r in records]
+            else:
+                trimmed = records
+            all_tables.append(pa.Table.from_pylist(trimmed))
+
+        merged = pa.concat_tables(all_tables, promote_options="default")
+        row_count = merged.num_rows
+        print(f"[Parser] 保存端口 {port_number}: {row_count} 行 (合并 {len(spill_files)} 个溢出文件)"
               + (f", {len(target_cols)} 列" if target_cols else ""))
-        table = pa.Table.from_pylist(trimmed)
+        merged = self._cast_datetime_col(merged)
+        pq.write_table(merged, str(result_file))
+
+        # 清理已合并的溢出文件
+        for sf in spill_files:
+            sf.unlink(missing_ok=True)
+
+        return str(result_file), row_count
+
+    @staticmethod
+    def _cast_datetime_col(table: pa.Table) -> pa.Table:
+        """将 BeijingDateTime 列统一转为 string 类型。"""
         if "BeijingDateTime" in table.schema.names:
             idx = table.schema.get_field_index("BeijingDateTime")
             table = table.set_column(
                 idx, pa.field("BeijingDateTime", pa.string()),
                 table.column("BeijingDateTime").cast(pa.string()),
             )
-        pq.write_table(table, str(result_file))
-
-        return str(result_file)
+        return table
     
     def _find_parquet_file(self, result_dir: Path, port_number: int, parser_id: int = None) -> Optional[Path]:
         """查找 parquet 结果文件，兼容新旧命名格式"""

@@ -9,7 +9,7 @@ from typing import Callable, Any
 
 
 _DEFAULT_CPU_CORES = int(os.environ.get("SERVER_CPU_CORES", "4"))
-# 4 核默认建议并发 2；也可通过 TASK_PROCESS_WORKERS 覆盖。
+# 默认 CPU_CORES // 2；也可通过 TASK_PROCESS_WORKERS 覆盖。
 _DEFAULT_TASK_WORKERS = max(1, _DEFAULT_CPU_CORES // 2)
 _TASK_WORKERS = int(os.environ.get("TASK_PROCESS_WORKERS", str(_DEFAULT_TASK_WORKERS)))
 

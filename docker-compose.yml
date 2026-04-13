@@ -5,8 +5,8 @@ services:
     build: ./backend
     container_name: tsn-backend
     environment:
-      - SERVER_CPU_CORES=4
-      - TASK_PROCESS_WORKERS=2
+      - SERVER_CPU_CORES=2
+      - TASK_PROCESS_WORKERS=1
       - APP_BASE_DIR=/app_runtime
     ports:
       - "8081:8081"

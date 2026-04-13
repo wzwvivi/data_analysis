@@ -11,5 +11,5 @@ RUN mkdir -p /app/data /app/uploads/pcap /app/uploads/protocols /app/data/result
 
 EXPOSE 8081
 
-# 4 核默认：API workers=2；重任务通过独立进程池执行（TASK_PROCESS_WORKERS 默认 2）
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "2"]
+# 2 核部署：API worker=1；重任务通过独立进程池执行（TASK_PROCESS_WORKERS=1）
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "1"]

@@ -6,12 +6,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Keep database file, ignore generated analysis artifacts
-backend/data/results/
-backend/data/exports/
-backend/data/*.db-journal
-backend/data/*.db-wal
-backend/data/*.db-shm
+# Legacy backend/data tree (Docker 使用 backend-runtime)
+backend/data/
 
 # Uploaded files can be huge; keep directories local
 backend/uploads/pcap/
@@ -22,7 +18,7 @@ backend/uploads/*/
 backend-data/exports/
 backend-uploads/
 backend-runtime/data/exports/
-backend-runtime/data/results/
+# results/*.parquet tracked for reproducibility; uploads remain local
 backend-runtime/uploads/
 backend-runtime/data/*.db-journal
 backend-runtime/data/*.db-wal
