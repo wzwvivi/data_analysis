@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import statistics
 
+from ..config import UPLOAD_DIR
 from ..models import CompareTask, ComparePortResult, CompareGapRecord, ComparePortTimingResult
 from .protocol_service import ProtocolService
 
@@ -342,7 +343,27 @@ class CompareService:
             traceback.print_exc()
             await self.update_task_status(task_id, "failed", error_message=str(e))
             return False
-    
+        finally:
+            self._cleanup_compare_files(task.file_path_1, task.file_path_2)
+
+    @staticmethod
+    def _cleanup_compare_files(*paths: Optional[str]) -> None:
+        from pathlib import Path
+        shared_dir = (UPLOAD_DIR / "shared_tsn").resolve()
+        for fp in paths:
+            if not fp:
+                continue
+            try:
+                p = Path(fp)
+                if p.resolve().is_relative_to(shared_dir):
+                    print(f"[Compare] 跳过共享文件: {p.name}")
+                    continue
+                if p.is_file():
+                    p.unlink()
+                    print(f"[Compare] 已删除临时文件: {p.name}")
+            except Exception as exc:
+                print(f"[Compare] 清理临时文件失败: {fp} -> {exc}")
+
     def _extract_timestamps_by_port(self, file_path: str) -> Dict[int, List[float]]:
         """
         用dpkt遍历pcap文件，按目标端口收集时间戳列表

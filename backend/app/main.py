@@ -11,9 +11,11 @@ from .routers import (
     parse_router,
     event_analysis_router,
     fcc_event_analysis_router,
+    auto_flight_analysis_router,
     compare_router,
     auth_router,
     shared_tsn_router,
+    arinc429_router,
 )
 from .config import UPLOAD_DIR, DATA_DIR
 from .init_data import init_all_data
@@ -62,10 +64,12 @@ app.add_middleware(
 # 注册路由
 app.include_router(auth_router)
 app.include_router(shared_tsn_router)
+app.include_router(arinc429_router)
 app.include_router(protocol_router)
 app.include_router(parse_router)
 app.include_router(event_analysis_router)
 app.include_router(fcc_event_analysis_router)
+app.include_router(auto_flight_analysis_router)
 app.include_router(compare_router)
 
 

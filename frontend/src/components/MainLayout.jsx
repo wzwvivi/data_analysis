@@ -10,6 +10,7 @@ import {
   TeamOutlined,
   UserOutlined,
   LogoutOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '../context/AuthContext'
 
@@ -37,6 +38,7 @@ function MainLayout() {
         children: [
           { key: '/event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' },
           { key: '/fcc-event-analysis', icon: <FileSearchOutlined />, label: '飞控事件分析' },
+          { key: '/auto-flight-analysis', icon: <FileSearchOutlined />, label: '自动飞行性能分析' },
         ],
       },
       {
@@ -53,6 +55,7 @@ function MainLayout() {
         type: 'group',
         label: '系统配置',
         children: [
+          { key: '/admin/protocol-manager', icon: <FileTextOutlined />, label: '协议管理' },
           { key: '/admin/platform-data', icon: <CloudUploadOutlined />, label: '平台共享数据' },
           { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
         ],
@@ -70,8 +73,10 @@ function MainLayout() {
     const path = location.pathname
     if (path.startsWith('/tasks/')) return '/tasks'
     if (path.startsWith('/compare')) return '/compare'
+    if (path.startsWith('/auto-flight-analysis')) return '/auto-flight-analysis'
     if (path.startsWith('/fcc-event-analysis')) return '/fcc-event-analysis'
     if (path.startsWith('/event-analysis')) return '/event-analysis'
+    if (path.startsWith('/admin/protocol-manager')) return '/admin/protocol-manager'
     if (path.startsWith('/admin/platform-data')) return '/admin/platform-data'
     if (path.startsWith('/admin/users')) return '/admin/users'
     return path
@@ -103,7 +108,7 @@ function MainLayout() {
             letterSpacing: '-0.5px',
           }}>
             <DatabaseOutlined style={{ marginRight: 10, color: '#58a6ff' }} />
-            TSN日志数据分析平台
+            网络数据处理
           </Title>
         </div>
         <Menu
@@ -132,9 +137,11 @@ function MainLayout() {
             {location.pathname === '/tasks' && '网络数据分析 / 查看所有解析任务'}
             {location.pathname.startsWith('/compare') && 'TSN数据异常检查'}
             {location.pathname.includes('/fcc-event-analysis') && '飞机行为事件分析 / 飞控事件分析'}
-            {location.pathname.includes('/event-analysis') && !location.pathname.includes('/fcc-event-analysis') && '飞机行为事件分析 / 飞管事件分析'}
+            {location.pathname.includes('/auto-flight-analysis') && '飞机行为事件分析 / 自动飞行性能分析'}
+            {location.pathname.includes('/event-analysis') && !location.pathname.includes('/fcc-event-analysis') && !location.pathname.includes('/auto-flight-analysis') && '飞机行为事件分析 / 飞管事件分析'}
             {location.pathname.includes('/analysis') && !location.pathname.includes('/event-analysis') && '网络数据分析 / 时序数据分析与可视化'}
             {location.pathname.startsWith('/tasks/') && !location.pathname.includes('/analysis') && '网络数据分析 / 解析结果查看'}
+            {location.pathname.startsWith('/admin/protocol-manager') && '系统配置 / 协议管理'}
             {location.pathname.startsWith('/admin/platform-data') && '系统配置 / 平台共享数据'}
             {location.pathname.startsWith('/admin/users') && '系统配置 / 用户管理'}
           </div>

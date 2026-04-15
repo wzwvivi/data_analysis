@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
-from ..config import DATA_DIR
+from ..config import DATA_DIR, UPLOAD_DIR
 from ..models import (
     ParseTask,
     EventAnalysisTask, EventCheckResult, EventTimelineEvent
@@ -372,8 +372,8 @@ class EventAnalysisService:
         analysis_task.progress = 0
         await self.db.commit()
 
+        pcap_path = Path(analysis_task.pcap_file_path)
         try:
-            pcap_path = Path(analysis_task.pcap_file_path)
             if not pcap_path.is_file():
                 analysis_task.status = "failed"
                 analysis_task.error_message = f"pcap 文件不存在: {pcap_path}"
@@ -422,6 +422,16 @@ class EventAnalysisService:
             analysis_task.error_message = str(e)
             await self.db.commit()
             return False
+        finally:
+            try:
+                shared_dir = (UPLOAD_DIR / "shared_tsn").resolve()
+                if pcap_path.resolve().is_relative_to(shared_dir):
+                    print(f"[EventAnalysis] 跳过共享文件: {pcap_path.name}")
+                elif pcap_path.is_file():
+                    pcap_path.unlink()
+                    print(f"[EventAnalysis] 已删除临时文件: {pcap_path}")
+            except Exception as cleanup_err:
+                print(f"[EventAnalysis] 清理临时文件失败: {cleanup_err}")
 
     async def get_check_results_by_analysis_id(
         self,

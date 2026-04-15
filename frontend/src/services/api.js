@@ -62,6 +62,41 @@ export const sharedTsnApi = {
   remove: (id) => api.delete(`/shared-tsn/${id}`),
 }
 
+/** 协议管理（设备树、Label、版本）— 写操作需管理员 */
+export const protocolManagerApi = {
+  getDeviceTree: () => api.get('/protocol-manager/device-tree'),
+  createSystem: (body) => api.post('/protocol-manager/systems', body),
+  createDevice: (body) => api.post('/protocol-manager/devices', body),
+  deleteDevice: (deviceId) => api.delete(`/protocol-manager/devices/${encodeURIComponent(deviceId)}`),
+  setActiveVersion: (deviceId, currentVersionName) =>
+    api.put(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/active-version`, {
+      current_version_name: currentVersionName,
+    }),
+  getLabels: (deviceId, protocolVersionId) =>
+    api.get(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/labels`, {
+      params: protocolVersionId != null ? { protocol_version_id: protocolVersionId } : {},
+    }),
+  saveLabels: (deviceId, body) =>
+    api.post(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/labels`, body),
+  deleteLabel: (deviceId, labelId) =>
+    api.delete(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/labels/${labelId}`),
+  listProtocolVersions: (deviceId) =>
+    api.get(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/versions`),
+  listHistory: (deviceId, limit = 50) =>
+    api.get(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/history`, { params: { limit } }),
+  getSnapshotLabels: (deviceId, version) =>
+    api.get(
+      `/protocol-manager/devices/${encodeURIComponent(deviceId)}/versions/${encodeURIComponent(version)}/labels`
+    ),
+  restoreVersion: (deviceId, version) =>
+    api.post(
+      `/protocol-manager/devices/${encodeURIComponent(deviceId)}/versions/${encodeURIComponent(version)}/restore`
+    ),
+}
+
+// 向后兼容旧命名，避免其他页面暂时引用失败
+export const arinc429Api = protocolManagerApi
+
 // 协议（网络配置）相关API
 export const protocolApi = {
   // 获取协议列表（含嵌套版本）
@@ -260,6 +295,54 @@ export const fccEventAnalysisApi = {
 
   exportResults: (taskId) =>
     api.get(`/fcc-event-analysis/standalone/tasks/${taskId}/export`, {
+      responseType: 'blob',
+      timeout: 120000,
+    }),
+}
+
+/** 自动飞行性能分析（Auto Flight Performance Analysis） */
+export const autoFlightAnalysisApi = {
+  upload: (formData, onUploadProgress) =>
+    api.post('/auto-flight-analysis/standalone/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+      onUploadProgress,
+    }),
+
+  fromShared: (formData) =>
+    api.post('/auto-flight-analysis/standalone/from-shared', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    }),
+
+  fromParseTask: (formData) =>
+    api.post('/auto-flight-analysis/from-parse-task', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    }),
+
+  listTasks: (page = 1, pageSize = 20) =>
+    api.get('/auto-flight-analysis/tasks', {
+      params: { page, page_size: pageSize },
+    }),
+
+  getTask: (taskId) =>
+    api.get(`/auto-flight-analysis/tasks/${taskId}`),
+
+  getTouchdowns: (taskId) =>
+    api.get(`/auto-flight-analysis/tasks/${taskId}/touchdowns`),
+
+  getTouchdownDetail: (taskId, tdId) =>
+    api.get(`/auto-flight-analysis/tasks/${taskId}/touchdowns/${tdId}`),
+
+  getSteadyStates: (taskId) =>
+    api.get(`/auto-flight-analysis/tasks/${taskId}/steady-states`),
+
+  getSteadyStateDetail: (taskId, ssId) =>
+    api.get(`/auto-flight-analysis/tasks/${taskId}/steady-states/${ssId}`),
+
+  exportResults: (taskId) =>
+    api.get(`/auto-flight-analysis/tasks/${taskId}/export`, {
       responseType: 'blob',
       timeout: 120000,
     }),

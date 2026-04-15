@@ -116,3 +116,22 @@ def run_compare_task_job(task_id: int) -> None:
     except Exception as exc:
         print(f"[比对任务/子进程] 失败 task_id={task_id}: {exc}")
         traceback.print_exc()
+
+
+def run_auto_flight_analysis_task_job(task_id: int) -> None:
+    """自动飞行性能分析子进程入口。"""
+    print(f"[自动飞行性能分析/子进程] 开始执行 task_id={task_id}")
+    try:
+        from .database import async_session
+        from .services import AutoFlightAnalysisService
+
+        async def _run() -> None:
+            async with async_session() as db:
+                service = AutoFlightAnalysisService(db)
+                ok = await service.run_analysis(task_id)
+                print(f"[自动飞行性能分析/子进程] 完成 task_id={task_id}, result={ok}")
+
+        asyncio.run(_run())
+    except Exception as exc:
+        print(f"[自动飞行性能分析/子进程] 失败 task_id={task_id}: {exc}")
+        traceback.print_exc()

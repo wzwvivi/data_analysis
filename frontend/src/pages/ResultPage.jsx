@@ -1243,11 +1243,11 @@ function ResultPage() {
         }
       },
       legend: { data: spSelectedFields, textStyle: { color: '#8b949e' }, top: 10 },
-      grid: { left: 60, right: 40, top: 60, bottom: 60 },
+      grid: { left: 60, right: 40, top: 60, bottom: 70 },
       xAxis: {
         type: 'time',
         axisPointer: { snap: true },
-        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
+        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
         axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false }
       },
       yAxis, series: chartSeries,
@@ -1342,11 +1342,11 @@ function ResultPage() {
       },
       legend: validFields.length > 1 ? { data: validFields, textStyle: { color: '#8b949e', fontSize: 11 }, top: 20, itemWidth: 14, itemHeight: 8 } : undefined,
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
-      grid: { left: 56, right: validFields.length === 2 ? 56 : 16, top: validFields.length > 1 ? 44 : 32, bottom: 46 },
+      grid: { left: 56, right: validFields.length === 2 ? 56 : 16, top: validFields.length > 1 ? 44 : 32, bottom: 56 },
       xAxis: {
         type: 'time',
         axisPointer: { snap: true, label: { show: false } },
-        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
+        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
         axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false },
       },
       yAxis,
@@ -1583,11 +1583,11 @@ function ResultPage() {
         textStyle: { color: '#8b949e' }, top: 10,
         type: 'scroll',
       },
-      grid: { left: 60, right: 40, top: 60, bottom: 60 },
+      grid: { left: 60, right: 40, top: 60, bottom: 70 },
       xAxis: {
         type: 'time',
         axisPointer: { snap: true },
-        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
+        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
         axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false }
       },
       yAxis,
@@ -1625,11 +1625,11 @@ function ResultPage() {
         },
       },
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
-      grid: { left: 56, right: 16, top: 36, bottom: 46 },
+      grid: { left: 56, right: 16, top: 36, bottom: 56 },
       xAxis: {
         type: 'time',
         axisPointer: { snap: true, label: { show: false } },
-        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss') },
+        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
         axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false },
       },
       yAxis: {

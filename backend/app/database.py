@@ -255,5 +255,29 @@ async def init_db():
                             text("ALTER TABLE event_analysis_tasks ADD COLUMN progress INTEGER DEFAULT 0")
                         )
                         print("[DB] 已添加 event_analysis_tasks.progress")
-        
+
+            # auto_flight_analysis_tasks：自动飞行性能分析任务（支持 pcap 独立分析 + 解析任务分析）
+            if 'auto_flight_analysis_tasks' in inspector.get_table_names():
+                af_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(auto_flight_analysis_tasks)")).fetchall()}
+                cols_to_add = {
+                    'parse_task_id': 'INTEGER REFERENCES parse_tasks(id)',
+                    'pcap_filename': 'VARCHAR(200)',
+                    'pcap_file_path': 'VARCHAR(500)',
+                    'name': 'VARCHAR(200)',
+                    'source_type': "VARCHAR(30) DEFAULT 'standalone'",
+                    'status': "VARCHAR(20) DEFAULT 'pending'",
+                    'progress': 'INTEGER DEFAULT 0',
+                    'error_message': 'TEXT',
+                    'touchdown_count': 'INTEGER DEFAULT 0',
+                    'steady_count': 'INTEGER DEFAULT 0',
+                    'created_at': 'DATETIME',
+                    'completed_at': 'DATETIME',
+                }
+                for col_name, col_type in cols_to_add.items():
+                    if col_name not in af_cols:
+                        sync_conn.execute(
+                            text(f"ALTER TABLE auto_flight_analysis_tasks ADD COLUMN {col_name} {col_type}")
+                        )
+                        print(f"[DB] 已添加 auto_flight_analysis_tasks.{col_name}")
+
         await conn.run_sync(_check_and_add_columns)

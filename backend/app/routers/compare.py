@@ -188,13 +188,10 @@ async def _resolve_compare_slot(
         ext = Path(row.original_filename).suffix.lower()
         if ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(status_code=400, detail=f"{label}：共享文件类型不支持")
-        try:
-            dest, display = shared_tsn_svc.copy_shared_to_workdir(
-                row, upload_path, f"cmp{slot}_shared"
-            )
-        except FileNotFoundError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        return display, str(dest)
+        src = Path(row.file_path)
+        if not src.is_file():
+            raise HTTPException(status_code=400, detail=f"{label}：共享文件不存在: {row.file_path}")
+        return row.original_filename, str(src.resolve())
 
     raw_name = Path(file.filename or "").name
     if raw_name in {"", ".", ".."}:

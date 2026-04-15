@@ -103,3 +103,24 @@ body {
   animation: fadeIn 0.3s ease-out;
 }
 
+/* 自动飞行分析：暗色主题下提升 tabs 可读性 */
+.auto-flight-task-tabs .ant-tabs-nav::before {
+  border-bottom-color: #30363d !important;
+}
+
+.auto-flight-task-tabs .ant-tabs-tab .ant-tabs-tab-btn {
+  color: #c9d1d9 !important;
+  font-weight: 500;
+  text-shadow: 0 0 0.01px rgba(201, 209, 217, 0.9);
+}
+
+.auto-flight-task-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #ffffff !important;
+  font-weight: 600;
+  text-shadow: 0 0 0.01px rgba(255, 255, 255, 0.95);
+}
+
+.auto-flight-task-tabs .ant-tabs-ink-bar {
+  background: #58a6ff !important;
+}
+

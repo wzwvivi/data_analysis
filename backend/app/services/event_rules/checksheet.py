@@ -51,12 +51,12 @@ class CheckItem:
     response_timeout_ms: int = 1000
     response_description: str = ""
 
-    # 突发密集响应检测（加载数据类 13-18）:
+    # 突发密集响应检测（正常航段交互 13-18）:
     # 在 response_port 上找连续 N 包间隔都 < threshold 的位置
     response_burst_count: int = 0            # 连续包数，0 表示不使用此模式
     response_burst_threshold_ms: float = 10  # 相邻包间隔阈值（毫秒）
 
-    # 多端口窗口响应检测（装订信息类 19-22）:
+    # 多端口窗口响应检测（起飞/着陆信息 19-22）:
     # 事件后连续 N 个窗口（每 window_ms），任一窗口内 response_ports 每个端口各 >= 1 包 = 成功
     response_ports: List[int] = field(default_factory=list)  # 多个响应端口（如三个飞控）
     response_window_count: int = 0           # 连续窗口数，0 表示不使用此模式
@@ -416,13 +416,13 @@ class Checksheet:
                 ]
             ),
 
-            # ── 13–18 飞管飞控加载数据升级 ──
+            # ── 13–18 飞管与飞控正常航段交互 ──
             # 事件识别：前几个端口出现首包；响应：最后一个端口上连续9包间隔<阈值
             CheckItem(
                 sequence=13,
-                name="飞管1飞控1加载数据升级",
-                category="数据加载",
-                description="飞管1对飞控1加载/升级数据流出现",
+                name="飞管1与飞控1交互正常航段",
+                category="正常航段交互",
+                description="飞管1与飞控1正常航段数据交互（加载/升级数据流）",
                 port=9908,
                 extra_ports=[9909, 9121],
                 wireshark_filter="udp.port in {9908,9909,9121,9131}",
@@ -430,13 +430,13 @@ class Checksheet:
                 response_port=9131,
                 response_burst_count=9,
                 response_burst_threshold_ms=10,
-                response_description="飞控1加载响应完成",
+                response_description="飞控1正常航段响应完成",
             ),
             CheckItem(
                 sequence=14,
-                name="飞管1飞控2加载数据升级",
-                category="数据加载",
-                description="飞管1对飞控2加载/升级数据流出现",
+                name="飞管1与飞控2交互正常航段",
+                category="正常航段交互",
+                description="飞管1与飞控2正常航段数据交互（加载/升级数据流）",
                 port=9708,
                 extra_ports=[9709, 9122],
                 wireshark_filter="udp.port in {9708,9709,9122,9132}",
@@ -444,13 +444,13 @@ class Checksheet:
                 response_port=9132,
                 response_burst_count=9,
                 response_burst_threshold_ms=10,
-                response_description="飞控2加载响应完成",
+                response_description="飞控2正常航段响应完成",
             ),
             CheckItem(
                 sequence=15,
-                name="飞管1飞控3加载数据升级",
-                category="数据加载",
-                description="飞管1对飞控3加载/升级数据流出现",
+                name="飞管1与飞控3交互正常航段",
+                category="正常航段交互",
+                description="飞管1与飞控3正常航段数据交互（加载/升级数据流）",
                 port=9508,
                 extra_ports=[9509, 9123],
                 wireshark_filter="udp.port in {9508,9509,9123,9133}",
@@ -458,13 +458,13 @@ class Checksheet:
                 response_port=9133,
                 response_burst_count=9,
                 response_burst_threshold_ms=10,
-                response_description="飞控3加载响应完成",
+                response_description="飞控3正常航段响应完成",
             ),
             CheckItem(
                 sequence=16,
-                name="飞管2飞控1加载数据升级",
-                category="数据加载",
-                description="飞管2对飞控1加载/升级数据流出现",
+                name="飞管2与飞控1交互正常航段",
+                category="正常航段交互",
+                description="飞管2与飞控1正常航段数据交互（加载/升级数据流）",
                 port=9808,
                 extra_ports=[9809, 9221],
                 wireshark_filter="udp.port in {9808,9809,9221,9231}",
@@ -472,13 +472,13 @@ class Checksheet:
                 response_port=9231,
                 response_burst_count=9,
                 response_burst_threshold_ms=10,
-                response_description="飞控1加载响应完成",
+                response_description="飞控1正常航段响应完成",
             ),
             CheckItem(
                 sequence=17,
-                name="飞管2飞控2加载数据升级",
-                category="数据加载",
-                description="飞管2对飞控2加载/升级数据流出现",
+                name="飞管2与飞控2交互正常航段",
+                category="正常航段交互",
+                description="飞管2与飞控2正常航段数据交互（加载/升级数据流）",
                 port=9608,
                 extra_ports=[9609, 9222],
                 wireshark_filter="udp.port in {9608,9609,9222,9232}",
@@ -486,13 +486,13 @@ class Checksheet:
                 response_port=9232,
                 response_burst_count=9,
                 response_burst_threshold_ms=10,
-                response_description="飞控2加载响应完成",
+                response_description="飞控2正常航段响应完成",
             ),
             CheckItem(
                 sequence=18,
-                name="飞管2飞控3加载数据升级",
-                category="数据加载",
-                description="飞管2对飞控3加载/升级数据流出现",
+                name="飞管2与飞控3交互正常航段",
+                category="正常航段交互",
+                description="飞管2与飞控3正常航段数据交互（加载/升级数据流）",
                 port=9408,
                 extra_ports=[9409, 9223],
                 wireshark_filter="udp.port in {9408,9409,9223,9233}",
@@ -500,62 +500,62 @@ class Checksheet:
                 response_port=9233,
                 response_burst_count=9,
                 response_burst_threshold_ms=10,
-                response_description="飞控3加载响应完成",
+                response_description="飞控3正常航段响应完成",
             ),
 
-            # ── 19–22 装订飞行/着陆信息 ──
+            # ── 19–22 飞管与飞控起飞/着陆信息交互 ──
             # 响应：事件后连续5个200ms窗口，任一窗口内三个飞控端口各收到>=1包 = 成功
             CheckItem(
                 sequence=19,
-                name="飞管1飞控1-3装订飞行信息",
-                category="装订信息",
-                description="飞管1向飞控1-3装订飞行信息",
+                name="飞管1与飞控1-3交互起飞信息",
+                category="起飞着陆信息",
+                description="飞管1与飞控1-3交互起飞信息",
                 port=9905,
                 wireshark_filter="udp.port in {9905,9101,9102,9103}",
                 payload_filter=[],
                 response_ports=[9101, 9102, 9103],
                 response_window_count=5,
                 response_window_ms=200,
-                response_description="飞控1-3装订飞行信息响应",
+                response_description="飞控1-3起飞信息响应",
             ),
             CheckItem(
                 sequence=20,
-                name="飞管2飞控1-3装订飞行信息",
-                category="装订信息",
-                description="飞管2向飞控1-3装订飞行信息",
+                name="飞管2与飞控1-3交互起飞信息",
+                category="起飞着陆信息",
+                description="飞管2与飞控1-3交互起飞信息",
                 port=9805,
                 wireshark_filter="udp.port in {9805,9201,9202,9203}",
                 payload_filter=[],
                 response_ports=[9201, 9202, 9203],
                 response_window_count=5,
                 response_window_ms=200,
-                response_description="飞控1-3装订飞行信息响应",
+                response_description="飞控1-3起飞信息响应",
             ),
             CheckItem(
                 sequence=21,
-                name="飞管1飞控1-3装订着陆信息",
-                category="装订信息",
-                description="飞管1向飞控1-3装订着陆信息",
+                name="飞管1与飞控1-3交互着陆信息",
+                category="起飞着陆信息",
+                description="飞管1与飞控1-3交互着陆信息",
                 port=9906,
                 wireshark_filter="udp.port in {9906,9111,9112,9113}",
                 payload_filter=[],
                 response_ports=[9111, 9112, 9113],
                 response_window_count=5,
                 response_window_ms=200,
-                response_description="飞控1-3装订着陆信息响应",
+                response_description="飞控1-3着陆信息响应",
             ),
             CheckItem(
                 sequence=22,
-                name="飞管2飞控1-3装订着陆信息",
-                category="装订信息",
-                description="飞管2向飞控1-3装订着陆信息",
+                name="飞管2与飞控1-3交互着陆信息",
+                category="起飞着陆信息",
+                description="飞管2与飞控1-3交互着陆信息",
                 port=9806,
                 wireshark_filter="udp.port in {9806,9211,9212,9213}",
                 payload_filter=[],
                 response_ports=[9211, 9212, 9213],
                 response_window_count=5,
                 response_window_ms=200,
-                response_description="飞控1-3装订着陆信息响应",
+                response_description="飞控1-3着陆信息响应",
             ),
 
             # ── 23–24 800V 全下电 ──
@@ -642,12 +642,12 @@ class Checksheet:
                 response_description="800V下电响应",
             ),
 
-            # ── 25–26 270V 蓄电池等下电 ──
+            # ── 25–26 270V 左右电池下电 ──
             CheckItem(
                 sequence=25,
-                name="飞管1控制270V蓄电池等下电",
+                name="飞管1控制270V左右电池下电",
                 category="控制指令检查",
-                description="飞管1发送270VBMS蓄电池等下电指令",
+                description="飞管1发送270V左右电池下电指令",
                 port=8002,
                 wireshark_filter="udp.port == 8002 and udp.payload[14] == 0x48 and udp.payload[15] == 0x80",
                 payload_filter=[
@@ -671,9 +671,9 @@ class Checksheet:
             ),
             CheckItem(
                 sequence=26,
-                name="飞管2控制270V蓄电池等下电",
+                name="飞管2控制270V左右电池下电",
                 category="控制指令检查",
-                description="飞管2发送270VBMS蓄电池等下电指令",
+                description="飞管2发送270V左右电池下电指令",
                 port=8010,
                 wireshark_filter="udp.port == 8010 and udp.payload[14] == 0x48 and udp.payload[15] == 0x80",
                 payload_filter=[
@@ -1148,7 +1148,7 @@ class Checksheet:
     ) -> CheckResult:
         """检查响应（三种模式：首包匹配 / 突发密集包 / 多端口窗口）"""
 
-        # ── 模式 A：突发密集包检测（加载数据 13-18）──
+        # ── 模式 A：突发密集包检测（正常航段交互 13-18）──
         if item.response_burst_count > 0:
             response_df = parsed_data.get(item.response_port)
             if response_df is None or response_df.empty:
@@ -1166,7 +1166,7 @@ class Checksheet:
                 command_timestamp, item, response_df, result, events
             )
 
-        # ── 模式 B：多端口窗口检测（装订信息 19-22）──
+        # ── 模式 B：多端口窗口检测（起飞/着陆信息 19-22）──
         if item.response_window_count > 0 and item.response_ports:
             return self._check_multiport_window_response(
                 command_timestamp, item, parsed_data, result, events

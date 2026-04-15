@@ -368,7 +368,7 @@ async def standalone_from_shared_pcap(
     rule_template: str = Form("default_v1"),
     db: AsyncSession = Depends(get_db),
 ):
-    """使用平台共享 TSN 文件创建独立事件分析（复制到 standalone_events 目录）。"""
+    """使用平台共享 TSN 文件创建独立事件分析（直接读取共享源文件，不复制）。"""
     row = await shared_tsn_svc.get_shared_by_id(db, shared_tsn_id)
     if not row:
         raise HTTPException(status_code=404, detail="平台共享数据不存在或已过期删除")
@@ -376,19 +376,14 @@ async def standalone_from_shared_pcap(
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="共享文件类型不支持")
 
-    sub = UPLOAD_DIR / "standalone_events"
-    sub.mkdir(parents=True, exist_ok=True)
-    try:
-        dest, display_name = shared_tsn_svc.copy_shared_to_workdir(
-            row, sub, "shared_evt"
-        )
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    src = Path(row.file_path)
+    if not src.is_file():
+        raise HTTPException(status_code=400, detail=f"共享文件不存在: {row.file_path}")
 
     service = EventAnalysisService(db)
     task = await service.create_standalone_task(
-        filename=display_name,
-        file_path=str(dest.resolve()),
+        filename=row.original_filename,
+        file_path=str(src.resolve()),
         rule_template=rule_template,
     )
     background_tasks.add_task(

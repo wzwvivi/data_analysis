@@ -11,9 +11,12 @@ import StandaloneEventPage from './pages/StandaloneEventPage'
 import StandaloneEventTaskPage from './pages/StandaloneEventTaskPage'
 import FccEventAnalysisPage from './pages/FccEventAnalysisPage'
 import FccEventAnalysisTaskPage from './pages/FccEventAnalysisTaskPage'
+import AutoFlightAnalysisPage from './pages/AutoFlightAnalysisPage'
+import AutoFlightAnalysisTaskPage from './pages/AutoFlightAnalysisTaskPage'
 import ComparePage from './pages/ComparePage'
 import AdminPlatformDataPage from './pages/AdminPlatformDataPage'
 import AdminUserPage from './pages/AdminUserPage'
+import ProtocolManagerPage from './pages/ProtocolManagerPage'
 
 function PrivateRoute({ children }) {
   const { user, ready } = useAuth()
@@ -73,6 +76,16 @@ function AppRoutes() {
         <Route path="event-analysis" element={<StandaloneEventPage />} />
         <Route path="fcc-event-analysis/task/:analysisTaskId" element={<FccEventAnalysisTaskPage />} />
         <Route path="fcc-event-analysis" element={<FccEventAnalysisPage />} />
+        <Route path="auto-flight-analysis/task/:taskId" element={<AutoFlightAnalysisTaskPage />} />
+        <Route path="auto-flight-analysis" element={<AutoFlightAnalysisPage />} />
+        <Route
+          path="admin/protocol-manager"
+          element={(
+            <AdminRoute>
+              <ProtocolManagerPage />
+            </AdminRoute>
+          )}
+        />
         <Route
           path="admin/platform-data"
           element={(

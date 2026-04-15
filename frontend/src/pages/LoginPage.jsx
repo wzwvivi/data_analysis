@@ -53,7 +53,7 @@ function LoginPage() {
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <DatabaseOutlined style={{ fontSize: 40, color: '#58a6ff' }} />
           <Title level={3} style={{ color: '#c9d1d9', marginTop: 12, marginBottom: 8 }}>
-            TSN日志数据分析平台
+            网络数据处理
           </Title>
           <Text type="secondary">请使用管理员或普通用户账号登录</Text>
         </div>

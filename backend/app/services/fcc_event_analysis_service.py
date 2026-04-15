@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
+from ..config import UPLOAD_DIR
 from ..models import EventAnalysisTask, EventCheckResult, EventTimelineEvent
 from .event_rules import FccChecksheet
 from .pcap_reader import pcap_to_port_dataframes
@@ -104,8 +105,8 @@ class FccEventAnalysisService:
         task.progress = 0
         await self.db.commit()
 
+        pcap_path = Path(task.pcap_file_path)
         try:
-            pcap_path = Path(task.pcap_file_path)
             if not pcap_path.is_file():
                 task.status = "failed"
                 task.error_message = f"pcap 文件不存在: {pcap_path}"
@@ -149,6 +150,16 @@ class FccEventAnalysisService:
             task.error_message = str(e)
             await self.db.commit()
             return False
+        finally:
+            try:
+                shared_dir = (UPLOAD_DIR / "shared_tsn").resolve()
+                if pcap_path.resolve().is_relative_to(shared_dir):
+                    print(f"[FccEventAnalysis] 跳过共享文件: {pcap_path.name}")
+                elif pcap_path.is_file():
+                    pcap_path.unlink()
+                    print(f"[FccEventAnalysis] 已删除临时文件: {pcap_path}")
+            except Exception as cleanup_err:
+                print(f"[FccEventAnalysis] 清理临时文件失败: {cleanup_err}")
 
     # ---- query helpers ----
 
