@@ -146,6 +146,33 @@ async def init_db():
                 )
                 print("[DB] 已更新解析器配置（protocol_family + 动态端口 + 停用旧解析器）")
 
+            # users 表迁移
+            if 'users' in inspector.get_table_names():
+                user_cols = [col['name'] for col in inspector.get_columns('users')]
+                if 'display_name' not in user_cols:
+                    sync_conn.execute(
+                        text("ALTER TABLE users ADD COLUMN display_name VARCHAR(64)")
+                    )
+                    print("[DB] 已添加 users.display_name 列")
+
+            # role_port_access 表迁移（角色-端口权限）
+            if 'role_port_access' not in inspector.get_table_names():
+                sync_conn.execute(text("""
+                    CREATE TABLE role_port_access (
+                        id INTEGER PRIMARY KEY,
+                        role VARCHAR(20) NOT NULL,
+                        protocol_version_id INTEGER NOT NULL REFERENCES protocol_versions(id),
+                        port_number INTEGER NOT NULL
+                    )
+                """))
+                sync_conn.execute(
+                    text("CREATE UNIQUE INDEX IF NOT EXISTS uq_role_proto_port ON role_port_access(role, protocol_version_id, port_number)")
+                )
+                sync_conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_role_port_access_role ON role_port_access(role)")
+                )
+                print("[DB] 已创建 role_port_access 表及索引")
+
                 # JZXPDR113B S模式应答机：平台与库中统一显示为「S模式应答机」（不再带型号/日期后缀）
                 sync_conn.execute(
                     text(

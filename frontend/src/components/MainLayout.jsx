@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Menu, Typography, Dropdown, Button } from 'antd'
+import { Layout, Menu, Typography, Dropdown, Button, Modal, Form, Input, message } from 'antd'
 import {
   CloudUploadOutlined,
   UnorderedListOutlined,
@@ -20,36 +20,35 @@ const { Title } = Typography
 function MainLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout, isAdmin } = useAuth()
+  const { user, logout, isAdmin, hasPageAccess } = useAuth()
   const [collapsed, setCollapsed] = useState(true)
+  const [pwdVisible, setPwdVisible] = useState(false)
+  const [pwdLoading, setPwdLoading] = useState(false)
+  const [pwdForm] = Form.useForm()
 
   const menuItems = useMemo(() => {
-    const items = [
-      {
-        type: 'group',
-        label: '网络数据分析',
-        children: [
-          { key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' },
-          { key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' },
-        ],
-      },
-      {
-        type: 'group',
-        label: '飞机行为事件分析',
-        children: [
-          { key: '/event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' },
-          { key: '/fcc-event-analysis', icon: <FileSearchOutlined />, label: '飞控事件分析' },
-          { key: '/auto-flight-analysis', icon: <FileSearchOutlined />, label: '自动飞行性能分析' },
-        ],
-      },
-      {
-        type: 'group',
-        label: 'TSN数据异常检查',
-        children: [
-          { key: '/compare', icon: <SwapOutlined />, label: '异常检查' },
-        ],
-      },
-    ]
+    const items = []
+    const networkChildren = []
+    if (hasPageAccess('upload')) networkChildren.push({ key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' })
+    if (hasPageAccess('tasks')) networkChildren.push({ key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' })
+    if (networkChildren.length > 0) {
+      items.push({ type: 'group', label: '网络数据分析', children: networkChildren })
+    }
+
+    const analysisChildren = []
+    if (hasPageAccess('event-analysis')) analysisChildren.push({ key: '/event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' })
+    if (hasPageAccess('fcc-event-analysis')) analysisChildren.push({ key: '/fcc-event-analysis', icon: <FileSearchOutlined />, label: '飞控事件分析' })
+    if (hasPageAccess('auto-flight-analysis')) analysisChildren.push({ key: '/auto-flight-analysis', icon: <FileSearchOutlined />, label: '自动飞行性能分析' })
+    if (analysisChildren.length > 0) {
+      items.push({ type: 'group', label: '飞机行为事件分析', children: analysisChildren })
+    }
+
+    const compareChildren = []
+    if (hasPageAccess('compare')) compareChildren.push({ key: '/compare', icon: <SwapOutlined />, label: '异常检查' })
+    if (compareChildren.length > 0) {
+      items.push({ type: 'group', label: 'TSN数据异常检查', children: compareChildren })
+    }
+
     if (isAdmin) {
       items.push({ type: 'divider' })
       items.push({
@@ -63,7 +62,7 @@ function MainLayout() {
       })
     }
     return items
-  }, [isAdmin])
+  }, [isAdmin, hasPageAccess])
 
   const handleMenuClick = ({ key }) => {
     navigate(key)
@@ -85,6 +84,27 @@ function MainLayout() {
   const onLogout = () => {
     logout()
     navigate('/login')
+  }
+
+  const handleChangePassword = async () => {
+    try {
+      const values = await pwdForm.validateFields()
+      if (values.newPassword !== values.confirmPassword) {
+        message.error('两次输入的新密码不一致')
+        return
+      }
+      setPwdLoading(true)
+      const { authApi } = await import('../services/api')
+      await authApi.changePassword(values.oldPassword, values.newPassword)
+      message.success('密码修改成功，请妥善保管')
+      setPwdVisible(false)
+      pwdForm.resetFields()
+    } catch (e) {
+      if (e?.errorFields) return
+      message.error(e?.response?.data?.detail || '修改密码失败')
+    } finally {
+      setPwdLoading(false)
+    }
   }
 
   return (
@@ -202,8 +222,15 @@ function MainLayout() {
           </div>
           <Dropdown
             menu={{
-              items: [{ key: 'logout', label: '退出登录', icon: <LogoutOutlined /> }],
+              items: [
+                { key: 'change-password', label: '修改密码', icon: <UserOutlined /> },
+                { type: 'divider' },
+                { key: 'logout', label: '退出登录', icon: <LogoutOutlined /> },
+              ],
               onClick: ({ key }) => {
+                if (key === 'change-password') {
+                  setPwdVisible(true)
+                }
                 if (key === 'logout') onLogout()
               },
             }}
@@ -246,6 +273,45 @@ function MainLayout() {
           <Outlet />
         </Content>
       </Layout>
+      <Modal
+        title="修改密码"
+        open={pwdVisible}
+        onCancel={() => {
+          setPwdVisible(false)
+          pwdForm.resetFields()
+        }}
+        onOk={handleChangePassword}
+        confirmLoading={pwdLoading}
+        okText="确认修改"
+        cancelText="取消"
+      >
+        <Form form={pwdForm} layout="vertical">
+          <Form.Item
+            name="oldPassword"
+            label="当前密码"
+            rules={[{ required: true, message: '请输入当前密码' }]}
+          >
+            <Input.Password maxLength={128} />
+          </Form.Item>
+          <Form.Item
+            name="newPassword"
+            label="新密码"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              { min: 6, max: 128, message: '新密码长度需在 6-128 之间' },
+            ]}
+          >
+            <Input.Password maxLength={128} />
+          </Form.Item>
+          <Form.Item
+            name="confirmPassword"
+            label="确认新密码"
+            rules={[{ required: true, message: '请再次输入新密码' }]}
+          >
+            <Input.Password maxLength={128} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Layout>
   )
 }

@@ -44,9 +44,23 @@ export const authApi = {
     return api.post('/auth/login', payload)
   },
   me: () => api.get('/auth/me'),
+  permissions: () => api.get('/auth/permissions'),
+  listRoles: () => api.get('/auth/roles'),
   listUsers: () => api.get('/auth/users'),
+  listLegacyRoleUsers: () => api.get('/auth/users/legacy-role'),
   createUser: (data) => api.post('/auth/users', data),
   deleteUser: (userId) => api.delete(`/auth/users/${userId}`),
+  updateUserRole: (userId, role) => api.put(`/auth/users/${userId}/role`, { role }),
+  resetPassword: (userId, newPassword) => api.put(`/auth/users/${userId}/reset-password`, { new_password: newPassword }),
+  changePassword: (oldPassword, newPassword) => api.put('/auth/password', { old_password: oldPassword, new_password: newPassword }),
+}
+
+export const roleConfigApi = {
+  listRoles: () => api.get('/role-config/roles'),
+  getRolePorts: (role, protocolVersionId) =>
+    api.get(`/role-config/${role}/ports`, { params: { protocol_version_id: protocolVersionId } }),
+  setRolePorts: (role, protocolVersionId, ports) =>
+    api.put(`/role-config/${role}/ports`, { protocol_version_id: protocolVersionId, ports }),
 }
 
 /** 平台共享 TSN（管理员上传，全员可选用） */

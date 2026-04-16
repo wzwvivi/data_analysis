@@ -16,6 +16,7 @@ from .routers import (
     auth_router,
     shared_tsn_router,
     arinc429_router,
+    role_config_router,
 )
 from .config import UPLOAD_DIR, DATA_DIR
 from .init_data import init_all_data
@@ -65,6 +66,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(shared_tsn_router)
 app.include_router(arinc429_router)
+app.include_router(role_config_router)
 app.include_router(protocol_router)
 app.include_router(parse_router)
 app.include_router(event_analysis_router)

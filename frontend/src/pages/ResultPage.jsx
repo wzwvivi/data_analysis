@@ -2109,6 +2109,9 @@ function ResultPage() {
       )
     }
     if (filteredResults.length === 0) {
+      if (results.length > 0) {
+        return <Empty description="当前角色在该任务下无可见端口，请联系管理员配置角色端口权限" />
+      }
       const isNoMatchedPorts = results.length === 0
         && task.status === 'completed'
         && (

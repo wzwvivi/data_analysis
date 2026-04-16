@@ -17,6 +17,7 @@ import ComparePage from './pages/ComparePage'
 import AdminPlatformDataPage from './pages/AdminPlatformDataPage'
 import AdminUserPage from './pages/AdminUserPage'
 import ProtocolManagerPage from './pages/ProtocolManagerPage'
+import { Result } from 'antd'
 
 function PrivateRoute({ children }) {
   const { user, ready } = useAuth()
@@ -51,6 +52,34 @@ function AdminRoute({ children }) {
   return children
 }
 
+function PermissionDenied({ pageKey }) {
+  return (
+    <Result
+      status="403"
+      title="无权访问"
+      subTitle={`当前账号没有访问该页面的权限（${pageKey}）`}
+    />
+  )
+}
+
+function PermissionRoute({ children, requiredPage }) {
+  const { user, ready, hasPageAccess } = useAuth()
+  if (!ready) {
+    return (
+      <div style={{ padding: 100, textAlign: 'center', color: '#a1a1aa' }}>
+        加载中…
+      </div>
+    )
+  }
+  if (!user) {
+    return <Navigate to="/login" replace />
+  }
+  if (requiredPage && !hasPageAccess(requiredPage)) {
+    return <PermissionDenied pageKey={requiredPage} />
+  }
+  return children
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -64,20 +93,20 @@ function AppRoutes() {
         )}
       >
         <Route index element={<Navigate to="/upload" replace />} />
-        <Route path="upload" element={<UploadPage />} />
-        <Route path="tasks" element={<TaskListPage />} />
-        <Route path="tasks/:taskId" element={<ResultPage />} />
-        <Route path="tasks/:taskId/analysis" element={<ResultPage />} />
-        <Route path="tasks/:taskId/event-analysis" element={<EventAnalysisPage />} />
-        <Route path="network-config" element={<Navigate to="/upload" replace />} />
-        <Route path="compare" element={<ComparePage />} />
-        <Route path="compare/:taskId" element={<ComparePage />} />
-        <Route path="event-analysis/task/:analysisTaskId" element={<StandaloneEventTaskPage />} />
-        <Route path="event-analysis" element={<StandaloneEventPage />} />
-        <Route path="fcc-event-analysis/task/:analysisTaskId" element={<FccEventAnalysisTaskPage />} />
-        <Route path="fcc-event-analysis" element={<FccEventAnalysisPage />} />
-        <Route path="auto-flight-analysis/task/:taskId" element={<AutoFlightAnalysisTaskPage />} />
-        <Route path="auto-flight-analysis" element={<AutoFlightAnalysisPage />} />
+        <Route path="upload" element={<PermissionRoute requiredPage="upload"><UploadPage /></PermissionRoute>} />
+        <Route path="tasks" element={<PermissionRoute requiredPage="tasks"><TaskListPage /></PermissionRoute>} />
+        <Route path="tasks/:taskId" element={<PermissionRoute requiredPage="tasks/:taskId"><ResultPage /></PermissionRoute>} />
+        <Route path="tasks/:taskId/analysis" element={<PermissionRoute requiredPage="tasks/:taskId/analysis"><ResultPage /></PermissionRoute>} />
+        <Route path="tasks/:taskId/event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><EventAnalysisPage /></PermissionRoute>} />
+        <Route path="network-config" element={<PermissionRoute requiredPage="network-config"><Navigate to="/upload" replace /></PermissionRoute>} />
+        <Route path="compare" element={<PermissionRoute requiredPage="compare"><ComparePage /></PermissionRoute>} />
+        <Route path="compare/:taskId" element={<PermissionRoute requiredPage="compare/:taskId"><ComparePage /></PermissionRoute>} />
+        <Route path="event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="event-analysis/task/:analysisTaskId"><StandaloneEventTaskPage /></PermissionRoute>} />
+        <Route path="event-analysis" element={<PermissionRoute requiredPage="event-analysis"><StandaloneEventPage /></PermissionRoute>} />
+        <Route path="fcc-event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fcc-event-analysis/task/:analysisTaskId"><FccEventAnalysisTaskPage /></PermissionRoute>} />
+        <Route path="fcc-event-analysis" element={<PermissionRoute requiredPage="fcc-event-analysis"><FccEventAnalysisPage /></PermissionRoute>} />
+        <Route path="auto-flight-analysis/task/:taskId" element={<PermissionRoute requiredPage="auto-flight-analysis/task/:taskId"><AutoFlightAnalysisTaskPage /></PermissionRoute>} />
+        <Route path="auto-flight-analysis" element={<PermissionRoute requiredPage="auto-flight-analysis"><AutoFlightAnalysisPage /></PermissionRoute>} />
         <Route
           path="admin/protocol-manager"
           element={(

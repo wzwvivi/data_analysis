@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS
-from ..deps import get_current_user
+from ..deps import (
+    get_current_user,
+    ensure_port_visible_or_403,
+    get_visible_ports,
+)
 from ..services import ParserService
 from ..services import shared_tsn_service as shared_tsn_svc
 from ..services.port_anomaly_service import PortAnomalyService, STUCK_CONSECUTIVE_FRAMES
@@ -426,7 +430,11 @@ async def list_tasks(
 
 
 @router.get("/tasks/{task_id}")
-async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def get_task(
+    task_id: int,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """获取任务详情"""
     service = ParserService(db)
     task = await service.get_task(task_id)
@@ -497,6 +505,13 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
     
     # 获取解析结果
     results = await service.get_results(task_id)
+    visible_ports = await get_visible_ports(
+        db,
+        role=user.role or "",
+        protocol_version_id=task.protocol_version_id,
+    )
+    if visible_ports is not None:
+        results = [r for r in results if int(r.port_number) in visible_ports]
     
     return {
         "task": {
@@ -566,6 +581,7 @@ async def get_parsed_data(
     time_start: float = None,
     time_end: float = None,
     parser_id: int = None,
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """获取解析数据
@@ -580,6 +596,15 @@ async def get_parsed_data(
         parser_id: 解析器ID(可选, 多解析器时区分结果)
     """
     service = ParserService(db)
+    task = await service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    await ensure_port_visible_or_403(
+        db,
+        user=user,
+        protocol_version_id=task.protocol_version_id,
+        port_number=port_number,
+    )
     
     data, total, columns = await service.get_result_data(
         task_id, port_number, page, page_size, time_start, time_end, parser_id
@@ -615,6 +640,7 @@ async def get_time_series(
     time_end: float = None,
     max_points: int = 1000,
     parser_id: int = None,
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """获取时序数据（用于绘图）
@@ -629,6 +655,15 @@ async def get_time_series(
         parser_id: 解析器ID(可选, 多解析器时区分结果)
     """
     service = ParserService(db)
+    task = await service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    await ensure_port_visible_or_403(
+        db,
+        user=user,
+        protocol_version_id=task.protocol_version_id,
+        port_number=port_number,
+    )
     
     timestamps, values, enum_labels = await service.get_time_series(
         task_id, port_number, field_name, time_start, time_end, max_points, parser_id
@@ -658,6 +693,7 @@ async def export_data(
     time_end: float = None,
     include_text_columns: bool = True,
     parser_id: int = None,
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """导出数据
@@ -675,9 +711,18 @@ async def export_data(
         raise HTTPException(status_code=400, detail="不支持的导出格式，仅支持 csv 和 parquet")
     
     print(f"[Export] task={task_id} port={port_number} format={format} parser_id={parser_id}")
+    service = ParserService(db)
+    task = await service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    await ensure_port_visible_or_403(
+        db,
+        user=user,
+        protocol_version_id=task.protocol_version_id,
+        port_number=port_number,
+    )
     
     try:
-        service = ParserService(db)
         file_path = await service.export_data(
             task_id, port_number, format, time_start, time_end, parser_id, include_text_columns
         )
@@ -710,6 +755,7 @@ async def export_batch(
     ports: str = Query(..., description="逗号分隔的端口号，如 7004,7005,7006,8030"),
     parser_ids: str = Query("", description="逗号分隔的解析器ID（与ports一一对应，可为空）"),
     include_text_columns: bool = Query(True, description="是否导出文字列"),
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """批量导出多个端口到一个 ZIP 文件（每个端口一个 CSV，流式写入避免全量加载内存）"""
@@ -738,6 +784,18 @@ async def export_batch(
         raise HTTPException(status_code=400, detail="请指定至少一个端口")
 
     service = ParserService(db)
+    task = await service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    visible_ports = await get_visible_ports(
+        db,
+        role=user.role or "",
+        protocol_version_id=task.protocol_version_id,
+    )
+    if visible_ports is not None:
+        port_list = [p for p in port_list if p in visible_ports]
+    if not port_list:
+        raise HTTPException(status_code=403, detail="当前角色无可导出的端口")
 
     export_dir = DATA_DIR / "exports" / str(task_id)
     export_dir.mkdir(parents=True, exist_ok=True)
@@ -823,6 +881,7 @@ async def get_port_anomaly_defaults(
     task_id: int,
     port_number: int,
     parser_id: Optional[int] = Query(None),
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """获取该端口解析结果中的数值字段及默认跳变阈值（%）。"""
@@ -832,6 +891,12 @@ async def get_port_anomaly_defaults(
         raise HTTPException(status_code=404, detail="任务不存在")
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="任务未完成，无法分析")
+    await ensure_port_visible_or_403(
+        db,
+        user=user,
+        protocol_version_id=task.protocol_version_id,
+        port_number=port_number,
+    )
 
     pas = PortAnomalyService(service)
     numeric_fields, defaults = pas.get_numeric_fields_and_defaults(
@@ -859,6 +924,7 @@ async def analyze_port_anomalies(
     task_id: int,
     port_number: int,
     body: PortAnomalyAnalyzeRequest,
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """对选定数值字段执行跳变与卡死分析。"""
@@ -868,6 +934,12 @@ async def analyze_port_anomalies(
         raise HTTPException(status_code=404, detail="任务不存在")
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="任务未完成，无法分析")
+    await ensure_port_visible_or_403(
+        db,
+        user=user,
+        protocol_version_id=task.protocol_version_id,
+        port_number=port_number,
+    )
     if not body.fields:
         raise HTTPException(status_code=400, detail="请至少选择一个字段")
 
