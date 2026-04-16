@@ -48,7 +48,7 @@ function ProtocolPage() {
       title: '端口号',
       dataIndex: 'port_number',
       width: 100,
-      render: (port) => <span className="mono" style={{ color: '#d29922' }}>{port}</span>,
+      render: (port) => <span className="mono" style={{ color: '#d4a843' }}>{port}</span>,
     },
     {
       title: '消息名称',
@@ -98,7 +98,7 @@ function ProtocolPage() {
       <Card
         title={
           <Space>
-            <ApiOutlined style={{ color: '#d29922' }} />
+            <ApiOutlined style={{ color: '#d4a843' }} />
             <span>TSN网络配置管理</span>
           </Space>
         }
@@ -141,11 +141,11 @@ function ProtocolPage() {
                       <Tag color="blue">{version.version}</Tag>
                       <Tag color="green">{version.port_count} 个端口</Tag>
                       {version.source_file && (
-                        <span style={{ color: '#8b949e', fontSize: 12 }}>
+                        <span style={{ color: '#a1a1aa', fontSize: 12 }}>
                           来源: {version.source_file}
                         </span>
                       )}
-                      <span style={{ color: '#8b949e', fontSize: 12 }}>
+                      <span style={{ color: '#a1a1aa', fontSize: 12 }}>
                         {dayjs(version.created_at).format('YYYY-MM-DD HH:mm')}
                       </span>
                     </Space>

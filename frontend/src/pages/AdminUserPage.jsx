@@ -129,7 +129,7 @@ function AdminUserPage() {
         )}
         style={{ marginBottom: 24 }}
       >
-        <div style={{ color: '#8b949e', marginBottom: 16 }}>
+        <div style={{ color: '#a1a1aa', marginBottom: 16 }}>
           仅管理员可创建或删除账号。不能删除当前登录用户及最后一个管理员。
         </div>
         <Form

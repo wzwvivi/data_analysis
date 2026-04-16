@@ -97,10 +97,10 @@ function TaskListPage() {
         record.network_config_name ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
             <span>{record.network_config_name}</span>
-            <Tag color="cyan" style={{ margin: 0, background: 'rgba(56, 189, 248, 0.15)', borderColor: '#38bdf8', color: '#38bdf8' }}>{record.network_config_version}</Tag>
+            <Tag style={{ margin: 0, background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa' }}>{record.network_config_version}</Tag>
           </div>
         ) : (
-          <Tag style={{ background: '#21262d', borderColor: '#30363d', color: '#8b949e' }}>扫描模式</Tag>
+          <Tag style={{ background: '#18181b', borderColor: '#27272a', color: '#a1a1aa' }}>扫描模式</Tag>
         )
       ),
     },
@@ -114,8 +114,8 @@ function TaskListPage() {
             <Space direction="vertical" size={4} style={{ width: '100%' }}>
               {record.device_parsers.map(dp => (
                 <div key={dp.device_name} style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                  <Tag color="orange" style={{ margin: 0, background: 'rgba(210, 153, 34, 0.15)', borderColor: '#d29922', color: '#d29922' }}>{dp.device_name}</Tag>
-                  <Tag color="green" style={{ margin: 0, background: 'rgba(63, 185, 80, 0.15)', borderColor: '#3fb950', color: '#3fb950' }}>{[dp.parser_profile_name, dp.parser_profile_version].filter(Boolean).join(' ')}</Tag>
+                  <Tag color="orange" style={{ margin: 0, background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843' }}>{dp.device_name}</Tag>
+                  <Tag color="green" style={{ margin: 0, background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>{[dp.parser_profile_name, dp.parser_profile_version].filter(Boolean).join(' ')}</Tag>
                 </div>
               ))}
             </Space>
@@ -125,7 +125,7 @@ function TaskListPage() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
             <span style={{ fontWeight: 500 }}>{record.parser_profile_name || '-'}</span>
             {record.parser_profile_version && (
-              <Tag color="green" style={{ margin: 0, background: 'rgba(63, 185, 80, 0.15)', borderColor: '#3fb950', color: '#3fb950' }}>{record.parser_profile_version}</Tag>
+              <Tag color="green" style={{ margin: 0, background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>{record.parser_profile_version}</Tag>
             )}
           </div>
         )
@@ -142,7 +142,7 @@ function TaskListPage() {
       dataIndex: 'parsed_packets',
       width: 120,
       render: (count) => (
-        <span className="mono" style={{ color: '#3fb950' }}>
+        <span className="mono" style={{ color: '#5fd068' }}>
           {count?.toLocaleString() || 0}
         </span>
       ),

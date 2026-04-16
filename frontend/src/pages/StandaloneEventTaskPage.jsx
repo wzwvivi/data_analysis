@@ -211,7 +211,7 @@ function StandaloneEventTaskPage() {
               valueStyle={{ fontSize: 14, fontFamily: 'JetBrains Mono, monospace' }}
             />
             {analysisTask?.created_at && (
-              <div style={{ marginTop: 8, color: '#8b949e', fontSize: 12 }}>
+              <div style={{ marginTop: 8, color: '#a1a1aa', fontSize: 12 }}>
                 创建时间 {dayjs(analysisTask.created_at).format('YYYY-MM-DD HH:mm:ss')}
               </div>
             )}
@@ -226,17 +226,17 @@ function StandaloneEventTaskPage() {
               }
               valueStyle={{
                 fontSize: 14,
-                color: isCompleted ? '#3fb950' :
-                  analysisTask?.status === 'failed' ? '#f85149' :
-                  isProcessing ? '#d29922' : '#8b949e',
+                color: isCompleted ? '#5fd068' :
+                  analysisTask?.status === 'failed' ? '#f05050' :
+                  isProcessing ? '#d4a843' : '#a1a1aa',
               }}
             />
           </Col>
           <Col xs={24} md={12}>
             <Space wrap>
               <Statistic title="检查项" value={analysisTask?.total_checks ?? 0} prefix={<FileSearchOutlined />} />
-              <Statistic title="通过" value={analysisTask?.passed_checks ?? 0} valueStyle={{ color: '#3fb950' }} />
-              <Statistic title="失败" value={analysisTask?.failed_checks ?? 0} valueStyle={{ color: '#ef4444' }} />
+              <Statistic title="通过" value={analysisTask?.passed_checks ?? 0} valueStyle={{ color: '#5fd068' }} />
+              <Statistic title="失败" value={analysisTask?.failed_checks ?? 0} valueStyle={{ color: '#f05050' }} />
               <Button icon={<ReloadOutlined />} onClick={() => loadTaskDetail(taskId)} loading={detailLoading}>
                 刷新结果
               </Button>
@@ -255,13 +255,13 @@ function StandaloneEventTaskPage() {
           <Row style={{ marginTop: 16 }}>
             <Col span={24}>
               <Space align="center" style={{ width: '100%' }}>
-                <span style={{ color: '#8b949e' }}>通过率</span>
+                <span style={{ color: '#a1a1aa' }}>通过率</span>
                 <Progress
                   percent={passRate}
                   status={passRate === 100 ? 'success' : passRate < 50 ? 'exception' : 'normal'}
                   style={{ flex: 1, maxWidth: 420 }}
                 />
-                <span style={{ color: '#8b949e' }}>{passedCount}/{checkResults.length}</span>
+                <span style={{ color: '#a1a1aa' }}>{passedCount}/{checkResults.length}</span>
               </Space>
             </Col>
           </Row>
@@ -281,7 +281,7 @@ function StandaloneEventTaskPage() {
       <Card
         title={
           <Space>
-            <FileSearchOutlined style={{ color: '#d29922' }} />
+            <FileSearchOutlined style={{ color: '#d4a843' }} />
             <span>检查单结果</span>
             {isCompleted && <Tag color="green">{checkResults.length} 项</Tag>}
           </Space>
@@ -292,7 +292,7 @@ function StandaloneEventTaskPage() {
             <Spin />
           </div>
         ) : !isCompleted && isProcessing ? (
-          <div style={{ textAlign: 'center', padding: 48, color: '#8b949e' }}>
+          <div style={{ textAlign: 'center', padding: 48, color: '#a1a1aa' }}>
             <Spin style={{ marginRight: 12 }} />
             正在分析 pcap，请稍候…
             {typeof analysisTask?.progress === 'number' && analysisTask.progress > 0 && (
@@ -326,7 +326,7 @@ function StandaloneEventTaskPage() {
               children: (
                 <div>
                   <div style={{ fontWeight: 600 }}>{e.time_str} · {e.event_name}</div>
-                  <div style={{ color: '#8b949e', fontSize: 12 }}>{e.event_description}</div>
+                  <div style={{ color: '#a1a1aa', fontSize: 12 }}>{e.event_description}</div>
                   <Tag>端口 {e.port}</Tag>
                   {e.device && <Tag color="purple">{e.device}</Tag>}
                 </div>
@@ -353,13 +353,13 @@ function StandaloneEventTaskPage() {
               <Descriptions.Item label="事件时间">{checkDetail.check_result.event_time || '-'}</Descriptions.Item>
               <Descriptions.Item label="周期检查">
                 {renderResultTag(checkDetail.check_result.period_result)}
-                <div style={{ marginTop: 8, fontSize: 12, color: '#8b949e' }}>
+                <div style={{ marginTop: 8, fontSize: 12, color: '#a1a1aa' }}>
                   {checkDetail.check_result.period_analysis}
                 </div>
               </Descriptions.Item>
               <Descriptions.Item label="内容检查">
                 {renderResultTag(checkDetail.check_result.content_result)}
-                <div style={{ marginTop: 8, fontSize: 12, color: '#8b949e' }}>
+                <div style={{ marginTop: 8, fontSize: 12, color: '#a1a1aa' }}>
                   {checkDetail.check_result.content_analysis}
                 </div>
               </Descriptions.Item>
@@ -370,7 +370,7 @@ function StandaloneEventTaskPage() {
                   children: (
                     <div>
                       <div>{e.time_str} {e.event_name}</div>
-                      <div style={{ fontSize: 12, color: '#8b949e' }}>{e.event_description}</div>
+                      <div style={{ fontSize: 12, color: '#a1a1aa' }}>{e.event_description}</div>
                     </div>
                   ),
                 }))}

@@ -386,7 +386,7 @@ export default function ProtocolManagerPage() {
 
   return (
     <div style={{ padding: 16, minHeight: '100%' }}>
-      <Title level={4} style={{ color: '#c9d1d9', marginTop: 0 }}>
+      <Title level={4} style={{ color: '#e4e4e7', marginTop: 0 }}>
         协议管理
       </Title>
       <Text type="secondary">管理员维护设备树与 Label；与 TSN 网络配置（ICD）相互独立。</Text>
@@ -395,8 +395,8 @@ export default function ProtocolManagerPage() {
         <Sider
           width={320}
           style={{
-            background: '#161b22',
-            border: '1px solid #30363d',
+            background: '#18181b',
+            border: '1px solid #27272a',
             borderRadius: 8,
             padding: 12,
             overflow: 'auto',
@@ -426,8 +426,8 @@ export default function ProtocolManagerPage() {
           <Card
             bordered={false}
             style={{
-              background: '#161b22',
-              border: '1px solid #30363d',
+              background: '#18181b',
+              border: '1px solid #27272a',
               minHeight: 480,
             }}
             styles={{ body: { padding: 16 } }}
@@ -441,7 +441,7 @@ export default function ProtocolManagerPage() {
             {selectedNode?.isDevice && (
               <>
                 <Space wrap align="center" style={{ marginBottom: 12 }}>
-                  <Text strong style={{ color: '#c9d1d9', fontSize: 16 }}>
+                  <Text strong style={{ color: '#e4e4e7', fontSize: 16 }}>
                     {selectedNode.raw?.name}
                   </Text>
                   <Text type="secondary" code>
@@ -504,7 +504,7 @@ export default function ProtocolManagerPage() {
                 </Space>
 
                 {previewLabel && (
-                  <div style={{ marginBottom: 12, padding: 12, background: '#0d1117', borderRadius: 8 }}>
+                  <div style={{ marginBottom: 12, padding: 12, background: '#0f0f12', borderRadius: 8 }}>
                     <Text type="secondary">选中预览位图：</Text>
                     <Text code>{previewLabel.label_oct}</Text>
                     <BitMapDisplay label={previewLabel} />

@@ -294,9 +294,9 @@ function EventAnalysisPage() {
               }
               valueStyle={{ 
                 fontSize: 14,
-                color: isCompleted ? '#3fb950' : 
-                       analysisTask?.status === 'failed' ? '#f85149' :
-                       isProcessing ? '#d29922' : '#8b949e'
+                color: isCompleted ? '#5fd068' : 
+                       analysisTask?.status === 'failed' ? '#f05050' :
+                       isProcessing ? '#d4a843' : '#a1a1aa'
               }}
             />
           </Col>
@@ -311,7 +311,7 @@ function EventAnalysisPage() {
             <Statistic
               title="通过"
               value={analysisTask?.passed_checks || 0}
-              valueStyle={{ color: '#3fb950' }}
+              valueStyle={{ color: '#5fd068' }}
               prefix={<CheckCircleOutlined />}
             />
           </Col>
@@ -319,7 +319,7 @@ function EventAnalysisPage() {
             <Statistic
               title="失败"
               value={analysisTask?.failed_checks || 0}
-              valueStyle={{ color: '#ef4444' }}
+              valueStyle={{ color: '#f05050' }}
               prefix={<CloseCircleOutlined />}
             />
           </Col>
@@ -357,13 +357,13 @@ function EventAnalysisPage() {
           <Row style={{ marginTop: 16 }}>
             <Col span={24}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <span style={{ color: '#8b949e' }}>通过率:</span>
+                <span style={{ color: '#a1a1aa' }}>通过率:</span>
                 <Progress 
                   percent={passRate} 
                   status={passRate === 100 ? 'success' : passRate < 50 ? 'exception' : 'normal'}
                   style={{ flex: 1, maxWidth: 400 }}
                 />
-                <span style={{ color: '#8b949e' }}>
+                <span style={{ color: '#a1a1aa' }}>
                   {passedCount}/{checkResults.length} 项通过
                 </span>
               </div>
@@ -387,7 +387,7 @@ function EventAnalysisPage() {
       <Card 
         title={
           <Space>
-            <FileSearchOutlined style={{ color: '#d29922' }} />
+            <FileSearchOutlined style={{ color: '#d4a843' }} />
             <span>检查单结果</span>
             {isCompleted && (
               <Tag color="green">{checkResults.length} 项</Tag>
@@ -438,7 +438,7 @@ function EventAnalysisPage() {
         <Card 
           title={
             <Space>
-              <ClockCircleOutlined style={{ color: '#58a6ff' }} />
+              <ClockCircleOutlined style={{ color: '#8b5cf6' }} />
               <span>事件时间线</span>
               <Tag color="blue">{timeline.length} 个事件</Tag>
             </Space>
@@ -453,11 +453,11 @@ function EventAnalysisPage() {
               children: (
                 <div>
                   <div style={{ fontWeight: 500 }}>{event.event_name}</div>
-                  <div style={{ color: '#8b949e', fontSize: 12 }}>
+                  <div style={{ color: '#a1a1aa', fontSize: 12 }}>
                     {event.device} - 端口 {event.port}
                   </div>
                   {event.event_description && (
-                    <div style={{ color: '#8b949e', fontSize: 12, marginTop: 4 }}>
+                    <div style={{ color: '#a1a1aa', fontSize: 12, marginTop: 4 }}>
                       {event.event_description}
                     </div>
                   )}
@@ -466,7 +466,7 @@ function EventAnalysisPage() {
             }))}
           />
           {timeline.length > 20 && (
-            <div style={{ textAlign: 'center', color: '#8b949e', marginTop: 16 }}>
+            <div style={{ textAlign: 'center', color: '#a1a1aa', marginTop: 16 }}>
               ... 还有 {timeline.length - 20} 个事件
             </div>
           )}
@@ -520,7 +520,7 @@ function EventAnalysisPage() {
               {checkDetail.check_result.wireshark_filter && (
                 <Descriptions.Item label="Wireshark过滤器">
                   <code style={{ 
-                    background: '#161b22', 
+                    background: '#18181b', 
                     padding: '4px 8px', 
                     borderRadius: 4,
                     fontSize: 12
@@ -612,7 +612,7 @@ function EventAnalysisPage() {
                     children: (
                       <div>
                         <div style={{ fontWeight: 500 }}>{event.event_name}</div>
-                        <div style={{ color: '#8b949e', fontSize: 12 }}>
+                        <div style={{ color: '#a1a1aa', fontSize: 12 }}>
                           {event.time_str} - {event.device}
                         </div>
                       </div>
@@ -627,10 +627,10 @@ function EventAnalysisPage() {
       
       <style>{`
         .row-fail {
-          background-color: rgba(239, 68, 68, 0.1) !important;
+          background-color: rgba(240, 80, 80, 0.1) !important;
         }
         .row-pass {
-          background-color: rgba(16, 185, 129, 0.05) !important;
+          background-color: rgba(95, 208, 104, 0.05) !important;
         }
       `}</style>
     </div>

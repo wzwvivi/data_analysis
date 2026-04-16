@@ -150,7 +150,7 @@ function StandaloneEventPage() {
       <Card title="上传 pcap / pcapng 进行飞管事件分析" style={{ marginBottom: 24 }}>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <div>
-            <span style={{ color: '#8b949e', marginRight: 12 }}>数据来源</span>
+            <span style={{ color: '#a1a1aa', marginRight: 12 }}>数据来源</span>
             <Radio.Group
               value={dataSource}
               onChange={(e) => {
@@ -164,7 +164,7 @@ function StandaloneEventPage() {
             </Radio.Group>
           </div>
           <Space wrap align="center">
-            <span style={{ color: '#8b949e' }}>规则模板</span>
+            <span style={{ color: '#a1a1aa' }}>规则模板</span>
             <Select
               value={ruleTemplate}
               onChange={setRuleTemplate}
@@ -236,7 +236,7 @@ function StandaloneEventPage() {
             刷新列表
           </Button>
         </Space>
-        <div style={{ marginTop: 12, color: '#8b949e', fontSize: 12 }}>
+        <div style={{ marginTop: 12, color: '#a1a1aa', fontSize: 12 }}>
           直接读取原始报文，无需先完成端口解析。分析在后台执行；开始分析后会进入任务详情页。
         </div>
       </Card>

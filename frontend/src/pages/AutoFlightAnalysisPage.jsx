@@ -179,7 +179,7 @@ function AutoFlightAnalysisPage() {
       <Card title="上传 pcap / pcapng 进行自动飞行性能分析" style={{ marginBottom: 24 }}>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <div>
-            <span style={{ color: '#8b949e', marginRight: 12 }}>数据来源</span>
+            <span style={{ color: '#a1a1aa', marginRight: 12 }}>数据来源</span>
             <Radio.Group
               value={dataSource}
               onChange={(e) => {
@@ -268,7 +268,7 @@ function AutoFlightAnalysisPage() {
             刷新列表
           </Button>
         </Space>
-        <div style={{ marginTop: 12, color: '#8b949e', fontSize: 12 }}>
+        <div style={{ marginTop: 12, color: '#a1a1aa', fontSize: 12 }}>
           分析触底垂直速度/过载三机一致性，以及稳态段高度偏差、水平偏差、速度控制偏差。
         </div>
       </Card>

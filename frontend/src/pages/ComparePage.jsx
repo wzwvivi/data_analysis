@@ -186,9 +186,9 @@ function ComparePage() {
   }
 
   const getResultIcon = (result) => {
-    if (result === 'pass') return <CheckCircleOutlined style={{ color: '#52c41a' }} />
-    if (result === 'fail') return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
-    if (result === 'warning') return <WarningOutlined style={{ color: '#faad14' }} />
+    if (result === 'pass') return <CheckCircleOutlined style={{ color: '#5fd068' }} />
+    if (result === 'fail') return <CloseCircleOutlined style={{ color: '#f05050' }} />
+    if (result === 'warning') return <WarningOutlined style={{ color: '#d4a843' }} />
     return null
   }
 
@@ -695,8 +695,8 @@ function ComparePage() {
                     value={task.time_diff_ms?.toFixed(3) || '-'}
                     suffix="ms"
                     valueStyle={{
-                      color: task.sync_result === 'pass' ? '#3f8600' : 
-                             task.sync_result === 'warning' ? '#faad14' : '#cf1322'
+                      color: task.sync_result === 'pass' ? '#5fd068' : 
+                             task.sync_result === 'warning' ? '#d4a843' : '#f05050'
                     }}
                   />
                 </Col>
@@ -731,14 +731,14 @@ function ComparePage() {
                   <Statistic
                     title="两边都有数据"
                     value={task.both_present_count}
-                    valueStyle={{ color: '#3f8600' }}
+                    valueStyle={{ color: '#5fd068' }}
                   />
                 </Col>
                 <Col span={6}>
                   <Statistic
                     title="至少一边缺失"
                     value={task.missing_count}
-                    valueStyle={{ color: task.missing_count > 0 ? '#cf1322' : '#3f8600' }}
+                    valueStyle={{ color: task.missing_count > 0 ? '#f05050' : '#5fd068' }}
                   />
                 </Col>
               </Row>
@@ -790,14 +790,14 @@ function ComparePage() {
                   <Statistic
                     title="存在丢包的端口"
                     value={task.ports_with_gaps}
-                    valueStyle={{ color: task.ports_with_gaps > 0 ? '#faad14' : '#3f8600' }}
+                    valueStyle={{ color: task.ports_with_gaps > 0 ? '#d4a843' : '#5fd068' }}
                   />
                 </Col>
                 <Col span={6}>
                   <Statistic
                     title="总丢包段数"
                     value={task.total_gap_count}
-                    valueStyle={{ color: task.total_gap_count > 0 ? '#faad14' : '#3f8600' }}
+                    valueStyle={{ color: task.total_gap_count > 0 ? '#d4a843' : '#5fd068' }}
                   />
                 </Col>
               </Row>
@@ -846,21 +846,21 @@ function ComparePage() {
                   <Statistic
                     title="通过"
                     value={task.timing_pass_count}
-                    valueStyle={{ color: '#3f8600' }}
+                    valueStyle={{ color: '#5fd068' }}
                   />
                 </Col>
                 <Col span={4}>
                   <Statistic
                     title="警告"
                     value={task.timing_warning_count}
-                    valueStyle={{ color: '#faad14' }}
+                    valueStyle={{ color: '#d4a843' }}
                   />
                 </Col>
                 <Col span={4}>
                   <Statistic
                     title="失败"
                     value={task.timing_fail_count}
-                    valueStyle={{ color: '#cf1322' }}
+                    valueStyle={{ color: '#f05050' }}
                   />
                 </Col>
               </Row>
@@ -918,10 +918,10 @@ function ComparePage() {
 
       <style>{`
         .table-row-fail {
-          background-color: #fff1f0;
+          background-color: rgba(240, 80, 80, 0.08);
         }
         .table-row-warning {
-          background-color: #fffbe6;
+          background-color: rgba(212, 168, 67, 0.08);
         }
       `}</style>
     </div>

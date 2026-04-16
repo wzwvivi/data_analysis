@@ -298,7 +298,7 @@ function UploadPage() {
       key: 'device_name',
       render: (name) => (
         <Space>
-          <DesktopOutlined style={{ color: '#f59e0b' }} />
+          <DesktopOutlined style={{ color: '#d4a843' }} />
           <span style={{ fontWeight: 500 }}>{name}</span>
         </Space>
       ),
@@ -312,15 +312,15 @@ function UploadPage() {
         family
           ? (
             <Space size={4}>
-              <Tag color={hasSelectedATG && atgRequiredFamilies.includes(family) ? 'gold' : 'blue'}>
+              <Tag style={{ background: hasSelectedATG && atgRequiredFamilies.includes(family) ? 'rgba(212, 168, 67, 0.15)' : 'rgba(139, 92, 246, 0.15)', borderColor: hasSelectedATG && atgRequiredFamilies.includes(family) ? '#d4a843' : 'rgba(139, 92, 246, 0.4)', color: hasSelectedATG && atgRequiredFamilies.includes(family) ? '#d4a843' : '#a78bfa' }}>
                 {FAMILY_LABELS[family] || family}
               </Tag>
               {hasSelectedATG && atgRequiredFamilies.includes(family) && (
-                <Tag color="magenta">ATG依赖</Tag>
+                <Tag style={{ background: 'rgba(240, 80, 80, 0.15)', borderColor: '#f05050', color: '#f05050' }}>ATG依赖</Tag>
               )}
             </Space>
           )
-          : <Tag color="default">未识别</Tag>
+          : <Tag style={{ background: 'rgba(161, 161, 170, 0.1)', borderColor: '#52525b', color: '#a1a1aa' }}>未识别</Tag>
       ),
     },
     {
@@ -330,7 +330,7 @@ function UploadPage() {
       render: (_, record) => {
         const parsers = record.available_parsers || []
         if (parsers.length === 0) {
-          return <Tag color="red">暂无可用解析器</Tag>
+          return <Tag style={{ background: 'rgba(240, 80, 80, 0.15)', borderColor: '#f05050', color: '#f05050' }}>暂无可用解析器</Tag>
         }
         return (
           <Select
@@ -354,7 +354,7 @@ function UploadPage() {
       dataIndex: 'ports',
       key: 'ports',
       render: (ports) => (
-        <span style={{ color: '#8b949e', fontSize: 12 }}>
+        <span style={{ color: '#a1a1aa', fontSize: 12 }}>
           {ports?.length || 0} 个
         </span>
       ),
@@ -371,14 +371,18 @@ function UploadPage() {
         <Col span={16}>
           <Card
             title={
-              <Space>
-                <CloudUploadOutlined style={{ color: '#d29922' }} />
-                <span>上传TSN数据包</span>
-              </Space>
+              <div>
+                <Space align="center" size={10}>
+                  <CloudUploadOutlined style={{ color: '#a78bfa', fontSize: 18 }} />
+                  <span>
+                    <span style={{ color: '#f4f4f5', fontWeight: 650, letterSpacing: '0.01em' }}>上传 TSN 数据包</span>
+                  </span>
+                </Space>
+              </div>
             }
           >
             <div style={{ marginBottom: 16 }}>
-              <span style={{ color: '#8b949e', marginRight: 12 }}>数据来源</span>
+              <span style={{ color: '#a1a1aa', marginRight: 12 }}>数据来源</span>
               <Radio.Group
                 value={dataSource}
                 onChange={(e) => {
@@ -394,7 +398,7 @@ function UploadPage() {
 
             {dataSource === 'platform' ? (
               <div style={{ marginBottom: 24 }}>
-                <div style={{ color: '#8b949e', marginBottom: 8 }}>选择管理员上传的平台数据（近 2 天内有效）</div>
+                <div style={{ color: '#a1a1aa', marginBottom: 8 }}>选择管理员上传的平台数据（近 2 天内有效）</div>
                 <Select
                   placeholder="选择一条平台数据"
                   style={{ width: '100%' }}
@@ -415,12 +419,12 @@ function UploadPage() {
             ) : (
               <Dragger {...uploadProps} style={{ marginBottom: 24 }}>
                 <p className="ant-upload-drag-icon">
-                  <InboxOutlined style={{ color: '#d29922', fontSize: 48 }} />
+                  <InboxOutlined style={{ color: '#d4a843', fontSize: 48 }} />
                 </p>
-                <p className="ant-upload-text" style={{ color: '#c9d1d9' }}>
+                <p className="ant-upload-text" style={{ color: '#e4e4e7' }}>
                   点击或拖拽文件到此区域上传
                 </p>
-                <p className="ant-upload-hint" style={{ color: '#8b949e' }}>
+                <p className="ant-upload-hint" style={{ color: '#a1a1aa' }}>
                   支持 .pcapng, .pcap, .cap 格式的网络抓包文件
                 </p>
               </Dragger>
@@ -431,9 +435,9 @@ function UploadPage() {
               <Form.Item
                 label={
                   <Space>
-                    <ApiOutlined style={{ color: '#58a6ff' }} />
-                    <span>TSN网络配置</span>
-                    <Tag color="blue">必选</Tag>
+                    <ApiOutlined style={{ color: '#8b5cf6' }} />
+                    <span style={{ fontWeight: 600, color: '#f4f4f5' }}>TSN网络配置</span>
+                    <Tag style={{ background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa' }}>必选</Tag>
                   </Space>
                 }
                 required
@@ -457,10 +461,10 @@ function UploadPage() {
                   {netVersions.map(v => (
                     <Option key={v.id} value={v.id}>
                       <Space>
-                        <ApiOutlined style={{ color: '#58a6ff' }} />
+                        <ApiOutlined style={{ color: '#8b5cf6' }} />
                         <span style={{ fontWeight: 500 }}>{v.protocol_name}</span>
-                        <Tag color="cyan">{v.version}</Tag>
-                        <span style={{ color: '#8b949e', fontSize: 12 }}>
+                        <Tag style={{ background: 'rgba(161, 161, 170, 0.1)', borderColor: '#52525b', color: '#a1a1aa' }}>{v.version}</Tag>
+                        <span style={{ color: '#a1a1aa', fontSize: 12 }}>
                           ({v.port_count} 个端口)
                         </span>
                       </Space>
@@ -480,7 +484,7 @@ function UploadPage() {
                       <div>
                         <strong>网络配置：</strong>{selectedVersionInfo.protocol_name} - {selectedVersionInfo.version}
                       </div>
-                      <div style={{ color: '#8b949e', fontSize: 12 }}>
+                      <div style={{ color: '#a1a1aa', fontSize: 12 }}>
                         {selectedVersionInfo.port_count} 个端口定义
                         {selectedVersionInfo.source_file && ` | 来源: ${selectedVersionInfo.source_file}`}
                       </div>
@@ -494,9 +498,9 @@ function UploadPage() {
                 <Form.Item
                   label={
                     <Space>
-                      <DesktopOutlined style={{ color: '#f59e0b' }} />
+                      <DesktopOutlined style={{ color: '#d4a843' }} />
                       <span>选择设备</span>
-                      <Tag color="orange">必选</Tag>
+                      <Tag style={{ background: 'rgba(212, 168, 67, 0.12)', borderColor: '#d4a843', color: '#d4a843' }}>必选</Tag>
                     </Space>
                   }
                   required
@@ -516,19 +520,19 @@ function UploadPage() {
                     {devices.map(device => (
                       <Option key={device.device_name} value={device.device_name}>
                         <Space>
-                          <DesktopOutlined style={{ color: '#f59e0b' }} />
+                          <DesktopOutlined style={{ color: '#d4a843' }} />
                           <span style={{ fontWeight: 500 }}>{device.device_name}</span>
-                          <Tag color="orange">{device.port_count} 端口</Tag>
+                          <Tag style={{ background: 'rgba(212, 168, 67, 0.12)', borderColor: '#d4a843', color: '#d4a843' }}>{device.port_count} 端口</Tag>
                           {device.protocol_family && (
-                            <Tag color="blue">{FAMILY_LABELS[device.protocol_family] || device.protocol_family}</Tag>
+                            <Tag style={{ background: 'rgba(139, 92, 246, 0.12)', borderColor: 'rgba(139, 92, 246, 0.35)', color: '#a78bfa' }}>{FAMILY_LABELS[device.protocol_family] || device.protocol_family}</Tag>
                           )}
-                          <Tag color="green">{formatDirectionLabel(device.direction)}</Tag>
+                          <Tag style={{ background: 'rgba(95, 208, 104, 0.12)', borderColor: '#5fd068', color: '#5fd068' }}>{formatDirectionLabel(device.direction)}</Tag>
                         </Space>
                       </Option>
                     ))}
                   </Select>
                   {selectedDevices.length > 0 && (
-                    <div style={{ color: '#8b949e', fontSize: 12, marginTop: 4 }}>
+                    <div style={{ color: '#a1a1aa', fontSize: 12, marginTop: 4 }}>
                       已选 {selectedDevices.length} 个设备，共 {selectedPorts.length} 个端口
                     </div>
                   )}
@@ -543,10 +547,10 @@ function UploadPage() {
                   message="ATG 数据核对依赖协议"
                   description={
                     <Space wrap>
-                      <span style={{ color: '#8b949e' }}>请同时关注并配置：</span>
-                      <Tag color={atgFamilyCoverage.irs ? 'green' : 'red'}>IRS {atgFamilyCoverage.irs ? '已覆盖' : '未覆盖'}</Tag>
-                      <Tag color={atgFamilyCoverage.rtk ? 'green' : 'red'}>RTK {atgFamilyCoverage.rtk ? '已覆盖' : '未覆盖'}</Tag>
-                      <Tag color={atgFamilyCoverage.fcc ? 'green' : 'red'}>FCC {atgFamilyCoverage.fcc ? '已覆盖' : '未覆盖'}</Tag>
+                      <span style={{ color: '#a1a1aa' }}>请同时关注并配置：</span>
+                      <Tag style={{ background: atgFamilyCoverage.irs ? 'rgba(95, 208, 104, 0.15)' : 'rgba(240, 80, 80, 0.15)', borderColor: atgFamilyCoverage.irs ? '#5fd068' : '#f05050', color: atgFamilyCoverage.irs ? '#5fd068' : '#f05050' }}>IRS {atgFamilyCoverage.irs ? '已覆盖' : '未覆盖'}</Tag>
+                      <Tag style={{ background: atgFamilyCoverage.rtk ? 'rgba(95, 208, 104, 0.15)' : 'rgba(240, 80, 80, 0.15)', borderColor: atgFamilyCoverage.rtk ? '#5fd068' : '#f05050', color: atgFamilyCoverage.rtk ? '#5fd068' : '#f05050' }}>RTK {atgFamilyCoverage.rtk ? '已覆盖' : '未覆盖'}</Tag>
+                      <Tag style={{ background: atgFamilyCoverage.fcc ? 'rgba(95, 208, 104, 0.15)' : 'rgba(240, 80, 80, 0.15)', borderColor: atgFamilyCoverage.fcc ? '#5fd068' : '#f05050', color: atgFamilyCoverage.fcc ? '#5fd068' : '#f05050' }}>FCC {atgFamilyCoverage.fcc ? '已覆盖' : '未覆盖'}</Tag>
                     </Space>
                   }
                 />
@@ -559,9 +563,9 @@ function UploadPage() {
                   <Form.Item
                     label={
                       <Space>
-                        <SettingOutlined style={{ color: '#3fb950' }} />
+                        <SettingOutlined style={{ color: '#5fd068' }} />
                         <span>设备解析版本配置</span>
-                        <Tag color="green">为每个设备选择解析协议版本</Tag>
+                        <Tag style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>为每个设备选择解析协议版本</Tag>
                       </Space>
                     }
                     required
@@ -592,10 +596,10 @@ function UploadPage() {
                         const parser = dev.available_parsers?.find(p => p.id === pid)
                         return (
                           <div key={dev.device_name}>
-                            <Tag color="orange">{dev.device_name}</Tag>
+                            <Tag style={{ background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843' }}>{dev.device_name}</Tag>
                             →
-                            <Tag color="green">{parser ? [parser.name, parser.version].filter(Boolean).join(' ') : `ID:${pid}`}</Tag>
-                            <span style={{ color: '#8b949e', fontSize: 12 }}>
+                            <Tag style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>{parser ? [parser.name, parser.version].filter(Boolean).join(' ') : `ID:${pid}`}</Tag>
+                            <span style={{ color: '#a1a1aa', fontSize: 12 }}>
                               ({dev.ports?.length || 0} 个端口)
                             </span>
                           </div>
@@ -638,29 +642,29 @@ function UploadPage() {
 
         <Col span={8}>
           <Card title="使用说明">
-            <div style={{ color: '#8b949e', lineHeight: 2 }}>
-              <p><strong style={{ color: '#c9d1d9' }}>1. 准备数据</strong></p>
+            <div style={{ color: '#a1a1aa', lineHeight: 2, fontSize: 13 }}>
+              <p><strong style={{ color: '#d4d4d8' }}>1. 准备数据</strong></p>
               <p>上传从TSN网络抓取的 .pcapng 文件</p>
 
-              <p style={{ marginTop: 16 }}><strong style={{ color: '#58a6ff' }}>2. 选择网络配置</strong></p>
+              <p style={{ marginTop: 16 }}><strong style={{ color: '#a78bfa' }}>2. 选择网络配置</strong></p>
               <p>选择TSN网络配置版本，定义端口和字段偏移位置</p>
 
-              <p style={{ marginTop: 16 }}><strong style={{ color: '#d29922' }}>3. 选择设备</strong></p>
+              <p style={{ marginTop: 16 }}><strong style={{ color: '#d4a843' }}>3. 选择设备</strong></p>
               <p>选择要解析的目标设备</p>
 
-              <p style={{ marginTop: 16 }}><strong style={{ color: '#3fb950' }}>4. 配置解析版本</strong></p>
+              <p style={{ marginTop: 16 }}><strong style={{ color: '#5fd068' }}>4. 配置解析版本</strong></p>
               <p>为每个设备选择对应的解析协议版本。系统会自动匹配协议类型，只显示适用的版本。</p>
 
-              <p style={{ marginTop: 16 }}><strong style={{ color: '#c9d1d9' }}>5. 开始解析</strong></p>
+              <p style={{ marginTop: 16 }}><strong style={{ color: '#d4d4d8' }}>5. 开始解析</strong></p>
               <p>系统将按设备分配端口和解析器，精确解码每个设备的数据</p>
             </div>
           </Card>
 
           {netVersions.length === 0 && !loading && (
             <Card title="提示" style={{ marginTop: 16 }}>
-              <div style={{ color: '#f59e0b' }}>
+              <div style={{ color: '#d4a843' }}>
                 <p>暂无可用网络配置</p>
-                <p style={{ fontSize: 12, color: '#8b949e' }}>
+                <p style={{ fontSize: 12, color: '#a1a1aa' }}>
                   当前系统固定使用 TSN ICD v6.0.1，请联系管理员检查内置配置是否加载成功。
                 </p>
               </div>
@@ -668,24 +672,24 @@ function UploadPage() {
           )}
 
           <Card title="解析流程" style={{ marginTop: 16 }}>
-            <div style={{ color: '#8b949e', fontSize: 13, lineHeight: 2 }}>
+            <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 2 }}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                <Tag color="blue" style={{ margin: 0, marginRight: 8 }}>网络配置</Tag>
+                <Tag style={{ background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa', margin: 0, marginRight: 8 }}>网络配置</Tag>
                 <span>定位端口和偏移</span>
               </div>
-              <div style={{ borderLeft: '2px solid #30363d', height: 16, marginLeft: 12 }} />
+              <div style={{ borderLeft: '2px solid rgba(139, 92, 246, 0.3)', height: 16, marginLeft: 12 }} />
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                <Tag color="orange" style={{ margin: 0, marginRight: 8 }}>设备选择</Tag>
+                <Tag style={{ background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843', margin: 0, marginRight: 8 }}>设备选择</Tag>
                 <span>筛选目标设备端口</span>
               </div>
-              <div style={{ borderLeft: '2px solid #30363d', height: 16, marginLeft: 12 }} />
+              <div style={{ borderLeft: '2px solid rgba(139, 92, 246, 0.2)', height: 16, marginLeft: 12 }} />
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                <Tag color="green" style={{ margin: 0, marginRight: 8 }}>版本配置</Tag>
+                <Tag style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068', margin: 0, marginRight: 8 }}>版本配置</Tag>
                 <span>逐设备指定协议版本</span>
               </div>
-              <div style={{ borderLeft: '2px solid #30363d', height: 16, marginLeft: 12 }} />
+              <div style={{ borderLeft: '2px solid rgba(139, 92, 246, 0.15)', height: 16, marginLeft: 12 }} />
               <div style={{ display: 'flex', alignItems: 'center' }}>
-                <Tag color="purple" style={{ margin: 0, marginRight: 8 }}>输出结果</Tag>
+                <Tag style={{ background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa', margin: 0, marginRight: 8 }}>输出结果</Tag>
                 <span>按设备/端口分组</span>
               </div>
             </div>

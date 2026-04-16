@@ -211,16 +211,24 @@ function AutoFlightAnalysisTaskPage() {
         itemHeight: 10,
         itemGap: 14,
         textStyle: {
-          color: '#dce3ec',
+          color: '#a1a1aa',
           fontSize: 12,
           fontWeight: 500,
         },
-        inactiveColor: '#a7b6c6',
-        pageTextStyle: { color: '#dce3ec' },
+        inactiveColor: '#71717a',
+        pageTextStyle: { color: '#a1a1aa' },
       },
       grid: { left: 50, right: 24, top: 36, bottom: 40 },
-      xAxis: { type: 'value', name: 't(s)' },
-      yAxis: [{ type: 'value', name: 'Vz(m/s)' }, { type: 'value', name: 'Az(m/s²)' }],
+      xAxis: {
+        type: 'value',
+        name: 't(s)',
+        nameTextStyle: { color: '#a1a1aa' },
+        axisLabel: { color: '#71717a' },
+      },
+      yAxis: [
+        { type: 'value', name: 'Vz(m/s)', nameTextStyle: { color: '#a1a1aa' }, axisLabel: { color: '#71717a' } },
+        { type: 'value', name: 'Az(m/s²)', nameTextStyle: { color: '#a1a1aa' }, axisLabel: { color: '#71717a' } },
+      ],
       series: series.flatMap((s) => ([
         {
           name: `${s.irs}-Vz`,
@@ -256,16 +264,26 @@ function AutoFlightAnalysisTaskPage() {
         itemHeight: 10,
         itemGap: 14,
         textStyle: {
-          color: '#dce3ec',
+          color: '#a1a1aa',
           fontSize: 12,
           fontWeight: 500,
         },
-        inactiveColor: '#a7b6c6',
-        pageTextStyle: { color: '#dce3ec' },
+        inactiveColor: '#71717a',
+        pageTextStyle: { color: '#a1a1aa' },
       },
       grid: { left: 50, right: 24, top: 36, bottom: 40 },
-      xAxis: { type: 'value', name: 't(s)' },
-      yAxis: { type: 'value', name: '误差' },
+      xAxis: {
+        type: 'value',
+        name: 't(s)',
+        nameTextStyle: { color: '#a1a1aa' },
+        axisLabel: { color: '#71717a' },
+      },
+      yAxis: {
+        type: 'value',
+        name: '误差',
+        nameTextStyle: { color: '#a1a1aa' },
+        axisLabel: { color: '#71717a' },
+      },
       series: [
         {
           name: '高度偏差',
@@ -312,7 +330,7 @@ function AutoFlightAnalysisTaskPage() {
               valueStyle={{ fontSize: 14 }}
             />
             {task?.created_at && (
-              <div style={{ marginTop: 8, color: '#8b949e', fontSize: 12 }}>
+              <div style={{ marginTop: 8, color: '#a1a1aa', fontSize: 12 }}>
                 创建时间 {dayjs(task.created_at).format('YYYY-MM-DD HH:mm:ss')}
               </div>
             )}
@@ -327,9 +345,9 @@ function AutoFlightAnalysisTaskPage() {
               }
               valueStyle={{
                 fontSize: 14,
-                color: isCompleted ? '#3fb950' :
-                  task?.status === 'failed' ? '#f85149' :
-                  isProcessing ? '#d29922' : '#8b949e',
+                color: isCompleted ? '#5fd068' :
+                  task?.status === 'failed' ? '#f05050' :
+                  isProcessing ? '#d4a843' : '#a1a1aa',
               }}
             />
           </Col>
@@ -362,7 +380,7 @@ function AutoFlightAnalysisTaskPage() {
         {loading && !task ? (
           <div style={{ textAlign: 'center', padding: 48 }}><Spin /></div>
         ) : !isCompleted && isProcessing ? (
-          <div style={{ textAlign: 'center', padding: 48, color: '#8b949e' }}>
+          <div style={{ textAlign: 'center', padding: 48, color: '#a1a1aa' }}>
             <Spin style={{ marginRight: 12 }} />
             正在分析自动飞行数据，请稍候…
             {typeof task?.progress === 'number' && task.progress > 0 && (
@@ -420,7 +438,7 @@ function AutoFlightAnalysisTaskPage() {
           <Spin />
         ) : detailData ? (
           <>
-            <div style={{ marginBottom: 12, color: '#8b949e' }}>{detailData.summary || '-'}</div>
+            <div style={{ marginBottom: 12, color: '#a1a1aa' }}>{detailData.summary || '-'}</div>
             {detailType === 'touchdown'
               ? renderTouchdownChart(detailData.chart_data || {})
               : renderSteadyChart(detailData.chart_data || {})}

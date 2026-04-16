@@ -197,7 +197,7 @@ function FccEventAnalysisTaskPage() {
               valueStyle={{ fontSize: 14, fontFamily: 'JetBrains Mono, monospace' }}
             />
             {analysisTask?.created_at && (
-              <div style={{ marginTop: 8, color: '#8b949e', fontSize: 12 }}>
+              <div style={{ marginTop: 8, color: '#a1a1aa', fontSize: 12 }}>
                 创建时间 {dayjs(analysisTask.created_at).format('YYYY-MM-DD HH:mm:ss')}
               </div>
             )}
@@ -212,17 +212,17 @@ function FccEventAnalysisTaskPage() {
               }
               valueStyle={{
                 fontSize: 14,
-                color: isCompleted ? '#3fb950' :
-                  analysisTask?.status === 'failed' ? '#f85149' :
-                  isProcessing ? '#d29922' : '#8b949e',
+                color: isCompleted ? '#5fd068' :
+                  analysisTask?.status === 'failed' ? '#f05050' :
+                  isProcessing ? '#d4a843' : '#a1a1aa',
               }}
             />
           </Col>
           <Col xs={24} md={12}>
             <Space wrap>
               <Statistic title="检查项" value={analysisTask?.total_checks ?? 0} prefix={<FileSearchOutlined />} />
-              <Statistic title="已发生" value={detectedCount} valueStyle={{ color: '#d29922' }} />
-              <Statistic title="未发生" value={notDetectedCount} valueStyle={{ color: '#3fb950' }} />
+              <Statistic title="已发生" value={detectedCount} valueStyle={{ color: '#d4a843' }} />
+              <Statistic title="未发生" value={notDetectedCount} valueStyle={{ color: '#5fd068' }} />
               <Button icon={<ReloadOutlined />} onClick={() => loadTaskDetail(taskId)} loading={detailLoading}>
                 刷新结果
               </Button>
@@ -252,7 +252,7 @@ function FccEventAnalysisTaskPage() {
       <Card
         title={
           <Space>
-            <FileSearchOutlined style={{ color: '#d29922' }} />
+            <FileSearchOutlined style={{ color: '#d4a843' }} />
             <span>飞控事件检查结果</span>
             {isCompleted && <Tag color="green">{checkResults.length} 项</Tag>}
           </Space>
@@ -261,7 +261,7 @@ function FccEventAnalysisTaskPage() {
         {detailLoading && !analysisTask ? (
           <div style={{ textAlign: 'center', padding: 48 }}><Spin /></div>
         ) : !isCompleted && isProcessing ? (
-          <div style={{ textAlign: 'center', padding: 48, color: '#8b949e' }}>
+          <div style={{ textAlign: 'center', padding: 48, color: '#a1a1aa' }}>
             <Spin style={{ marginRight: 12 }} />
             正在分析飞控数据，请稍候…
             {typeof analysisTask?.progress === 'number' && analysisTask.progress > 0 && (
@@ -295,7 +295,7 @@ function FccEventAnalysisTaskPage() {
               children: (
                 <div>
                   <div style={{ fontWeight: 600 }}>{e.time_str} · {e.event_name}</div>
-                  <div style={{ color: '#8b949e', fontSize: 12 }}>{e.event_description}</div>
+                  <div style={{ color: '#a1a1aa', fontSize: 12 }}>{e.event_description}</div>
                   {e.port > 0 && <Tag>端口 {e.port}</Tag>}
                   {e.device && <Tag color="purple">{e.device}</Tag>}
                 </div>
@@ -323,7 +323,7 @@ function FccEventAnalysisTaskPage() {
               <Descriptions.Item label="事件描述">{checkDetail.check_result.event_description || '-'}</Descriptions.Item>
               {checkDetail.check_result.content_analysis && (
                 <Descriptions.Item label="详细信息">
-                  <div style={{ fontSize: 12, color: '#8b949e' }}>
+                  <div style={{ fontSize: 12, color: '#a1a1aa' }}>
                     {checkDetail.check_result.content_analysis}
                   </div>
                 </Descriptions.Item>
@@ -338,7 +338,7 @@ function FccEventAnalysisTaskPage() {
                     children: (
                       <div>
                         <div>{e.time_str} {e.event_name}</div>
-                        <div style={{ fontSize: 12, color: '#8b949e' }}>{e.event_description}</div>
+                        <div style={{ fontSize: 12, color: '#a1a1aa' }}>{e.event_description}</div>
                       </div>
                     ),
                   }))}

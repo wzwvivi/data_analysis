@@ -144,7 +144,7 @@ function FccEventAnalysisPage() {
       <Card title="上传 pcap / pcapng 进行飞控事件分析" style={{ marginBottom: 24 }}>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <div>
-            <span style={{ color: '#8b949e', marginRight: 12 }}>数据来源</span>
+            <span style={{ color: '#a1a1aa', marginRight: 12 }}>数据来源</span>
             <Radio.Group
               value={dataSource}
               onChange={(e) => {
@@ -159,7 +159,7 @@ function FccEventAnalysisPage() {
           </div>
 
           <Space wrap align="center">
-            <span style={{ color: '#8b949e' }}>分歧容忍阈值</span>
+            <span style={{ color: '#a1a1aa' }}>分歧容忍阈值</span>
             <Select
               value={tolerance}
               onChange={setTolerance}
@@ -231,7 +231,7 @@ function FccEventAnalysisPage() {
             刷新列表
           </Button>
         </Space>
-        <div style={{ marginTop: 12, color: '#8b949e', fontSize: 12 }}>
+        <div style={{ marginTop: 12, color: '#a1a1aa', fontSize: 12 }}>
           基于飞控状态帧、通道选择、通道故障等端口数据，检测主飞控异常、传感器选择分歧、通道故障等事件。
           分歧容忍阈值用于过滤因三机异步时差导致的瞬间"假分歧"，持续时间低于阈值的分歧将被忽略。
         </div>

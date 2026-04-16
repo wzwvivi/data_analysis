@@ -1,17 +1,20 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
 
 :root {
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
-  --border-color: #30363d;
-  --text-primary: #c9d1d9;
-  --text-secondary: #8b949e;
-  --accent-blue: #58a6ff;
-  --accent-green: #3fb950;
-  --accent-orange: #d29922;
-  --accent-red: #f85149;
-  --accent-purple: #a371f7;
+  --bg-primary: #121217;
+  --bg-secondary: #17171d;
+  --bg-tertiary: #1d1d24;
+  --border-color: #2f2f39;
+  --text-primary: #c7c7cf;
+  --text-secondary: #9393a1;
+  --accent-purple: #8b5cf6;
+  --accent-green: #5fd068;
+  --accent-orange: #d4a843;
+  --accent-red: #f05050;
+  --accent-purple-light: #a78bfa;
+  --glass-bg: rgba(29, 29, 36, 0.62);
+  --glass-border: rgba(70, 70, 82, 0.45);
+  --glow-purple: rgba(139, 92, 246, 0.15);
 }
 
 * {
@@ -21,77 +24,168 @@
 }
 
 body {
-  font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Inter', 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg-primary);
+  background-image: radial-gradient(ellipse at 50% 0%, rgba(139, 92, 246, 0.035) 0%, transparent 62%);
+  background-attachment: fixed;
   color: var(--text-primary);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }
 
 #root {
   min-height: 100vh;
 }
 
-/* 自定义滚动条 */
+/* ===== Scrollbar ===== */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 4px;
+  background: rgba(63, 63, 70, 0.6);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
+  background: rgba(113, 113, 122, 0.8);
 }
 
-/* 侧边栏菜单分组 */
+/* ===== Glassmorphism Cards ===== */
+.ant-card {
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 12px !important;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+.ant-card:hover {
+  border-color: rgba(139, 92, 246, 0.18) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.24) !important;
+}
+
+.ant-card .ant-card-head {
+  border-bottom-color: var(--glass-border) !important;
+}
+
+.ant-card .ant-card-head-title {
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
+  color: #d4d4d8 !important;
+}
+
+/* ===== Table Polish ===== */
+.ant-table {
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+
+.ant-table-thead > tr > th {
+  background: rgba(24, 24, 27, 0.8) !important;
+  border-bottom: 1px solid var(--glass-border) !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  text-transform: none !important;
+  letter-spacing: 0.02em !important;
+  color: var(--text-secondary) !important;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(39, 39, 42, 0.5) !important;
+  transition: background 0.2s ease !important;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: rgba(139, 92, 246, 0.04) !important;
+}
+
+.ant-table-tbody > tr.ant-table-row-selected > td {
+  background: rgba(139, 92, 246, 0.1) !important;
+}
+
+/* All buttons smooth transition */
+.ant-btn {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease !important;
+}
+
+/* ===== Sidebar Menu ===== */
 .ant-menu-item-divider {
-  border-color: #30363d !important;
+  border-color: var(--border-color) !important;
   margin: 8px 16px !important;
 }
 
 .ant-menu-inline .ant-menu-item-group-title {
-  color: #9fb3c8 !important;
-  font-size: 16px !important;
-  font-weight: 600 !important;
+  color: #71717a !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
   line-height: 1.3 !important;
   padding: 14px 24px 8px !important;
+  transition: opacity 0.2s ease;
 }
 
 .ant-menu-inline .ant-menu-item-group-list {
   margin-left: 18px !important;
   padding-left: 10px !important;
-  border-left: 1px solid #30363d;
+  border-left: 1px solid rgba(39, 39, 42, 0.6);
 }
 
 .ant-menu-inline .ant-menu-item-group-list .ant-menu-item {
-  font-size: 12px !important;
+  font-size: 13px !important;
   font-weight: 500 !important;
-  min-height: 36px !important;
-  line-height: 36px !important;
+  min-height: 38px !important;
+  line-height: 38px !important;
   margin-inline: 10px !important;
-  margin-block: 4px !important;
+  margin-block: 2px !important;
   padding-left: 12px !important;
+  border-radius: 8px !important;
+  transition: all 0.2s ease !important;
 }
 
-/* 代码字体 */
+.ant-layout-sider-collapsed .ant-menu-item-group-title {
+  opacity: 0;
+  height: 0;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.ant-layout-sider {
+  transition: all 0.2s ease !important;
+}
+
+/* Selected menu item: glowing left bar */
+.ant-menu-item-selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: var(--accent-purple);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 6px rgba(139, 92, 246, 0.35);
+}
+
+/* ===== Code Font ===== */
 .mono {
   font-family: 'JetBrains Mono', 'Fira Code', 'Source Code Pro', 'Consolas', 'Monaco', monospace !important;
 }
 
-/* 动画 */
+/* ===== Animations ===== */
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -100,27 +194,248 @@ body {
 }
 
 .fade-in {
-  animation: fadeIn 0.3s ease-out;
+  animation: fadeIn 0.4s ease-out;
 }
 
-/* 自动飞行分析：暗色主题下提升 tabs 可读性 */
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+/* ===== Spotlight Effect (mouse-follow glow on hover) ===== */
+.spotlight-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+.spotlight-wrapper::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(
+    600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(139, 92, 246, 0.035),
+    transparent 40%
+  );
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.spotlight-wrapper:hover::before {
+  opacity: 0.65;
+}
+
+/* ===== Gradient Text Utility ===== */
+.gradient-text {
+  background: linear-gradient(135deg, #e4e4e7 0%, #a1a1aa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-purple {
+  background: linear-gradient(135deg, #c4b5fd 0%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ===== Primary button: translucent glass style ===== */
+.ant-btn-primary {
+  background: rgba(109, 40, 217, 0.25) !important;
+  border: 1px solid rgba(139, 92, 246, 0.42) !important;
+  color: #c4b5fd !important;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.08) !important;
+  font-weight: 600 !important;
+}
+
+.ant-btn-primary:hover:not(:disabled) {
+  background: rgba(109, 40, 217, 0.33) !important;
+  border-color: rgba(167, 139, 250, 0.55) !important;
+  color: #ddd6fe !important;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.12) !important;
+}
+
+.ant-btn-primary:active:not(:disabled) {
+  background: rgba(91, 33, 182, 0.42) !important;
+  border-color: rgba(167, 139, 250, 0.62) !important;
+  color: #ede9fe !important;
+}
+
+.ant-btn-primary:disabled {
+  background: rgba(39, 39, 42, 0.5) !important;
+  border-color: rgba(63, 63, 70, 0.4) !important;
+  color: #52525b !important;
+  box-shadow: none !important;
+}
+
+/* ===== Pill badge + ghost purple button ===== */
+.pill-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #c4b5fd;
+  background: rgba(76, 29, 149, 0.22);
+  border: 1px solid rgba(139, 92, 246, 0.38);
+  border-radius: 9999px;
+  padding: 5px 14px;
+  line-height: 1.2;
+}
+
+.btn-ghost-purple.ant-btn,
+.btn-ghost-purple.ant-btn-default {
+  background: rgba(76, 29, 149, 0.2) !important;
+  border: 1px solid rgba(139, 92, 246, 0.4) !important;
+  color: #c4b5fd !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600 !important;
+  border-radius: 9999px !important;
+  box-shadow: none !important;
+}
+
+.btn-ghost-purple.ant-btn:hover,
+.btn-ghost-purple.ant-btn-default:hover {
+  background: rgba(91, 33, 182, 0.35) !important;
+  border-color: rgba(167, 139, 250, 0.55) !important;
+  color: #ddd6fe !important;
+}
+
+.btn-ghost-purple.ant-btn:focus-visible,
+.btn-ghost-purple.ant-btn-default:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.45);
+  outline-offset: 2px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===== Tabs (auto-flight analysis) ===== */
 .auto-flight-task-tabs .ant-tabs-nav::before {
-  border-bottom-color: #30363d !important;
+  border-bottom-color: var(--glass-border) !important;
+}
+
+.auto-flight-task-tabs .ant-tabs-tab {
+  transition: all 0.2s ease !important;
 }
 
 .auto-flight-task-tabs .ant-tabs-tab .ant-tabs-tab-btn {
-  color: #c9d1d9 !important;
+  color: var(--text-secondary) !important;
   font-weight: 500;
-  text-shadow: 0 0 0.01px rgba(201, 209, 217, 0.9);
 }
 
 .auto-flight-task-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
   color: #ffffff !important;
   font-weight: 600;
-  text-shadow: 0 0 0.01px rgba(255, 255, 255, 0.95);
 }
 
 .auto-flight-task-tabs .ant-tabs-ink-bar {
-  background: #58a6ff !important;
+  background: var(--accent-purple) !important;
+  box-shadow: 0 1px 8px rgba(139, 92, 246, 0.4);
 }
 
+/* ===== Input Focus ===== */
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-number:focus,
+.ant-input-number-focused,
+.ant-select-focused .ant-select-selector {
+  border-color: var(--accent-purple) !important;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.12) !important;
+}
+
+/* ===== Select Dropdown ===== */
+.ant-select-dropdown {
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 10px !important;
+}
+
+/* ===== Tag Polish ===== */
+.ant-tag {
+  border-radius: 6px !important;
+  font-weight: 500 !important;
+  font-size: 11px !important;
+  letter-spacing: 0.02em !important;
+}
+
+/* Ant Tag Global Overrides for dark theme harmony */
+.ant-tag-blue, .ant-tag-processing {
+  background: rgba(139, 92, 246, 0.15) !important;
+  border-color: rgba(139, 92, 246, 0.4) !important;
+  color: #a78bfa !important;
+}
+.ant-tag-orange, .ant-tag-warning, .ant-tag-gold {
+  background: rgba(212, 168, 67, 0.15) !important;
+  border-color: #d4a843 !important;
+  color: #d4a843 !important;
+}
+.ant-tag-green, .ant-tag-success {
+  background: rgba(95, 208, 104, 0.15) !important;
+  border-color: #5fd068 !important;
+  color: #5fd068 !important;
+}
+.ant-tag-red, .ant-tag-error, .ant-tag-magenta {
+  background: rgba(240, 80, 80, 0.15) !important;
+  border-color: #f05050 !important;
+  color: #f05050 !important;
+}
+.ant-tag-cyan, .ant-tag-geekblue, .ant-tag-purple {
+  background: rgba(139, 92, 246, 0.12) !important;
+  border-color: rgba(139, 92, 246, 0.3) !important;
+  color: #c4b5fd !important;
+}
+.ant-tag-default {
+  background: rgba(161, 161, 170, 0.1) !important;
+  border-color: #52525b !important;
+  color: #a1a1aa !important;
+}
+
+/* ===== Upload Area ===== */
+.ant-upload-drag {
+  border-radius: 12px !important;
+  border-color: var(--glass-border) !important;
+  background: rgba(24, 24, 27, 0.3) !important;
+  transition: all 0.3s ease !important;
+}
+
+.ant-upload-drag:hover {
+  border-color: rgba(139, 92, 246, 0.4) !important;
+  background: rgba(24, 24, 27, 0.5) !important;
+  box-shadow: 0 0 30px rgba(139, 92, 246, 0.05);
+}
+
+/* ===== Alert ===== */
+.ant-alert {
+  border-radius: 10px !important;
+}
+
+/* ===== Modal ===== */
+.ant-modal-content {
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 14px !important;
+}
+
+/* ===== Tooltip ===== */
+.ant-tooltip-inner {
+  border-radius: 8px !important;
+}
+
+/* ===== Progress Bar ===== */
+.ant-progress-bg {
+  background: linear-gradient(90deg, #7c3aed, #8b5cf6, #a78bfa) !important;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+}

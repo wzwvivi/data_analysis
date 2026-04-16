@@ -22,7 +22,7 @@ function PrivateRoute({ children }) {
   const { user, ready } = useAuth()
   if (!ready) {
     return (
-      <div style={{ padding: 100, textAlign: 'center', color: '#8b949e' }}>
+      <div style={{ padding: 100, textAlign: 'center', color: '#a1a1aa' }}>
         加载中…
       </div>
     )
@@ -37,7 +37,7 @@ function AdminRoute({ children }) {
   const { user, ready, isAdmin } = useAuth()
   if (!ready) {
     return (
-      <div style={{ padding: 100, textAlign: 'center', color: '#8b949e' }}>
+      <div style={{ padding: 100, textAlign: 'center', color: '#a1a1aa' }}>
         加载中…
       </div>
     )

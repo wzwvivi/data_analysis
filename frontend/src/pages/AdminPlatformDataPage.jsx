@@ -134,7 +134,7 @@ function AdminPlatformDataPage() {
         }
         style={{ marginBottom: 24 }}
       >
-        <p style={{ color: '#8b949e', marginBottom: 16 }}>
+        <p style={{ color: '#a1a1aa', marginBottom: 16 }}>
           上传的抓包将出现在「上传解析」「事件分析」「TSN 异常检查」中的「平台数据」选项，供所有登录用户使用。
         </p>
         <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pcap,.pcapng,.cap">

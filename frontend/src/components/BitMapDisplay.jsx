@@ -7,8 +7,8 @@ import React, { useMemo } from 'react'
 const SEGMENTS = [
   { from: 1, to: 8, label: 'Label', color: 'rgba(88, 166, 255, 0.15)' },
   { from: 9, to: 10, label: 'SDI', color: 'rgba(163, 113, 247, 0.15)' },
-  { from: 11, to: 29, label: 'Data', color: 'rgba(63, 185, 80, 0.12)' },
-  { from: 30, to: 31, label: 'SSM', color: 'rgba(210, 153, 34, 0.15)' },
+  { from: 11, to: 29, label: 'Data', color: 'rgba(95, 208, 104, 0.12)' },
+  { from: 30, to: 31, label: 'SSM', color: 'rgba(212, 168, 67, 0.15)' },
   { from: 32, to: 32, label: 'P', color: 'rgba(248, 81, 73, 0.15)' },
 ]
 
@@ -71,22 +71,22 @@ export default function BitMapDisplay({ label }) {
     for (let b = 1; b <= 32; b += 1) {
       const seg = segmentAt(b)
       const hits = ranges.filter((r) => b >= r.lo && b <= r.hi)
-      let border = '1px solid #30363d'
-      let bg = seg?.color || '#21262d'
-      let fg = '#8b949e'
+      let border = '1px solid #27272a'
+      let bg = seg?.color || '#18181b'
+      let fg = '#a1a1aa'
       if (hits.length) {
         const k = hits[0].kind
         if (k === 'bnr') {
-          bg = 'rgba(63, 185, 80, 0.35)'
-          fg = '#3fb950'
+          bg = 'rgba(95, 208, 104, 0.35)'
+          fg = '#5fd068'
         } else if (k === 'disc') {
-          bg = 'rgba(210, 153, 34, 0.4)'
-          fg = '#d29922'
+          bg = 'rgba(212, 168, 67, 0.4)'
+          fg = '#d4a843'
         } else {
           bg = 'rgba(163, 113, 247, 0.35)'
-          fg = '#a371f7'
+          fg = '#a78bfa'
         }
-        border = '1px solid #58a6ff'
+        border = '1px solid #8b5cf6'
       }
       out.push({ bit: b, bg, fg, border, seg: seg?.label, hint: hits.map((h) => h.name).join(', ') })
     }
@@ -95,7 +95,7 @@ export default function BitMapDisplay({ label }) {
 
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 6 }}>32 位字位图（1=LSB）</div>
+      <div style={{ fontSize: 12, color: '#a0a0b8', marginBottom: 6 }}>32 位字位图（1=LSB）</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
         {cells.map((c) => (
           <div
@@ -119,7 +119,7 @@ export default function BitMapDisplay({ label }) {
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, fontSize: 11, color: '#6e7681' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, fontSize: 11, color: '#71717a' }}>
         {SEGMENTS.map((s) => (
           <span key={s.label}>
             <span

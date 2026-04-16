@@ -21,8 +21,8 @@ import dayjs from 'dayjs'
 const { Option } = Select
 
 const CHART_COLORS = [
-  '#58a6ff', '#3fb950', '#d29922', '#a371f7', '#f85149',
-  '#14b8a6', '#f59e0b', '#ef4444', '#6366f1', '#84cc16'
+  '#8b5cf6', '#a78bfa', '#5fd068', '#d4a843', '#f05050',
+  '#14b8a6', '#d4a843', '#f05050', '#6366f1', '#84cc16'
 ]
 
 const SKIP_FIELDS = new Set([
@@ -1107,7 +1107,7 @@ function ResultPage() {
 
   const renderFieldWithTooltip = (fieldName) => (
     <Tooltip title={getFieldTooltipText(fieldName)}>
-      <span className="mono" style={{ fontSize: 13, color: '#c9d1d9' }}>{fieldName}</span>
+      <span className="mono" style={{ fontSize: 13, color: '#e4e4e7' }}>{fieldName}</span>
     </Tooltip>
   )
 
@@ -1176,9 +1176,9 @@ function ResultPage() {
           min: leftRange.min,
           max: leftRange.max,
           position: 'left',
-          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-          axisLine: { lineStyle: { color: '#30363d' } },
-          splitLine: { lineStyle: { color: '#30363d' } },
+          axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { lineStyle: { color: '#27272a' } },
         },
         {
           type: 'value',
@@ -1186,8 +1186,8 @@ function ResultPage() {
           min: rightRange.min,
           max: rightRange.max,
           position: 'right',
-          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-          axisLine: { lineStyle: { color: '#30363d' } },
+          axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
           splitLine: { show: false },
         },
       ]
@@ -1200,22 +1200,22 @@ function ResultPage() {
         name: spSelectedFields.length > 1 ? (spUsePrimary ? spPrimaryYField : '自动(全部字段)') : '',
         min: spRange.min,
         max: spRange.max,
-        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-        axisLine: { lineStyle: { color: '#30363d' } },
-        splitLine: { lineStyle: { color: '#30363d' } },
+        axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+        axisLine: { lineStyle: { color: '#27272a' } },
+        splitLine: { lineStyle: { color: '#27272a' } },
       }
     }
 
     return {
       backgroundColor: 'transparent',
       tooltip: {
-        trigger: 'axis', backgroundColor: '#161b22', borderColor: '#30363d',
-        textStyle: { color: '#c9d1d9' },
+        trigger: 'axis', backgroundColor: '#0f0f12', borderColor: '#27272a',
+        textStyle: { color: '#e4e4e7' },
         axisPointer: {
           type: 'cross', snap: true,
-          crossStyle: { color: '#8b949e' },
-          lineStyle: { color: '#58a6ff', type: 'dashed' },
-          label: { backgroundColor: '#21262d', color: '#c9d1d9' },
+          crossStyle: { color: '#a1a1aa' },
+          lineStyle: { color: '#8b5cf6', type: 'dashed' },
+          label: { backgroundColor: '#18181b', color: '#e4e4e7' },
         },
         formatter: (params) => {
           if (!params || params.length === 0) return ''
@@ -1242,21 +1242,21 @@ function ResultPage() {
           return html
         }
       },
-      legend: { data: spSelectedFields, textStyle: { color: '#8b949e' }, top: 10 },
+      legend: { data: spSelectedFields, textStyle: { color: '#a1a1aa' }, top: 10 },
       grid: { left: 60, right: 40, top: 60, bottom: 70 },
       xAxis: {
         type: 'time',
         axisPointer: { snap: true },
-        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
-        axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false }
+        axisLabel: { color: '#a1a1aa', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
+        axisLine: { lineStyle: { color: '#27272a' } }, splitLine: { show: false }
       },
       yAxis, series: chartSeries,
       dataZoom: [
         { type: 'inside', start: 0, end: 100 },
         { type: 'slider', start: 0, end: 100, height: 20, bottom: 10,
-          borderColor: '#30363d', backgroundColor: '#161b22',
-          fillerColor: 'rgba(88, 166, 255, 0.2)',
-          handleStyle: { color: '#58a6ff' }, textStyle: { color: '#8b949e' } }
+          borderColor: '#27272a', backgroundColor: '#0f0f12',
+          fillerColor: 'rgba(139, 92, 246, 0.2)',
+          handleStyle: { color: '#8b5cf6' }, textStyle: { color: '#a1a1aa' } }
       ],
       color: CHART_COLORS,
     }
@@ -1291,16 +1291,16 @@ function ResultPage() {
       yAxis = [
         {
           type: 'value', name: validFields[0], min: leftRange.min, max: leftRange.max, position: 'left',
-          nameTextStyle: { color: '#8b949e', fontSize: 10 },
-          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-          axisLine: { lineStyle: { color: '#30363d' } },
-          splitLine: { lineStyle: { color: '#30363d' } },
+          nameTextStyle: { color: '#a1a1aa', fontSize: 10 },
+          axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { lineStyle: { color: '#27272a' } },
         },
         {
           type: 'value', name: validFields[1], min: rightRange.min, max: rightRange.max, position: 'right',
-          nameTextStyle: { color: '#8b949e', fontSize: 10 },
-          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-          axisLine: { lineStyle: { color: '#30363d' } },
+          nameTextStyle: { color: '#a1a1aa', fontSize: 10 },
+          axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
           splitLine: { show: false },
         },
       ]
@@ -1309,18 +1309,18 @@ function ResultPage() {
       const range = computeYRange(allSeriesData, null)
       yAxis = {
         type: 'value', min: range.min, max: range.max,
-        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-        axisLine: { lineStyle: { color: '#30363d' } },
-        splitLine: { lineStyle: { color: '#30363d' } },
+        axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+        axisLine: { lineStyle: { color: '#27272a' } },
+        splitLine: { lineStyle: { color: '#27272a' } },
       }
     }
 
     return {
       backgroundColor: 'transparent',
-      title: { text: titleText, left: 'center', top: 4, textStyle: { color: '#c9d1d9', fontSize: 12, fontFamily: 'JetBrains Mono' } },
+      title: { text: titleText, left: 'center', top: 4, textStyle: { color: '#e4e4e7', fontSize: 12, fontFamily: 'JetBrains Mono' } },
       tooltip: {
-        trigger: 'axis', backgroundColor: '#161b22', borderColor: '#30363d',
-        textStyle: { color: '#c9d1d9' },
+        trigger: 'axis', backgroundColor: '#0f0f12', borderColor: '#27272a',
+        textStyle: { color: '#e4e4e7' },
         formatter: (params) => {
           if (!params || params.length === 0) return ''
           const time = params[0].value[0]
@@ -1340,23 +1340,23 @@ function ResultPage() {
           return html
         },
       },
-      legend: validFields.length > 1 ? { data: validFields, textStyle: { color: '#8b949e', fontSize: 11 }, top: 20, itemWidth: 14, itemHeight: 8 } : undefined,
+      legend: validFields.length > 1 ? { data: validFields, textStyle: { color: '#a1a1aa', fontSize: 11 }, top: 20, itemWidth: 14, itemHeight: 8 } : undefined,
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
       grid: { left: 56, right: validFields.length === 2 ? 56 : 16, top: validFields.length > 1 ? 44 : 32, bottom: 56 },
       xAxis: {
         type: 'time',
         axisPointer: { snap: true, label: { show: false } },
-        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
-        axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false },
+        axisLabel: { color: '#a1a1aa', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
+        axisLine: { lineStyle: { color: '#27272a' } }, splitLine: { show: false },
       },
       yAxis,
       series: chartSeries,
       dataZoom: [
         { type: 'inside', start: 0, end: 100 },
         { type: 'slider', start: 0, end: 100, height: 16, bottom: 4,
-          borderColor: '#30363d', backgroundColor: '#161b22',
-          fillerColor: 'rgba(88, 166, 255, 0.2)',
-          handleStyle: { color: '#58a6ff' }, textStyle: { color: '#8b949e' } }
+          borderColor: '#27272a', backgroundColor: '#0f0f12',
+          fillerColor: 'rgba(139, 92, 246, 0.2)',
+          handleStyle: { color: '#8b5cf6' }, textStyle: { color: '#a1a1aa' } }
       ],
       color: CHART_COLORS,
     }
@@ -1512,9 +1512,9 @@ function ResultPage() {
           min: leftRange.min,
           max: leftRange.max,
           position: 'left',
-          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-          axisLine: { lineStyle: { color: '#30363d' } },
-          splitLine: { lineStyle: { color: '#30363d' } },
+          axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { lineStyle: { color: '#27272a' } },
         },
         {
           type: 'value',
@@ -1522,8 +1522,8 @@ function ResultPage() {
           min: rightRange.min,
           max: rightRange.max,
           position: 'right',
-          axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-          axisLine: { lineStyle: { color: '#30363d' } },
+          axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
           splitLine: { show: false },
         },
       ]
@@ -1536,22 +1536,22 @@ function ResultPage() {
         name: seriesNames.length > 1 ? (cpUsePrimary ? cpPrimaryYSeries : '自动(全部系列)') : '',
         min: cpRange.min,
         max: cpRange.max,
-        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-        axisLine: { lineStyle: { color: '#30363d' } },
-        splitLine: { lineStyle: { color: '#30363d' } },
+        axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+        axisLine: { lineStyle: { color: '#27272a' } },
+        splitLine: { lineStyle: { color: '#27272a' } },
       }
     }
 
     return {
       backgroundColor: 'transparent',
       tooltip: {
-        trigger: 'axis', backgroundColor: '#161b22', borderColor: '#30363d',
-        textStyle: { color: '#c9d1d9' },
+        trigger: 'axis', backgroundColor: '#0f0f12', borderColor: '#27272a',
+        textStyle: { color: '#e4e4e7' },
         axisPointer: {
           type: 'cross', snap: true,
-          crossStyle: { color: '#8b949e' },
-          lineStyle: { color: '#58a6ff', type: 'dashed' },
-          label: { backgroundColor: '#21262d', color: '#c9d1d9' },
+          crossStyle: { color: '#a1a1aa' },
+          lineStyle: { color: '#8b5cf6', type: 'dashed' },
+          label: { backgroundColor: '#18181b', color: '#e4e4e7' },
         },
         formatter: (params) => {
           if (!params || params.length === 0) return ''
@@ -1580,24 +1580,24 @@ function ResultPage() {
       },
       legend: {
         data: seriesNames,
-        textStyle: { color: '#8b949e' }, top: 10,
+        textStyle: { color: '#a1a1aa' }, top: 10,
         type: 'scroll',
       },
       grid: { left: 60, right: 40, top: 60, bottom: 70 },
       xAxis: {
         type: 'time',
         axisPointer: { snap: true },
-        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
-        axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false }
+        axisLabel: { color: '#a1a1aa', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
+        axisLine: { lineStyle: { color: '#27272a' } }, splitLine: { show: false }
       },
       yAxis,
       series: chartSeries,
       dataZoom: [
         { type: 'inside', start: 0, end: 100 },
         { type: 'slider', start: 0, end: 100, height: 20, bottom: 10,
-          borderColor: '#30363d', backgroundColor: '#161b22',
-          fillerColor: 'rgba(88, 166, 255, 0.2)',
-          handleStyle: { color: '#58a6ff' }, textStyle: { color: '#8b949e' } }
+          borderColor: '#27272a', backgroundColor: '#0f0f12',
+          fillerColor: 'rgba(139, 92, 246, 0.2)',
+          handleStyle: { color: '#8b5cf6' }, textStyle: { color: '#a1a1aa' } }
       ],
       color: CHART_COLORS,
     }
@@ -1612,10 +1612,10 @@ function ResultPage() {
     const color = getCpSeriesColor(d.label)
     return {
       backgroundColor: 'transparent',
-      title: { text: d.label, left: 'center', top: 6, textStyle: { color: '#c9d1d9', fontSize: 12, fontFamily: 'JetBrains Mono' } },
+      title: { text: d.label, left: 'center', top: 6, textStyle: { color: '#e4e4e7', fontSize: 12, fontFamily: 'JetBrains Mono' } },
       tooltip: {
-        trigger: 'axis', backgroundColor: '#161b22', borderColor: '#30363d',
-        textStyle: { color: '#c9d1d9' },
+        trigger: 'axis', backgroundColor: '#0f0f12', borderColor: '#27272a',
+        textStyle: { color: '#e4e4e7' },
         formatter: (params) => {
           if (!params || params.length === 0) return ''
           const p = params[0]
@@ -1629,14 +1629,14 @@ function ResultPage() {
       xAxis: {
         type: 'time',
         axisPointer: { snap: true, label: { show: false } },
-        axisLabel: { color: '#8b949e', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
-        axisLine: { lineStyle: { color: '#30363d' } }, splitLine: { show: false },
+        axisLabel: { color: '#a1a1aa', formatter: (v) => dayjs(v).format('HH:mm:ss'), hideOverlap: true, rotate: 30 },
+        axisLine: { lineStyle: { color: '#27272a' } }, splitLine: { show: false },
       },
       yAxis: {
         type: 'value', name: '', min: range.min, max: range.max,
-        axisLabel: { color: '#8b949e', formatter: formatYAxisTick },
-        axisLine: { lineStyle: { color: '#30363d' } },
-        splitLine: { lineStyle: { color: '#30363d' } },
+        axisLabel: { color: '#a1a1aa', formatter: formatYAxisTick },
+        axisLine: { lineStyle: { color: '#27272a' } },
+        splitLine: { lineStyle: { color: '#27272a' } },
       },
       series: [{
         name: d.label, type: 'line', data: points,
@@ -1647,9 +1647,9 @@ function ResultPage() {
       dataZoom: [
         { type: 'inside', start: 0, end: 100 },
         { type: 'slider', start: 0, end: 100, height: 16, bottom: 4,
-          borderColor: '#30363d', backgroundColor: '#161b22',
-          fillerColor: 'rgba(88, 166, 255, 0.2)',
-          handleStyle: { color: '#58a6ff' }, textStyle: { color: '#8b949e' } }
+          borderColor: '#27272a', backgroundColor: '#0f0f12',
+          fillerColor: 'rgba(139, 92, 246, 0.2)',
+          handleStyle: { color: '#8b5cf6' }, textStyle: { color: '#a1a1aa' } }
       ],
     }
   }
@@ -1671,11 +1671,11 @@ function ResultPage() {
       return (
         <>
           {/* 改善 2: 模式说明 */}
-          <div style={{ color: '#8b949e', fontSize: 12, marginBottom: 16 }}>在同一设备的数据中，对比不同字段的变化趋势</div>
+          <div style={{ color: '#a1a1aa', fontSize: 12, marginBottom: 16 }}>在同一设备的数据中，对比不同字段的变化趋势</div>
 
           <Row gutter={16} align="bottom" style={{ marginBottom: 16 }}>
             <Col flex="240px">
-              <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>选择端口</div>
+              <div style={{ color: '#a1a1aa', marginBottom: 8, fontSize: 13 }}>选择端口</div>
               <Select
                 value={spActiveResult ? getResultKey(spActiveResult) : undefined}
                 onChange={(key) => {
@@ -1693,7 +1693,7 @@ function ResultPage() {
               </Select>
             </Col>
             <Col flex="auto">
-              <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>预加载要分析的字段（可多选）</div>
+              <div style={{ color: '#a1a1aa', marginBottom: 8, fontSize: 13 }}>预加载要分析的字段（可多选）</div>
               <Select
                 mode="multiple"
                 value={spSelectedFields}
@@ -1708,7 +1708,7 @@ function ResultPage() {
             </Col>
             <Col flex="100px">
               <Button
-                type="primary"
+                type="default"
                 icon={<ReloadOutlined />}
                 onClick={loadSpChartData}
                 loading={chartLoading}
@@ -1724,10 +1724,10 @@ function ResultPage() {
           {spAvailableFields.length > 0 && (
             <Collapse
               size="small"
-              style={{ marginBottom: 16, backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: 8 }}
+              style={{ marginBottom: 16, backgroundColor: '#0f0f12', border: '1px solid #27272a', borderRadius: 8 }}
               items={[{
                 key: 'quick-fields',
-                label: <span style={{ color: '#8b949e', fontSize: 13 }}>快速选择字段（点击展开）</span>,
+                label: <span style={{ color: '#a1a1aa', fontSize: 13 }}>快速选择字段（点击展开）</span>,
                 children: (
                   <Checkbox.Group value={spSelectedFields} onChange={setSpSelectedFields} style={{ width: '100%' }}>
                     <Row gutter={[16, 12]}>
@@ -1777,9 +1777,9 @@ function ResultPage() {
                 </>
               )}
               {!spCanMulti ? (
-                <span style={{ color: '#8b949e', fontSize: 12 }}>提示：选择多个字段可使用叠加对比或并列对比模式</span>
+                <span style={{ color: '#a1a1aa', fontSize: 12 }}>提示：选择多个字段可使用叠加对比或并列对比模式</span>
               ) : spChartLayout === 'grid' ? (
-                <span style={{ color: '#8b949e', fontSize: 12 }}>提示：可在各个子图的下拉框中选择多个字段进行叠加对比</span>
+                <span style={{ color: '#a1a1aa', fontSize: 12 }}>提示：可在各个子图的下拉框中选择多个字段进行叠加对比</span>
               ) : null}
             </div>
           )}
@@ -1796,8 +1796,8 @@ function ResultPage() {
                   const hasSeries = opt && opt.series && opt.series.length > 0
                   return (
                     <Col span={24 / spGridCols} key={panelIdx}>
-                      <div style={{ border: '1px solid #30363d', borderRadius: 8, backgroundColor: '#0d1117', overflow: 'hidden' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderBottom: '1px solid #30363d', backgroundColor: '#161b22' }}>
+                      <div style={{ border: '1px solid #27272a', borderRadius: 8, backgroundColor: '#0f0f12', overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderBottom: '1px solid #27272a', backgroundColor: '#0f0f12' }}>
                           <Select
                             mode="multiple"
                             size="small"
@@ -1841,7 +1841,7 @@ function ResultPage() {
             ) : showSpYBaseline ? (
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 0 }}>
                 <div style={{ flex: '0 0 auto', paddingTop: 48 }}>
-                  <div style={{ color: '#8b949e', fontSize: 11, marginBottom: 6, lineHeight: 1.2 }}>Y轴基准</div>
+                  <div style={{ color: '#a1a1aa', fontSize: 11, marginBottom: 6, lineHeight: 1.2 }}>Y轴基准</div>
                   <Segmented
                     vertical
                     value={spPrimaryYField || '__auto__'}
@@ -1867,11 +1867,11 @@ function ResultPage() {
     return (
       <>
         {/* 改善 2: 模式说明 */}
-        <div style={{ color: '#8b949e', fontSize: 12, marginBottom: 16 }}>选择多个设备/端口，对比相同或不同字段</div>
+        <div style={{ color: '#a1a1aa', fontSize: 12, marginBottom: 16 }}>选择多个设备/端口，对比相同或不同字段</div>
 
         <Row gutter={16} align="bottom" style={{ marginBottom: 24 }}>
           <Col flex="auto">
-            <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>选择端口/设备（至少两个）</div>
+            <div style={{ color: '#a1a1aa', marginBottom: 8, fontSize: 13 }}>选择端口/设备（至少两个）</div>
             <Select
               mode="multiple"
               value={cpSelectedResults}
@@ -1890,8 +1890,8 @@ function ResultPage() {
                 <Option key={getResultKey(r)} value={getResultKey(r)} label={getResultLabel(r)}>
                   <Space>
                     <span className="mono">{r.port_number}</span>
-                    {r.source_device && <Tag color="orange" style={{ margin: 0, background: 'rgba(210, 153, 34, 0.15)', borderColor: '#d29922', color: '#d29922' }}>{r.source_device}</Tag>}
-                    {r.parser_profile_name && <Tag color="green" style={{ margin: 0, background: 'rgba(63, 185, 80, 0.15)', borderColor: '#3fb950', color: '#3fb950' }}>{r.parser_profile_name}</Tag>}
+                    {r.source_device && <Tag color="orange" style={{ margin: 0, background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843' }}>{r.source_device}</Tag>}
+                    {r.parser_profile_name && <Tag color="green" style={{ margin: 0, background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>{r.parser_profile_name}</Tag>}
                   </Space>
                 </Option>
               ))}
@@ -1899,7 +1899,7 @@ function ResultPage() {
           </Col>
           <Col flex="100px">
             <Button
-              type="primary"
+              type="default"
               icon={<ReloadOutlined />}
               onClick={loadCpChartData}
               loading={chartLoading}
@@ -1916,9 +1916,9 @@ function ResultPage() {
         )}
 
         {cpSelectedResults.length >= 2 && cpCommonFields.length > 0 && (
-          <div style={{ marginBottom: 16, padding: 16, backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: 8 }}>
-            <div style={{ color: '#58a6ff', marginBottom: 12, fontSize: 13, fontWeight: 500 }}>
-              共同字段 <span style={{ color: '#8b949e', fontWeight: 400 }}>（对所有已选设备生效）</span>
+          <div style={{ marginBottom: 16, padding: 16, backgroundColor: '#0f0f12', border: '1px solid #27272a', borderRadius: 8 }}>
+            <div style={{ color: '#8b5cf6', marginBottom: 12, fontSize: 13, fontWeight: 500 }}>
+              共同字段 <span style={{ color: '#a1a1aa', fontWeight: 400 }}>（对所有已选设备生效）</span>
             </div>
             <Checkbox.Group value={cpSelectedCommonFields} onChange={setCpSelectedCommonFields} style={{ width: '100%' }}>
               <Row gutter={[16, 12]}>
@@ -1933,22 +1933,22 @@ function ResultPage() {
         )}
 
         {cpSelectedResults.length >= 2 && cpSelectedResults.some(key => (cpUniqueFieldsPerResult[key] || []).length > 0) && (
-          <div style={{ marginBottom: 16, padding: 16, backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: 8 }}>
-            <div style={{ color: '#d29922', marginBottom: 16, fontSize: 13, fontWeight: 500 }}>
-              设备独有字段 <span style={{ color: '#8b949e', fontWeight: 400 }}>（仅对对应设备生效）</span>
+          <div style={{ marginBottom: 16, padding: 16, backgroundColor: '#0f0f12', border: '1px solid #27272a', borderRadius: 8 }}>
+            <div style={{ color: '#d4a843', marginBottom: 16, fontSize: 13, fontWeight: 500 }}>
+              设备独有字段 <span style={{ color: '#a1a1aa', fontWeight: 400 }}>（仅对对应设备生效）</span>
             </div>
             {cpSelectedResults.map(key => {
               const result = results.find(r => getResultKey(r) === key)
               const uniqueFields = cpUniqueFieldsPerResult[key] || []
               if (uniqueFields.length === 0) return null
               return (
-                <div key={key} style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #21262d' }}>
-                  <div style={{ color: '#c9d1d9', marginBottom: 8, fontSize: 13 }}>
+                <div key={key} style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #18181b' }}>
+                  <div style={{ color: '#e4e4e7', marginBottom: 8, fontSize: 13 }}>
                     {result && (
                       <Space size={4}>
                         <span className="mono" style={{ fontWeight: 600 }}>{result.port_number}</span>
-                        {result.source_device && <Tag color="orange" style={{ margin: 0, background: 'rgba(210, 153, 34, 0.15)', borderColor: '#d29922', color: '#d29922' }}>{result.source_device}</Tag>}
-                        {result.parser_profile_name && <Tag color="green" style={{ margin: 0, background: 'rgba(63, 185, 80, 0.15)', borderColor: '#3fb950', color: '#3fb950' }}>{result.parser_profile_name}</Tag>}
+                        {result.source_device && <Tag color="orange" style={{ margin: 0, background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843' }}>{result.source_device}</Tag>}
+                        {result.parser_profile_name && <Tag color="green" style={{ margin: 0, background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>{result.parser_profile_name}</Tag>}
                       </Space>
                     )}
                   </div>
@@ -1994,7 +1994,7 @@ function ResultPage() {
               开始分析
             </Button>
             {cpHasSelection && (
-              <span style={{ color: '#8b949e', fontSize: 13 }}>
+              <span style={{ color: '#a1a1aa', fontSize: 13 }}>
                 已选择 {(() => {
                   let count = 0
                   count += cpSelectedCommonFields.length * cpSelectedResults.length
@@ -2042,7 +2042,7 @@ function ResultPage() {
                     ]} size="small" />
                   )}
                   {!cpCanMulti && (
-                    <span style={{ color: '#8b949e', fontSize: 12 }}>提示：点击"开始分析"加载数据后可使用叠加或并列模式</span>
+                    <span style={{ color: '#a1a1aa', fontSize: 12 }}>提示：点击"开始分析"加载数据后可使用叠加或并列模式</span>
                   )}
                 </div>
               )}
@@ -2058,7 +2058,7 @@ function ResultPage() {
                         if (!opt || !opt.series) return null
                         return (
                           <Col span={24 / cpGridCols} key={key}>
-                            <div style={{ border: '1px solid #30363d', borderRadius: 8, padding: 4, backgroundColor: '#0d1117' }}>
+                            <div style={{ border: '1px solid #27272a', borderRadius: 8, padding: 4, backgroundColor: '#0f0f12' }}>
                               <ReactECharts
                                 option={opt}
                                 style={{ height: 280 }}
@@ -2073,7 +2073,7 @@ function ResultPage() {
                   ) : showCpYBaseline ? (
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 0 }}>
                       <div style={{ flex: '0 0 auto', paddingTop: 48 }}>
-                        <div style={{ color: '#8b949e', fontSize: 11, marginBottom: 6, lineHeight: 1.2 }}>Y轴基准</div>
+                        <div style={{ color: '#a1a1aa', fontSize: 11, marginBottom: 6, lineHeight: 1.2 }}>Y轴基准</div>
                         <Segmented
                           vertical
                           value={cpPrimaryYSeries || '__auto__'}
@@ -2119,26 +2119,7 @@ function ResultPage() {
     }
     return (
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-          <Space wrap>
-            {(deviceList.length > 0 || parserList.length > 1) && (
-              <>
-                <span style={{ color: '#8b949e' }}><FilterOutlined /> 筛选:</span>
-                {deviceList.length > 0 && (
-                  <Select placeholder="按设备筛选" allowClear style={{ width: 160 }}
-                    size="middle" value={selectedDevice} onChange={handleDeviceFilter}>
-                    {deviceList.map(d => <Option key={d} value={d}>{d}</Option>)}
-                  </Select>
-                )}
-                {parserList.length > 1 && (
-                  <Select placeholder="按解析器筛选" allowClear style={{ width: 160 }}
-                    size="middle" value={selectedParser} onChange={handleParserFilter}>
-                    {parserList.map(p => <Option key={p.id} value={p.id}>{p.name}</Option>)}
-                  </Select>
-                )}
-              </>
-            )}
-          </Space>
+        {renderResultScopeFilters(
           <Button
             icon={<ReloadOutlined />}
             onClick={() => loadAnomalyDefaults()}
@@ -2146,20 +2127,29 @@ function ResultPage() {
           >
             刷新字段与默认阈值
           </Button>
-        </div>
+        )}
 
-        <Tabs
-          items={tabItems}
-          activeKey={activeResult ? getResultKey(activeResult) : undefined}
-          onChange={(key) => {
-            const result = filteredResults.find(r => getResultKey(r) === key)
-            if (result) {
-              setActiveResult(result)
-              setPagination(prev => ({ ...prev, current: 1 }))
-            }
-          }}
-          style={{ marginBottom: 16 }}
-        />
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ color: '#a1a1aa', fontSize: 12, marginBottom: 6 }}>分析端口</div>
+          <Select
+            showSearch
+            placeholder="选择端口 / 设备 / 解析器"
+            optionFilterProp="label"
+            style={{ width: '100%' }}
+            value={activeResult ? getResultKey(activeResult) : undefined}
+            onChange={(key) => {
+              const result = filteredResults.find(r => getResultKey(r) === key)
+              if (result) {
+                setActiveResult(result)
+                setPagination(prev => ({ ...prev, current: 1 }))
+              }
+            }}
+            options={filteredResults.map((r) => ({
+              value: getResultKey(r),
+              label: getResultLabel(r),
+            }))}
+          />
+        </div>
 
         <Spin spinning={anomalyDefaultsLoading}>
           {!anomalyDefaultsLoading && anomalyNumericFields.length === 0 && (
@@ -2185,7 +2175,7 @@ function ResultPage() {
 
               <div style={{ marginBottom: 12 }}>
                 <Space wrap>
-                  <span style={{ color: '#8b949e' }}>分析字段:</span>
+                  <span style={{ color: '#a1a1aa' }}>分析字段:</span>
                   <Button size="small" type="link" onClick={() => onAnomalyFieldsChange([...anomalyNumericFields])}>
                     全选
                   </Button>
@@ -2208,7 +2198,7 @@ function ResultPage() {
                 </Row>
               </Checkbox.Group>
 
-              <Divider orientation="left" plain style={{ color: '#8b949e' }}>
+              <Divider orientation="left" plain style={{ color: '#a1a1aa' }}>
                 跳变阈值（%，相对卡尔曼预测值）
               </Divider>
               <Row gutter={[12, 12]} style={{ marginBottom: 20 }}>
@@ -2216,7 +2206,7 @@ function ResultPage() {
                   <Col xs={24} sm={12} md={8} key={f}>
                     <Space>
                       <Tooltip title={getFieldTooltipText(f)}>
-                        <span className="mono" style={{ color: '#c9d1d9', minWidth: 120 }}>{f}</span>
+                        <span className="mono" style={{ color: '#e4e4e7', minWidth: 120 }}>{f}</span>
                       </Tooltip>
                       <InputNumber
                         min={0.01}
@@ -2226,7 +2216,7 @@ function ResultPage() {
                         onChange={(v) => setAnomalyThresholdEdits((prev) => ({ ...prev, [f]: v }))}
                         size="small"
                       />
-                      <span style={{ color: '#8b949e', fontSize: 12 }}>
+                      <span style={{ color: '#a1a1aa', fontSize: 12 }}>
                         默认 {anomalyDefaultThresholds[f] ?? '—'}
                       </span>
                     </Space>
@@ -2258,10 +2248,10 @@ function ResultPage() {
                 <Statistic title="分析字段数" value={anomalyResult.summary?.fields_analyzed ?? 0} />
               </Col>
               <Col span={6}>
-                <Statistic title="跳变告警数" value={anomalyResult.summary?.jump_count ?? 0} valueStyle={{ color: '#f85149' }} />
+                <Statistic title="跳变告警数" value={anomalyResult.summary?.jump_count ?? 0} valueStyle={{ color: '#f05050' }} />
               </Col>
               <Col span={6}>
-                <Statistic title="卡死区间数" value={anomalyResult.summary?.stuck_count ?? 0} valueStyle={{ color: '#d29922' }} />
+                <Statistic title="卡死区间数" value={anomalyResult.summary?.stuck_count ?? 0} valueStyle={{ color: '#d4a843' }} />
               </Col>
               <Col span={6}>
                 <Statistic
@@ -2283,7 +2273,7 @@ function ResultPage() {
 
             {anomalyTimelineHints.length > 0 && (
               <div style={{ marginBottom: 24 }}>
-                <div style={{ color: '#8b949e', marginBottom: 8 }}>异常时间点速览（点击复制时间戳）</div>
+                <div style={{ color: '#a1a1aa', marginBottom: 8 }}>异常时间点速览（点击复制时间戳）</div>
                 <Space wrap size={[4, 8]}>
                   {anomalyTimelineHints.map((ts) => (
                     <Tag
@@ -2304,7 +2294,7 @@ function ResultPage() {
             <Divider orientation="left">跳变分析</Divider>
             <div style={{ marginBottom: 12 }}>
               <Space>
-                <span style={{ color: '#8b949e' }}>按字段筛选:</span>
+                <span style={{ color: '#a1a1aa' }}>按字段筛选:</span>
                 <Select
                   allowClear
                   placeholder="全部字段"
@@ -2334,7 +2324,7 @@ function ResultPage() {
             <Divider orientation="left">卡死分析</Divider>
             <div style={{ marginBottom: 12 }}>
               <Space>
-                <span style={{ color: '#8b949e' }}>按字段筛选:</span>
+                <span style={{ color: '#a1a1aa' }}>按字段筛选:</span>
                 <Select
                   allowClear
                   placeholder="全部字段"
@@ -2384,19 +2374,19 @@ function ResultPage() {
         <Card>
           <div style={{ textAlign: 'center', padding: '32px 16px' }}>
             <Spin size="large" />
-            <h2 style={{ marginTop: 28, marginBottom: 8, color: '#c9d1d9', fontWeight: 600 }}>
+            <h2 style={{ marginTop: 28, marginBottom: 8, color: '#e4e4e7', fontWeight: 600 }}>
               {task.status === 'pending' ? '等待开始解析…' : '正在解析数据…'}
             </h2>
-            <p className="mono" style={{ color: '#8b949e', marginBottom: 24, wordBreak: 'break-all' }}>
+            <p className="mono" style={{ color: '#a1a1aa', marginBottom: 24, wordBreak: 'break-all' }}>
               {task.filename}
             </p>
             <Progress
               percent={task.status === 'pending' ? 0 : pct}
               status={task.status === 'pending' ? 'normal' : 'active'}
-              strokeColor={{ from: '#58a6ff', to: '#3fb950' }}
+              strokeColor={{ from: '#8b5cf6', to: '#5fd068' }}
               style={{ marginBottom: 12 }}
             />
-            <p style={{ color: '#8b949e', fontSize: 13 }}>
+            <p style={{ color: '#a1a1aa', fontSize: 13 }}>
               {task.status === 'pending'
                 ? '任务已排队，解析即将开始'
                 : `已读取约 ${pct}%（按文件字节估算，保存结果阶段可能停留在 99%）`}
@@ -2419,14 +2409,60 @@ function ResultPage() {
     label: (
       <Space>
         <span className="mono">{result.port_number}</span>
-        {result.source_device && <Tag color="orange" style={{ background: 'rgba(210, 153, 34, 0.15)', borderColor: '#d29922', color: '#d29922' }}>{result.source_device}</Tag>}
+        {result.source_device && <Tag color="orange" style={{ background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843' }}>{result.source_device}</Tag>}
         {result.parser_profile_name && parserList.length > 1 && (
-          <Tag color="green" style={{ background: 'rgba(63, 185, 80, 0.15)', borderColor: '#3fb950', color: '#3fb950' }}>{result.parser_profile_name}</Tag>
+          <Tag color="green" style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>{result.parser_profile_name}</Tag>
         )}
-        <Tag style={{ background: '#21262d', borderColor: '#30363d', color: '#8b949e' }}>{result.record_count.toLocaleString()} 条</Tag>
+        <Tag style={{ background: '#18181b', borderColor: '#27272a', color: '#a1a1aa' }}>{result.record_count.toLocaleString()} 条</Tag>
       </Space>
     ),
   }))
+
+  const renderResultScopeFilters = (extraRight = null) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+      <Space wrap>
+        {(deviceList.length > 0 || parserList.length > 1) && (
+          <>
+            <span style={{ color: '#a1a1aa' }}><FilterOutlined /> 筛选:</span>
+            {deviceList.length > 0 && (
+              <Select
+                placeholder="按设备筛选"
+                allowClear
+                style={{ width: 160 }}
+                value={selectedDevice}
+                onChange={handleDeviceFilter}
+              >
+                {deviceList.map(d => <Option key={d} value={d}>{d}</Option>)}
+              </Select>
+            )}
+            {parserList.length > 1 && (
+              <Select
+                placeholder="按解析器筛选"
+                allowClear
+                style={{ width: 160 }}
+                value={selectedParser}
+                onChange={handleParserFilter}
+              >
+                {parserList.map(p => <Option key={p.id} value={p.id}>{p.name}</Option>)}
+              </Select>
+            )}
+          </>
+        )}
+        {results.length > 0 && (
+          filteredResults.length > 0 ? (
+            <Tag style={{ background: '#18181b', borderColor: '#27272a', color: '#a1a1aa' }}>
+              匹配端口 {filteredResults.length} / {results.length}
+            </Tag>
+          ) : (
+            <Tag style={{ background: 'rgba(212, 168, 67, 0.12)', borderColor: '#d4a843', color: '#d4a843' }}>
+              筛选后无可用端口
+            </Tag>
+          )
+        )}
+      </Space>
+      {extraRight ? <Space>{extraRight}</Space> : null}
+    </div>
+  )
 
   return (
     <div className="fade-in">
@@ -2436,19 +2472,19 @@ function ResultPage() {
           <Col xs={24} sm={12} md={8} lg={6}>
             <Statistic
               title="文件名" value={task.filename}
-              valueStyle={{ fontSize: 14, fontFamily: 'JetBrains Mono', wordBreak: 'break-all', color: '#c9d1d9' }}
+              valueStyle={{ fontSize: 14, fontFamily: 'JetBrains Mono', wordBreak: 'break-all', color: '#e4e4e7' }}
             />
           </Col>
           <Col xs={12} sm={6} md={4} lg={4}>
             <Statistic
-              title={<Space size={4}><ApiOutlined style={{ color: '#58a6ff' }} /><span>网络配置</span></Space>}
+              title={<Space size={4}><ApiOutlined style={{ color: '#8b5cf6' }} /><span>网络配置</span></Space>}
               value={task.network_config_name ? `${task.network_config_name} ${task.network_config_version}` : '扫描模式'}
-              valueStyle={{ fontSize: 13, color: task.network_config_name ? '#58a6ff' : '#8b949e' }}
+              valueStyle={{ fontSize: 13, color: task.network_config_name ? '#8b5cf6' : '#a1a1aa' }}
             />
           </Col>
           <Col xs={12} sm={6} md={4} lg={4}>
             <Statistic
-              title={<Space size={4}><RocketOutlined style={{ color: '#3fb950' }} /><span>解析器</span></Space>}
+              title={<Space size={4}><RocketOutlined style={{ color: '#5fd068' }} /><span>解析器</span></Space>}
               value={
                 task.device_parsers?.length > 0
                   ? `${task.device_parsers.length} 设备`
@@ -2456,29 +2492,29 @@ function ResultPage() {
                     ? `${task.parser_profiles.length} 个解析器`
                     : (task.parser_profile_name || '-')
               }
-              valueStyle={{ fontSize: 13, color: '#3fb950' }}
+              valueStyle={{ fontSize: 13, color: '#5fd068' }}
             />
           </Col>
           <Col xs={12} sm={6} md={4} lg={3}>
             <Statistic title="解析端口数" value={results.length}
-              prefix={<DatabaseOutlined />} valueStyle={{ color: '#3fb950' }} />
+              prefix={<DatabaseOutlined />} valueStyle={{ color: '#5fd068' }} />
           </Col>
           <Col xs={12} sm={6} md={4} lg={3}>
             <Statistic title="总数据量" value={task.parsed_packets}
-              valueStyle={{ color: '#d29922' }} />
+              valueStyle={{ color: '#d4a843' }} />
           </Col>
         </Row>
 
         {task.device_parsers && task.device_parsers.length > 0 ? (
           <div style={{ marginTop: 16 }}>
             <Space wrap>
-              <DesktopOutlined style={{ color: '#d29922' }} />
-              <span style={{ color: '#8b949e' }}>设备解析配置:</span>
+              <DesktopOutlined style={{ color: '#d4a843' }} />
+              <span style={{ color: '#a1a1aa' }}>设备解析配置:</span>
               {task.device_parsers.map(dp => (
                 <Space key={dp.device_name} size={2}>
-                  <Tag color="orange" style={{ background: 'rgba(210, 153, 34, 0.15)', borderColor: '#d29922', color: '#d29922' }}>{dp.device_name}</Tag>
-                  <span style={{ color: '#8b949e' }}>→</span>
-                  <Tag color="green" style={{ background: 'rgba(63, 185, 80, 0.15)', borderColor: '#3fb950', color: '#3fb950' }}>{[dp.parser_profile_name, dp.parser_profile_version].filter(Boolean).join(' ')}</Tag>
+                  <Tag color="orange" style={{ background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843' }}>{dp.device_name}</Tag>
+                  <span style={{ color: '#a1a1aa' }}>→</span>
+                  <Tag color="green" style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>{[dp.parser_profile_name, dp.parser_profile_version].filter(Boolean).join(' ')}</Tag>
                 </Space>
               ))}
             </Space>
@@ -2488,18 +2524,18 @@ function ResultPage() {
             {task.selected_devices && task.selected_devices.length > 0 && (
               <div style={{ marginTop: 16 }}>
                 <Space>
-                  <DesktopOutlined style={{ color: '#d29922' }} />
-                  <span style={{ color: '#8b949e' }}>选中设备:</span>
-                  {task.selected_devices.map(d => <Tag key={d} color="orange" style={{ background: 'rgba(210, 153, 34, 0.15)', borderColor: '#d29922', color: '#d29922' }}>{d}</Tag>)}
+                  <DesktopOutlined style={{ color: '#d4a843' }} />
+                  <span style={{ color: '#a1a1aa' }}>选中设备:</span>
+                  {task.selected_devices.map(d => <Tag key={d} color="orange" style={{ background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843' }}>{d}</Tag>)}
                 </Space>
               </div>
             )}
             {task.parser_profiles && task.parser_profiles.length > 1 && (
               <div style={{ marginTop: 8 }}>
                 <Space>
-                  <RocketOutlined style={{ color: '#3fb950' }} />
-                  <span style={{ color: '#8b949e' }}>解析器:</span>
-                  {task.parser_profiles.map(p => <Tag key={p.id} color="green" style={{ background: 'rgba(63, 185, 80, 0.15)', borderColor: '#3fb950', color: '#3fb950' }}>{p.name}</Tag>)}
+                  <RocketOutlined style={{ color: '#5fd068' }} />
+                  <span style={{ color: '#a1a1aa' }}>解析器:</span>
+                  {task.parser_profiles.map(p => <Tag key={p.id} color="green" style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>{p.name}</Tag>)}
                 </Space>
               </div>
             )}
@@ -2527,27 +2563,8 @@ function ResultPage() {
             label: <Space><DatabaseOutlined />数据表格</Space>,
             children: (
               <Card>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <Space>
-                    {(deviceList.length > 0 || parserList.length > 1) && (
-                      <>
-                        <span style={{ color: '#8b949e' }}><FilterOutlined /> 筛选:</span>
-                        {deviceList.length > 0 && (
-                          <Select placeholder="按设备筛选" allowClear style={{ width: 160 }}
-                            size="middle" value={selectedDevice} onChange={handleDeviceFilter}>
-                            {deviceList.map(d => <Option key={d} value={d}>{d}</Option>)}
-                          </Select>
-                        )}
-                        {parserList.length > 1 && (
-                          <Select placeholder="按解析器筛选" allowClear style={{ width: 160 }}
-                            size="middle" value={selectedParser} onChange={handleParserFilter}>
-                            {parserList.map(p => <Option key={p.id} value={p.id}>{p.name}</Option>)}
-                          </Select>
-                        )}
-                      </>
-                    )}
-                  </Space>
-            <Space>
+                {renderResultScopeFilters(
+                  <>
                     {activeResult && (
                       <>
                         <Checkbox
@@ -2573,25 +2590,35 @@ function ResultPage() {
                         列管理
                       </Button>
                     )}
-            </Space>
-                </div>
+                  </>
+                )}
 
                 {filteredResults.length > 0 ? (
           <>
-            <Tabs
-              items={tabItems}
-                      activeKey={activeResult ? getResultKey(activeResult) : undefined}
-              onChange={(key) => {
-                        const result = filteredResults.find(r => getResultKey(r) === key)
-                        if (result) {
-                          setActiveResult(result)
-                setPagination(prev => ({ ...prev, current: 1 }))
-                        }
-              }}
-            />
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ color: '#a1a1aa', fontSize: 12, marginBottom: 6 }}>当前端口</div>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder="选择端口 / 设备 / 解析器"
+                style={{ width: '100%' }}
+                value={activeResult ? getResultKey(activeResult) : undefined}
+                onChange={(key) => {
+                  const result = filteredResults.find(r => getResultKey(r) === key)
+                  if (result) {
+                    setActiveResult(result)
+                    setPagination(prev => ({ ...prev, current: 1 }))
+                  }
+                }}
+                options={filteredResults.map((result) => ({
+                  value: getResultKey(result),
+                  label: getResultLabel(result),
+                }))}
+              />
+            </div>
             {labelFilterOptions.length > 0 && (
               <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center' }}>
-                <span style={{ color: '#8b949e', marginRight: 8 }}><FilterOutlined /> 当前视图内筛选:</span>
+                <span style={{ color: '#a1a1aa', marginRight: 8 }}><FilterOutlined /> 当前视图内筛选:</span>
                 <Select
                   placeholder="按 Label / CAN ID 筛选列/行"
                   allowClear showSearch
@@ -2684,7 +2711,7 @@ function ResultPage() {
             }}>仅显示固定列</Button>
           </Space>
         </div>
-        <div style={{ marginBottom: 8, color: '#8b949e', fontSize: 12 }}>
+        <div style={{ marginBottom: 8, color: '#a1a1aa', fontSize: 12 }}>
           <PushpinOutlined /> 固定列会锁定在表格左侧。点击图钉切换固定状态，取消勾选可隐藏列。
         </div>
         {allColumnNames.map(col => {
@@ -2693,7 +2720,7 @@ function ResultPage() {
           return (
             <div key={col} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '6px 8px', borderBottom: '1px solid #21262d',
+              padding: '6px 8px', borderBottom: '1px solid #18181b',
               opacity: isHidden ? 0.5 : 1,
             }}>
               <Checkbox
@@ -2711,7 +2738,7 @@ function ResultPage() {
               </Checkbox>
               <Button
                 type="text" size="small"
-                icon={<PushpinOutlined style={{ color: isPinned ? '#58a6ff' : '#8b949e' }} />}
+                icon={<PushpinOutlined style={{ color: isPinned ? '#8b5cf6' : '#a1a1aa' }} />}
                 onClick={() => {
                   setPinnedColumns(prev => {
                     const next = new Set(prev)
@@ -2738,21 +2765,21 @@ function ResultPage() {
         width={560}
       >
         <div style={{ marginBottom: 16 }}>
-          <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>导出格式</div>
+          <div style={{ color: '#a1a1aa', marginBottom: 8, fontSize: 13 }}>导出格式</div>
           <Radio.Group value={batchExportFormat} onChange={e => setBatchExportFormat(e.target.value)}>
             <Radio.Button value="csv">CSV（逐个下载）</Radio.Button>
             <Radio.Button value="zip">ZIP（打包下载）</Radio.Button>
           </Radio.Group>
         </div>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>文字列导出</div>
+          <div style={{ color: '#a1a1aa', marginBottom: 8, fontSize: 13 }}>文字列导出</div>
           <Radio.Group value={batchExportIncludeText} onChange={e => setBatchExportIncludeText(e.target.value)}>
             <Radio.Button value={true}>导出文字列</Radio.Button>
             <Radio.Button value={false}>去掉中文说明列</Radio.Button>
           </Radio.Group>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <div style={{ color: '#8b949e', marginBottom: 8, fontSize: 13 }}>选择要导出的端口</div>
+          <div style={{ color: '#a1a1aa', marginBottom: 8, fontSize: 13 }}>选择要导出的端口</div>
           <Space style={{ marginBottom: 8 }}>
             <Button size="small" type="link" onClick={() => setBatchExportSelected(results.map(r => getResultKey(r)))}>全选</Button>
             <Button size="small" type="link" onClick={() => setBatchExportSelected([])}>清空</Button>
@@ -2768,9 +2795,9 @@ function ResultPage() {
                   <Checkbox value={getResultKey(r)}>
                     <Space>
                       <span className="mono">{r.port_number}</span>
-                      {r.source_device && <Tag color="orange" style={{ margin: 0, background: 'rgba(210, 153, 34, 0.15)', borderColor: '#d29922', color: '#d29922' }}>{r.source_device}</Tag>}
-                      {r.parser_profile_name && <Tag color="green" style={{ margin: 0, background: 'rgba(63, 185, 80, 0.15)', borderColor: '#3fb950', color: '#3fb950' }}>{r.parser_profile_name}</Tag>}
-                      <span style={{ color: '#8b949e', fontSize: 12 }}>{r.record_count.toLocaleString()} 条</span>
+                      {r.source_device && <Tag color="orange" style={{ margin: 0, background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843' }}>{r.source_device}</Tag>}
+                      {r.parser_profile_name && <Tag color="green" style={{ margin: 0, background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>{r.parser_profile_name}</Tag>}
+                      <span style={{ color: '#a1a1aa', fontSize: 12 }}>{r.record_count.toLocaleString()} 条</span>
                     </Space>
                   </Checkbox>
                 </Col>
