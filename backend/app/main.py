@@ -17,6 +17,8 @@ from .routers import (
     shared_tsn_router,
     arinc429_router,
     role_config_router,
+    dashboard_router,
+    workbench_router,
 )
 from .config import UPLOAD_DIR, DATA_DIR
 from .init_data import init_all_data
@@ -73,6 +75,8 @@ app.include_router(event_analysis_router)
 app.include_router(fcc_event_analysis_router)
 app.include_router(auto_flight_analysis_router)
 app.include_router(compare_router)
+app.include_router(dashboard_router)
+app.include_router(workbench_router)
 
 
 @app.get("/")
