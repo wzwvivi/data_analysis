@@ -17,6 +17,8 @@ import ComparePage from './pages/ComparePage'
 import AdminPlatformDataPage from './pages/AdminPlatformDataPage'
 import AdminUserPage from './pages/AdminUserPage'
 import ProtocolManagerPage from './pages/ProtocolManagerPage'
+import DashboardPage from './pages/DashboardPage'
+import WorkbenchPage from './pages/WorkbenchPage'
 import { Result } from 'antd'
 
 function PrivateRoute({ children }) {
@@ -92,7 +94,10 @@ function AppRoutes() {
           </PrivateRoute>
         )}
       >
-        <Route index element={<Navigate to="/upload" replace />} />
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="dashboard" element={<PermissionRoute requiredPage="dashboard"><DashboardPage /></PermissionRoute>} />
+        <Route path="workbench" element={<PermissionRoute requiredPage="workbench"><WorkbenchPage /></PermissionRoute>} />
+        <Route path="workbench/:sortieId" element={<PermissionRoute requiredPage="workbench"><WorkbenchPage /></PermissionRoute>} />
         <Route path="upload" element={<PermissionRoute requiredPage="upload"><UploadPage /></PermissionRoute>} />
         <Route path="tasks" element={<PermissionRoute requiredPage="tasks"><TaskListPage /></PermissionRoute>} />
         <Route path="tasks/:taskId" element={<PermissionRoute requiredPage="tasks/:taskId"><ResultPage /></PermissionRoute>} />

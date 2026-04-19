@@ -7,6 +7,7 @@ import {
   InboxOutlined, CloudUploadOutlined, ApiOutlined, DesktopOutlined, SettingOutlined
 } from '@ant-design/icons'
 import { parseApi, protocolApi, sharedTsnApi } from '../services/api'
+import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 
 const { Dragger } = Upload
 const { Option } = Select
@@ -91,6 +92,11 @@ function UploadPage() {
   useEffect(() => {
     loadSharedTsn()
   }, [])
+
+  const parseSharedList = useMemo(
+    () => sharedList.filter(isParseCompatibleSharedItem),
+    [sharedList],
+  )
 
   useEffect(() => {
     if (selectedVersion) {
@@ -407,13 +413,18 @@ function UploadPage() {
                   allowClear
                   showSearch
                   optionFilterProp="label"
-                  options={sharedList.map((s) => ({
+                  options={parseSharedList.map((s) => ({
                     value: s.id,
-                    label: `#${s.id} ${s.original_filename}${s.experiment_label ? ` — ${s.experiment_label}` : ''}${s.experiment_date ? ` (${s.experiment_date})` : ''}`,
+                    label: `#${s.id} ${s.original_filename}${s.asset_label ? ` · ${s.asset_label}` : ''}${s.sortie_label ? ` · ${s.sortie_label}` : ''}`,
                   }))}
                 />
-                {sharedList.length === 0 && (
-                  <Alert type="info" showIcon style={{ marginTop: 12 }} message="暂无平台数据，请管理员在「系统配置 → 平台共享数据」中上传" />
+                {parseSharedList.length === 0 && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginTop: 12 }}
+                    message="暂无可用于解析的 PCAP 类平台数据（需选择 TSN 交换机 / 网联 / 飞控记录器等类型）；视频仅归档不上屏"
+                  />
                 )}
               </div>
             ) : (

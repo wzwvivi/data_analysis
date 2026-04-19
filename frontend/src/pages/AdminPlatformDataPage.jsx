@@ -1,26 +1,47 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Card, Upload, Button, Table, message, Modal, Form, DatePicker, Input, Space, Tag, Popconfirm, Progress,
+  Select, Collapse, Typography,
 } from 'antd'
-import { UploadOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons'
+import { UploadOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { sharedTsnApi } from '../services/api'
 
+const { Text } = Typography
+
 function AdminPlatformDataPage() {
-  const [list, setList] = useState([])
+  const [tree, setTree] = useState([])
+  const [flatList, setFlatList] = useState([])
+  const [kindOptions, setKindOptions] = useState([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
-  const [editRow, setEditRow] = useState(null)
-  const [form] = Form.useForm()
+  const [transcodeActive, setTranscodeActive] = useState(false)
+  const [transcodeProgress, setTranscodeProgress] = useState(0)
+
+  const [sortieModalOpen, setSortieModalOpen] = useState(false)
+  const [sortieEdit, setSortieEdit] = useState(null)
+  const [sortieForm] = Form.useForm()
+
+  const [editFileRow, setEditFileRow] = useState(null)
+  const [fileForm] = Form.useForm()
+
+  const [uploadSortieId, setUploadSortieId] = useState(null)
+  const [uploadKind, setUploadKind] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await sharedTsnApi.list()
-      setList(res.data || [])
+      const [treeRes, flatRes, kindsRes] = await Promise.all([
+        sharedTsnApi.listSorties(),
+        sharedTsnApi.list(),
+        sharedTsnApi.assetKinds(),
+      ])
+      setTree(treeRes.data || [])
+      setFlatList(flatRes.data || [])
+      setKindOptions(kindsRes.data?.items || [])
     } catch {
-      message.error('加载平台数据列表失败')
+      message.error('加载平台数据失败')
     } finally {
       setLoading(false)
     }
@@ -30,19 +51,99 @@ function AdminPlatformDataPage() {
     load()
   }, [load])
 
+  const selectableSorties = useMemo(
+    () => tree.filter((s) => s.id > 0),
+    [tree],
+  )
+
+  const uploadAccept = useMemo(() => {
+    const k = kindOptions.find((x) => x.key === uploadKind)
+    if (!k?.extensions?.length) {
+      return '.pcap,.pcapng,.cap,.mp4,.mov,.mkv,.avi,.m4v,.ts,.webm'
+    }
+    return k.extensions.map((e) => `.${e}`).join(',')
+  }, [uploadKind, kindOptions])
+
   const handleUpload = async (file) => {
+    if (!uploadSortieId) {
+      message.warning('请先选择试验架次')
+      return false
+    }
+    if (!uploadKind) {
+      message.warning('请选择本次上传的数据类型')
+      return false
+    }
     const fd = new FormData()
     fd.append('file', file)
+    fd.append('sortie_id', String(uploadSortieId))
+    fd.append('asset_type', uploadKind)
     setUploading(true)
     setUploadProgress(0)
+    setTranscodeActive(false)
+    setTranscodeProgress(0)
     try {
-      await sharedTsnApi.upload(fd, (e) => {
+      const res = await sharedTsnApi.upload(fd, (e) => {
         if (e.total) setUploadProgress(Math.round((e.loaded * 100) / e.total))
       })
-      message.success('已上传到平台共享库（超过保留期的文件会在启动或下次上传时自动清理）')
-      load()
+      const msg = res.data?.message || '已上传到平台共享库'
+      const vj = res.data?.video_job
+      const fid = res.data?.id
+
+      if (vj?.status === 'transcoding' && fid != null) {
+        message.success(msg)
+        setTranscodeActive(true)
+        setTranscodeProgress(vj.progress ?? 8)
+        load()
+        message.loading({ content: '视频正在服务端转码（H.265→H.264）…', key: 'video-transcode', duration: 0 })
+        try {
+          let finished = false
+          let ticks = 0
+          const maxTicks = 900
+          while (!finished && ticks < maxTicks) {
+            ticks += 1
+            await new Promise((r) => setTimeout(r, 1100))
+            let jr
+            try {
+              jr = await sharedTsnApi.videoJob(fid)
+            } catch {
+              message.destroy('video-transcode')
+              message.warning('轮询转码状态失败，请稍后刷新列表查看是否已完成')
+              finished = true
+              break
+            }
+            const st = jr.data?.status
+            const p = jr.data?.progress ?? 0
+            setTranscodeProgress(Number.isFinite(p) ? Math.min(100, Math.max(0, p)) : 0)
+            if (st === 'ready') {
+              message.destroy('video-transcode')
+              message.success('视频转码完成，工作台可正常播放')
+              finished = true
+            } else if (st === 'failed') {
+              message.destroy('video-transcode')
+              message.error(jr.data?.error || '视频转码失败')
+              finished = true
+            }
+          }
+          if (!finished && ticks >= maxTicks) {
+            message.destroy('video-transcode')
+            message.warning('长时间未收到完成状态，请稍后手动刷新列表')
+          }
+        } finally {
+          message.destroy('video-transcode')
+          setTranscodeActive(false)
+          setTranscodeProgress(0)
+          load()
+        }
+      } else if (vj?.status === 'failed' && vj?.error) {
+        message.warning(`${msg}`)
+        load()
+      } else {
+        message.success(msg)
+        load()
+      }
     } catch (e) {
-      message.error(e.response?.data?.detail || '上传失败')
+      const d = e.response?.data?.detail
+      message.error(typeof d === 'string' ? d : d ? JSON.stringify(d) : '上传失败')
     } finally {
       setUploading(false)
       setUploadProgress(0)
@@ -50,23 +151,43 @@ function AdminPlatformDataPage() {
     return false
   }
 
-  const openEdit = (record) => {
-    setEditRow(record)
-    form.setFieldsValue({
-      experiment_date: record.experiment_date ? dayjs(record.experiment_date) : null,
-      experiment_label: record.experiment_label || '',
-    })
+  const openCreateSortie = () => {
+    setSortieEdit(null)
+    sortieForm.resetFields()
+    setSortieModalOpen(true)
   }
 
-  const submitEdit = async () => {
+  const openEditSortie = (sortie) => {
+    if (!sortie?.id || sortie.id <= 0) return
+    setSortieEdit(sortie)
+    sortieForm.setFieldsValue({
+      sortie_label: sortie.sortie_label,
+      experiment_date: sortie.experiment_date ? dayjs(sortie.experiment_date) : null,
+      remarks: sortie.remarks || '',
+    })
+    setSortieModalOpen(true)
+  }
+
+  const submitSortie = async () => {
     try {
-      const v = await form.validateFields()
-      await sharedTsnApi.update(editRow.id, {
+      const v = await sortieForm.validateFields()
+      const payload = {
+        sortie_label: v.sortie_label?.trim(),
         experiment_date: v.experiment_date ? v.experiment_date.format('YYYY-MM-DD') : null,
-        experiment_label: v.experiment_label || null,
-      })
-      message.success('已保存')
-      setEditRow(null)
+        remarks: v.remarks || null,
+      }
+      if (sortieEdit?.id) {
+        await sharedTsnApi.updateSortie(sortieEdit.id, payload)
+        message.success('架次信息已更新')
+      } else {
+        const r = await sharedTsnApi.createSortie(payload)
+        const newId = r.data?.id
+        if (newId != null) {
+          setUploadSortieId(newId)
+        }
+        message.success('已新建试验架次，已自动选为当前上传架次')
+      }
+      setSortieModalOpen(false)
       load()
     } catch (e) {
       if (e?.errorFields) return
@@ -74,17 +195,47 @@ function AdminPlatformDataPage() {
     }
   }
 
-  const columns = [
+  const openEditFile = (record) => {
+    setEditFileRow(record)
+    fileForm.setFieldsValue({
+      experiment_date: record.experiment_date ? dayjs(record.experiment_date) : null,
+      experiment_label: record.experiment_label || '',
+    })
+  }
+
+  const submitEditFile = async () => {
+    try {
+      const v = await fileForm.validateFields()
+      await sharedTsnApi.update(editFileRow.id, {
+        experiment_date: v.experiment_date ? v.experiment_date.format('YYYY-MM-DD') : null,
+        experiment_label: v.experiment_label || null,
+      })
+      message.success('已保存')
+      setEditFileRow(null)
+      load()
+    } catch (e) {
+      if (e?.errorFields) return
+      message.error(e.response?.data?.detail || '保存失败')
+    }
+  }
+
+  const fileColumns = [
     { title: 'ID', dataIndex: 'id', width: 70 },
     { title: '文件名', dataIndex: 'original_filename', ellipsis: true },
     {
-      title: '实验日期',
-      dataIndex: 'experiment_date',
-      width: 120,
-      render: (t) => t || <Tag color="default">未填写</Tag>,
+      title: '数据类型',
+      key: 'kind',
+      width: 180,
+      render: (_, r) => r.asset_label || <Tag>未标注</Tag>,
     },
     {
-      title: '实验说明',
+      title: '试验日期(旧字段)',
+      dataIndex: 'experiment_date',
+      width: 120,
+      render: (t) => t || <Tag color="default">—</Tag>,
+    },
+    {
+      title: '说明(旧字段)',
       dataIndex: 'experiment_label',
       ellipsis: true,
       render: (t) => t || '—',
@@ -92,7 +243,7 @@ function AdminPlatformDataPage() {
     {
       title: '上传时间',
       dataIndex: 'created_at',
-      width: 180,
+      width: 170,
       render: (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '—'),
     },
     {
@@ -101,18 +252,21 @@ function AdminPlatformDataPage() {
       width: 160,
       render: (_, r) => (
         <Space>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditFile(r)}>
             编辑
           </Button>
-          <Popconfirm title="确定删除该条平台数据？" onConfirm={async () => {
-            try {
-              await sharedTsnApi.remove(r.id)
-              message.success('已删除')
-              load()
-            } catch (e) {
-              message.error(e.response?.data?.detail || '删除失败')
-            }
-          }}>
+          <Popconfirm
+            title="确定删除该文件？"
+            onConfirm={async () => {
+              try {
+                await sharedTsnApi.remove(r.id)
+                message.success('已删除')
+                load()
+              } catch (e) {
+                message.error(e.response?.data?.detail || '删除失败')
+              }
+            }}
+          >
             <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
           </Popconfirm>
         </Space>
@@ -123,10 +277,10 @@ function AdminPlatformDataPage() {
   return (
     <div className="fade-in">
       <Card
-        title="平台共享 TSN 数据"
+        title="平台共享试验数据"
         extra={
           <Space>
-            <Tag color="blue">管理员上传，保留近 2 天</Tag>
+            <Tag color="blue">按试验架次分类；保留近 2 天</Tag>
             <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
               刷新
             </Button>
@@ -134,44 +288,208 @@ function AdminPlatformDataPage() {
         }
         style={{ marginBottom: 24 }}
       >
-        <p style={{ color: '#a1a1aa', marginBottom: 16 }}>
-          上传的抓包将出现在「上传解析」「事件分析」「TSN 异常检查」中的「平台数据」选项，供所有登录用户使用。
-        </p>
-        <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pcap,.pcapng,.cap">
-          <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
-            {uploading ? `上传中 ${uploadProgress}%` : '上传 TSN 抓包到平台'}
+        <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+          一次完整试验可包含：TSN 交换机 1/2 抓包、地面网联记录、飞控记录器数据，以及下列各机位视频（可按试验实际上传其中一部分）。
+          请先<strong>新建架次</strong>，再按<strong>数据类型</strong>分别上传；解析/分析功能仅可选用 PCAP 类数据源。
+        </Text>
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateSortie}>
+            新建试验架次
           </Button>
-        </Upload>
-        {uploading && uploadProgress > 0 && (
-          <Progress percent={uploadProgress} status="active" style={{ marginTop: 12, maxWidth: 400 }} />
+        </Space>
+
+        <Card type="inner" title="上传到指定架次" style={{ marginBottom: 16 }}>
+          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            <Space wrap align="center">
+              <span style={{ color: '#a1a1aa' }}>试验架次</span>
+              <Select
+                placeholder="选择架次"
+                style={{ minWidth: 260 }}
+                value={uploadSortieId}
+                onChange={setUploadSortieId}
+                options={selectableSorties.map((s) => ({
+                  value: s.id,
+                  label: `${s.sortie_label}${s.experiment_date ? ` (${s.experiment_date})` : ''}`,
+                }))}
+                allowClear
+              />
+              <span style={{ color: '#a1a1aa' }}>数据类型</span>
+              <Select
+                placeholder="选择本次上传的数据种类"
+                style={{ minWidth: 280 }}
+                value={uploadKind}
+                onChange={setUploadKind}
+                options={kindOptions.map((k) => ({
+                  value: k.key,
+                  label: `${k.label}（${k.extensions?.map((e) => `.${e}`).join('、') || ''}）`,
+                }))}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+              />
+            </Space>
+            <Upload beforeUpload={handleUpload} showUploadList={false} accept={uploadAccept}>
+              <Button type="primary" icon={<UploadOutlined />} loading={uploading} disabled={!uploadSortieId || !uploadKind}>
+                {uploading ? `上传中 ${uploadProgress}%` : '选择文件并上传'}
+              </Button>
+            </Upload>
+            {uploading && (
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>上传到服务器</Text>
+                <Progress percent={uploadProgress} status="active" style={{ maxWidth: 400 }} />
+              </div>
+            )}
+            {transcodeActive && (
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+                  视频转码（H.265→H.264，完成后即可在浏览器播放）
+                </Text>
+                <Progress percent={transcodeProgress} status="active" style={{ maxWidth: 400 }} />
+              </div>
+            )}
+          </Space>
+        </Card>
+      </Card>
+
+      <Card title="按试验架次浏览" loading={loading}>
+        <Collapse
+          bordered={false}
+          defaultActiveKey={tree.map((s) => String(s.id))}
+          items={tree.map((s) => ({
+            key: String(s.id),
+            label: (
+              <Space wrap>
+                <strong style={{ color: '#e4e4e7' }}>{s.sortie_label}</strong>
+                {s.experiment_date && <Tag>{s.experiment_date}</Tag>}
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {s.files?.length || 0} 个文件
+                </Text>
+              </Space>
+            ),
+            extra: s.id > 0 ? (
+              <div role="presentation" onClick={(e) => e.stopPropagation()}>
+                <Space>
+                  <Button type="link" size="small" onClick={() => openEditSortie(s)}>编辑架次</Button>
+                  <Popconfirm
+                    title="删除整个架次及其下所有文件？"
+                    onConfirm={async () => {
+                      try {
+                        await sharedTsnApi.deleteSortie(s.id)
+                        message.success('已删除架次')
+                        load()
+                      } catch (e) {
+                        message.error(e.response?.data?.detail || '删除失败')
+                      }
+                    }}
+                  >
+                    <Button type="link" size="small" danger>删除架次</Button>
+                  </Popconfirm>
+                </Space>
+              </div>
+            ) : null,
+            children: (
+              <div>
+                {s.remarks && (
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>{s.remarks}</Text>
+                )}
+                <Table
+                  rowKey="id"
+                  size="small"
+                  columns={fileColumns}
+                  dataSource={s.files || []}
+                  pagination={false}
+                  scroll={{ x: 960 }}
+                  locale={{ emptyText: '该架次下暂无文件' }}
+                />
+              </div>
+            ),
+          }))}
+        />
+        {!loading && tree.length === 0 && (
+          <Text type="secondary">暂无架次数据</Text>
         )}
       </Card>
 
-      <Card title="当前平台数据">
+      <Card title="全部文件（扁平列表）" style={{ marginTop: 24 }}>
         <Table
           rowKey="id"
           size="small"
           loading={loading}
-          columns={columns}
-          dataSource={list}
-          pagination={false}
-          scroll={{ x: 900 }}
+          columns={[
+            { title: 'ID', dataIndex: 'id', width: 70 },
+            { title: '文件名', dataIndex: 'original_filename', ellipsis: true },
+            {
+              title: '数据类型',
+              key: 'kind',
+              width: 180,
+              render: (_, r) => r.asset_label || <Tag>未标注</Tag>,
+            },
+            {
+              title: '试验架次',
+              key: 'sortie',
+              width: 200,
+              ellipsis: true,
+              render: (_, r) => r.sortie_label || '—',
+            },
+            {
+              title: '试验日期(旧字段)',
+              dataIndex: 'experiment_date',
+              width: 120,
+              render: (t) => t || <Tag color="default">—</Tag>,
+            },
+            {
+              title: '说明(旧字段)',
+              dataIndex: 'experiment_label',
+              ellipsis: true,
+              render: (t) => t || '—',
+            },
+            {
+              title: '上传时间',
+              dataIndex: 'created_at',
+              width: 170,
+              render: (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '—'),
+            },
+            fileColumns[fileColumns.length - 1],
+          ]}
+          dataSource={flatList}
+          pagination={{ pageSize: 15 }}
+          scroll={{ x: 1100 }}
         />
       </Card>
 
       <Modal
-        title="编辑实验信息"
-        open={!!editRow}
-        onCancel={() => setEditRow(null)}
-        onOk={submitEdit}
+        title={sortieEdit ? '编辑试验架次' : '新建试验架次'}
+        open={sortieModalOpen}
+        onCancel={() => setSortieModalOpen(false)}
+        onOk={submitSortie}
         destroyOnClose
       >
-        <Form form={form} layout="vertical">
-          <Form.Item name="experiment_date" label="实验日期">
+        <Form form={sortieForm} layout="vertical">
+          <Form.Item name="sortie_label" label="架次名称 / 编号" rules={[{ required: true, message: '请填写架次名称' }]}>
+            <Input placeholder="例如：2026-04-18 滑行试验 #01" maxLength={300} showCount />
+          </Form.Item>
+          <Form.Item name="experiment_date" label="试验日期">
             <DatePicker style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="experiment_label" label="实验说明 / 名称">
-            <Input.TextArea rows={3} placeholder="例如：某日滑行试验" maxLength={500} showCount />
+          <Form.Item name="remarks" label="备注">
+            <Input.TextArea rows={3} placeholder="可选：科目、场地、试验目的等" maxLength={2000} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="编辑文件附加信息（兼容旧字段）"
+        open={!!editFileRow}
+        onCancel={() => setEditFileRow(null)}
+        onOk={submitEditFile}
+        destroyOnClose
+      >
+        <Form form={fileForm} layout="vertical">
+          <Form.Item name="experiment_date" label="试验日期（旧字段）">
+            <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="experiment_label" label="说明（旧字段）">
+            <Input.TextArea rows={3} maxLength={500} showCount />
           </Form.Item>
         </Form>
       </Modal>

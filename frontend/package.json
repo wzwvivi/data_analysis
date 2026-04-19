@@ -11,6 +11,8 @@
     "axios": "^1.6.0",
     "echarts": "^5.4.3",
     "echarts-for-react": "^3.0.2",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
     "dayjs": "^1.11.10"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Card,
@@ -30,6 +30,7 @@ import {
   SyncOutlined,
 } from '@ant-design/icons'
 import { compareApi, protocolApi, sharedTsnApi } from '../services/api'
+import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 
 const { Panel } = Collapse
 
@@ -67,6 +68,11 @@ function ComparePage() {
   useEffect(() => {
     sharedTsnApi.list().then((r) => setSharedList(r.data || [])).catch(() => setSharedList([]))
   }, [])
+
+  const parseSharedList = useMemo(
+    () => sharedList.filter(isParseCompatibleSharedItem),
+    [sharedList],
+  )
 
   // 如果有taskId，加载任务详情并轮询直到完成
   useEffect(() => {
@@ -467,9 +473,9 @@ function ComparePage() {
                 allowClear
                 showSearch
                 optionFilterProp="label"
-                options={sharedList.map((s) => ({
+                options={parseSharedList.map((s) => ({
                   value: s.id,
-                  label: `#${s.id} ${s.original_filename}${s.experiment_label ? ` — ${s.experiment_label}` : ''}`,
+                  label: `#${s.id} ${s.original_filename}${s.asset_label ? ` · ${s.asset_label}` : ''}${s.sortie_label ? ` · ${s.sortie_label}` : ''}`,
                 }))}
               />
             </Form.Item>
@@ -512,9 +518,9 @@ function ComparePage() {
                 allowClear
                 showSearch
                 optionFilterProp="label"
-                options={sharedList.map((s) => ({
+                options={parseSharedList.map((s) => ({
                   value: s.id,
-                  label: `#${s.id} ${s.original_filename}${s.experiment_label ? ` — ${s.experiment_label}` : ''}`,
+                  label: `#${s.id} ${s.original_filename}${s.asset_label ? ` · ${s.asset_label}` : ''}${s.sortie_label ? ` · ${s.sortie_label}` : ''}`,
                 }))}
               />
             </Form.Item>

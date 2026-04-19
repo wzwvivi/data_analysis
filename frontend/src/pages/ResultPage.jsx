@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { useLocation, useParams } from 'react-router-dom'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useLocation, useParams, useSearchParams } from 'react-router-dom'
 import {
   Card, Table, Tabs, Tag, Button, Space, message, Statistic, Row, Col,
   Spin, Empty, Select, Radio, Checkbox, Alert, Progress, InputNumber, Divider, Segmented,
@@ -483,6 +483,7 @@ function buildChineseHintFromField(fieldName) {
 function ResultPage() {
   const { taskId } = useParams()
   const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [task, setTask] = useState(null)
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(true)
@@ -500,6 +501,14 @@ function ResultPage() {
   const [labelFilterValue, setLabelFilterValue] = useState(undefined)
 
   const [mainTab, setMainTab] = useState('table')
+
+  /** 工作台跳转：按解析库原始 timestamp 匹配行并高亮 */
+  const [timeRangeFilter, setTimeRangeFilter] = useState(null)
+  const [highlightSeekTs, setHighlightSeekTs] = useState(null)
+  const [resolvedHighlightTs, setResolvedHighlightTs] = useState(null)
+  const deepLinkAppliedRef = useRef('')
+  const widenAttemptRef = useRef(0)
+  const resolveMatchWarnOnceRef = useRef(false)
 
   // ---- Column manager ----
   const [colManagerOpen, setColManagerOpen] = useState(false)
@@ -639,8 +648,106 @@ function ResultPage() {
   }, [allColumnNames, hiddenColumns, pinnedColumns, labelFilterValue])
 
   useEffect(() => {
-    if (activeResult) loadPortData()
-  }, [activeResult, pagination.current, pagination.pageSize])
+    deepLinkAppliedRef.current = ''
+    widenAttemptRef.current = 0
+    setTimeRangeFilter(null)
+    setHighlightSeekTs(null)
+    setResolvedHighlightTs(null)
+    resolveMatchWarnOnceRef.current = false
+  }, [taskId])
+
+  const parseTsParam = searchParams.get('parse_ts')
+  const portParam = searchParams.get('port')
+  const parserIdParam = searchParams.get('parser_id')
+
+  useEffect(() => {
+    if (!parseTsParam || !portParam || results.length === 0) return
+    const key = `${parseTsParam}|${portParam}|${parserIdParam ?? ''}`
+    if (deepLinkAppliedRef.current === key) return
+    const targetTs = Number(parseTsParam)
+    if (!Number.isFinite(targetTs)) return
+    const portNum = Number(portParam)
+    if (!Number.isFinite(portNum)) return
+
+    const match = results.find((r) => {
+      if (r.port_number !== portNum) return false
+      if (parserIdParam != null && parserIdParam !== '') {
+        return String(r.parser_profile_id ?? '') === String(parserIdParam)
+      }
+      return true
+    })
+    if (!match) {
+      message.warning('链接中的端口/解析器与当前任务结果不匹配')
+      deepLinkAppliedRef.current = key
+      return
+    }
+
+    deepLinkAppliedRef.current = key
+    setActiveResult(match)
+    setMainTab('table')
+    setLabelFilterValue(undefined)
+    setHighlightSeekTs(targetTs)
+    setResolvedHighlightTs(null)
+    widenAttemptRef.current = 0
+    setTimeRangeFilter({ time_start: targetTs - 3, time_end: targetTs + 3 })
+    setPagination((prev) => ({ ...prev, current: 1 }))
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('parse_ts')
+      next.delete('port')
+      next.delete('parser_id')
+      return next
+    }, { replace: true })
+  }, [parseTsParam, portParam, parserIdParam, results, setSearchParams])
+
+  useEffect(() => {
+    if (highlightSeekTs == null || !portData.length) return
+    let best = null
+    let bestD = Infinity
+    for (const row of portData) {
+      const t = row.timestamp
+      if (t == null || !Number.isFinite(Number(t))) continue
+      const tn = Number(t)
+      const d = Math.abs(tn - highlightSeekTs)
+      if (d < bestD) {
+        bestD = d
+        best = tn
+      }
+    }
+    if (best != null) {
+      setResolvedHighlightTs(best)
+      if (bestD > 0.25 && !resolveMatchWarnOnceRef.current) {
+        resolveMatchWarnOnceRef.current = true
+        message.info({ content: `已匹配最接近的解析时刻，时间偏差约 ${bestD.toFixed(4)} s`, key: 'wb_ts_match', duration: 5 })
+      }
+    }
+  }, [portData, highlightSeekTs])
+
+  useEffect(() => {
+    if (highlightSeekTs == null) resolveMatchWarnOnceRef.current = false
+  }, [highlightSeekTs])
+
+  useEffect(() => {
+    if (highlightSeekTs == null || timeRangeFilter == null) return
+    if (dataLoading) return
+    if (portData.length > 0) return
+    if (widenAttemptRef.current >= 7) {
+      message.warning({ content: '在时间范围内仍未找到解析记录', key: 'wb_ts_empty', duration: 6 })
+      widenAttemptRef.current = 0
+      setHighlightSeekTs(null)
+      setTimeRangeFilter(null)
+      return
+    }
+    widenAttemptRef.current += 1
+    const span = Math.max(timeRangeFilter.time_end - timeRangeFilter.time_start, 1e-9)
+    const center = highlightSeekTs
+    const nextSpan = span * 5
+    setTimeRangeFilter({
+      time_start: center - nextSpan / 2,
+      time_end: center + nextSpan / 2,
+    })
+  }, [dataLoading, portData, highlightSeekTs, timeRangeFilter])
 
   useEffect(() => {
     const loadFieldDescriptions = async () => {
@@ -742,6 +849,10 @@ function ResultPage() {
       const params = { page: pagination.current, page_size: pagination.pageSize }
       if (activeResult.parser_profile_id)
         params.parser_id = activeResult.parser_profile_id
+      if (timeRangeFilter) {
+        params.time_start = timeRangeFilter.time_start
+        params.time_end = timeRangeFilter.time_end
+      }
       const res = await parseApi.getData(taskId, activeResult.port_number, params)
       setPortData(res.data.data || [])
       setPagination(prev => ({ ...prev, total: res.data.total_records }))
@@ -754,6 +865,10 @@ function ResultPage() {
       setDataLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (activeResult) loadPortData()
+  }, [activeResult, pagination.current, pagination.pageSize, timeRangeFilter])
 
   const handleExport = async (format) => {
     if (!activeResult) {
@@ -2632,9 +2747,41 @@ function ResultPage() {
                 />
               </div>
             )}
+            {timeRangeFilter && highlightSeekTs != null && (
+              <Alert
+                type="success"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="工作台轨迹定位：已按解析时间戳筛选表格"
+                description={(
+                  <Space wrap>
+                    <span>
+                      目标时刻约 <span className="mono">{highlightSeekTs.toFixed(6)}</span>
+                      （原始 timestamp）
+                    </span>
+                    <Button size="small" type="primary" ghost onClick={() => {
+                      setHighlightSeekTs(null)
+                      setResolvedHighlightTs(null)
+                      setTimeRangeFilter(null)
+                      widenAttemptRef.current = 0
+                      resolveMatchWarnOnceRef.current = false
+                    }}
+                    >
+                      清除时间筛选并显示全部记录
+                    </Button>
+                  </Space>
+                )}
+              />
+            )}
             <Table
                       columns={portColumns} dataSource={filteredPortData}
                       rowKey={(_, index) => index} loading={dataLoading}
+                      rowClassName={(record) => {
+                        if (resolvedHighlightTs == null || record.timestamp == null) return ''
+                        const ts = Number(record.timestamp)
+                        if (!Number.isFinite(ts)) return ''
+                        return Math.abs(ts - resolvedHighlightTs) < 1e-7 ? 'parse-table-row-highlight' : ''
+                      }}
                       scroll={{ x: 'max-content', y: 585 }} size="small"
               pagination={{
                         ...pagination, showSizeChanger: true, showQuickJumper: true,

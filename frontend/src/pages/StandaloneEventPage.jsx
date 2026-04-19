@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Button, Space, message, Tag, Table,
@@ -8,6 +8,7 @@ import {
   UploadOutlined, ReloadOutlined, PlayCircleOutlined,
 } from '@ant-design/icons'
 import { standaloneEventApi, sharedTsnApi } from '../services/api'
+import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import dayjs from 'dayjs'
 
 /**
@@ -22,6 +23,10 @@ function StandaloneEventPage() {
   const [ruleTemplate, setRuleTemplate] = useState('default_v1')
   const [dataSource, setDataSource] = useState('platform')
   const [sharedList, setSharedList] = useState([])
+  const parseSharedList = useMemo(
+    () => sharedList.filter(isParseCompatibleSharedItem),
+    [sharedList],
+  )
   const [platformId, setPlatformId] = useState(null)
   const [localFile, setLocalFile] = useState(null)
 
@@ -183,13 +188,13 @@ function StandaloneEventPage() {
                 allowClear
                 showSearch
                 optionFilterProp="label"
-                options={sharedList.map((s) => ({
+                options={parseSharedList.map((s) => ({
                   value: s.id,
-                  label: `#${s.id} ${s.original_filename}${s.experiment_label ? ` — ${s.experiment_label}` : ''}`,
+                  label: `#${s.id} ${s.original_filename}${s.asset_label ? ` · ${s.asset_label}` : ''}${s.sortie_label ? ` · ${s.sortie_label}` : ''}`,
                 }))}
               />
-              {sharedList.length === 0 && (
-                <Alert type="info" showIcon message="暂无平台数据，请管理员上传" style={{ marginBottom: 12 }} />
+              {parseSharedList.length === 0 && (
+                <Alert type="info" showIcon message="暂无可用的 PCAP 类平台数据" style={{ marginBottom: 12 }} />
               )}
               <Button
                 type="primary"

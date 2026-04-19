@@ -13,7 +13,7 @@ function LoginPage() {
 
   useEffect(() => {
     if (ready && user) {
-      navigate('/upload', { replace: true })
+      navigate('/dashboard', { replace: true })
     }
   }, [ready, user, navigate])
 
@@ -22,7 +22,7 @@ function LoginPage() {
     try {
       await login(values.username, values.password)
       message.success('登录成功')
-      navigate('/upload', { replace: true })
+      navigate('/dashboard', { replace: true })
     } catch (e) {
       message.error(e.response?.data?.detail || '登录失败')
     } finally {
