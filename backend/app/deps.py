@@ -3,7 +3,7 @@
 from typing import Optional, Callable
 
 import jwt
-from fastapi import Depends, HTTPException, Header
+from fastapi import Depends, HTTPException, Header, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,38 @@ async def get_current_user(
     token = authorization.split(" ", 1)[1].strip()
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(status_code=401, detail="无效令牌")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="无效或过期令牌")
+
+    r = await db.execute(select(User).where(User.username == sub))
+    user = r.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+    return user
+
+
+async def get_current_user_media(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None, description="与 Authorization 二选一，便于 <video src> 播放"),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """媒体流等无法自定义 Header 的场景：支持 Query ?token= JWT。"""
+    raw: Optional[str] = None
+    if authorization and authorization.lower().startswith("bearer "):
+        raw = authorization.split(" ", 1)[1].strip()
+    elif token:
+        raw = token.strip()
+    if not raw:
+        raise HTTPException(
+            status_code=401,
+            detail="未登录或令牌无效",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        payload = jwt.decode(raw, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         sub = payload.get("sub")
         if not sub:
             raise HTTPException(status_code=401, detail="无效令牌")

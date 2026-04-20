@@ -15,6 +15,8 @@ import {
   BellOutlined,
   CheckOutlined,
   ApartmentOutlined,
+  DashboardOutlined,
+  AimOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useAuth } from '../context/AuthContext'
@@ -87,6 +89,22 @@ function MainLayout() {
 
   const menuItems = useMemo(() => {
     const items = []
+    if (hasPageAccess('dashboard') || hasPageAccess('workbench')) {
+      const overviewChildren = []
+      if (hasPageAccess('dashboard')) {
+        overviewChildren.push({ key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' })
+      }
+      if (hasPageAccess('workbench')) {
+        overviewChildren.push({ key: '/workbench', icon: <AimOutlined />, label: '试验工作台' })
+      }
+      if (overviewChildren.length > 0) {
+        items.push({
+          type: 'group',
+          label: '总览',
+          children: overviewChildren,
+        })
+      }
+    }
     const networkChildren = []
     if (hasPageAccess('upload')) networkChildren.push({ key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' })
     if (hasPageAccess('tasks')) networkChildren.push({ key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' })
@@ -131,6 +149,8 @@ function MainLayout() {
 
   const getSelectedKey = () => {
     const path = location.pathname
+    if (path.startsWith('/dashboard')) return '/dashboard'
+    if (path.startsWith('/workbench')) return '/workbench'
     if (path.startsWith('/tasks/')) return '/tasks'
     if (path.startsWith('/network-config')) return '/network-config'
     if (path.startsWith('/device-protocol')) return '/device-protocol'
@@ -151,10 +171,14 @@ function MainLayout() {
 
   const breadcrumbItems = useMemo(() => {
     const path = location.pathname
-    const items = [{ title: '首页', href: '/upload' }]
+    const items = [{ title: '首页', href: '/dashboard' }]
     const push = (title, href) => items.push({ title, href })
 
-    if (path === '/upload') {
+    if (path === '/dashboard') {
+      push('总览', null); push('平台仪表盘', null)
+    } else if (path === '/workbench' || path.startsWith('/workbench/')) {
+      push('总览', null); push('试验工作台', null)
+    } else if (path === '/upload') {
       push('网络数据分析', null); push('上传解析', null)
     } else if (path === '/tasks') {
       push('网络数据分析', null); push('任务中心', null)

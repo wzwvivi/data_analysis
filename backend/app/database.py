@@ -622,4 +622,48 @@ async def init_db():
                         )
                         print(f"[DB] 已添加 auto_flight_analysis_tasks.{col_name}")
 
+            # 平台共享数据：试验架次 + 文件种类
+            if 'shared_sorties' not in inspector.get_table_names():
+                sync_conn.execute(text("""
+                    CREATE TABLE shared_sorties (
+                        id INTEGER PRIMARY KEY,
+                        sortie_label VARCHAR(300) NOT NULL,
+                        experiment_date DATE,
+                        remarks TEXT,
+                        uploaded_by_id INTEGER REFERENCES users(id),
+                        created_at DATETIME
+                    )
+                """))
+                sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_shared_sorties_created ON shared_sorties(created_at)"))
+                print("[DB] 已创建 shared_sorties 表")
+
+            if 'shared_tsn_files' in inspector.get_table_names():
+                st_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(shared_tsn_files)")).fetchall()}
+                if 'sortie_id' not in st_cols:
+                    sync_conn.execute(
+                        text("ALTER TABLE shared_tsn_files ADD COLUMN sortie_id INTEGER REFERENCES shared_sorties(id)")
+                    )
+                    sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_shared_tsn_sortie ON shared_tsn_files(sortie_id)"))
+                    print("[DB] 已添加 shared_tsn_files.sortie_id")
+                if 'asset_type' not in st_cols:
+                    sync_conn.execute(text("ALTER TABLE shared_tsn_files ADD COLUMN asset_type VARCHAR(64)"))
+                    print("[DB] 已添加 shared_tsn_files.asset_type")
+                if 'video_processing_status' not in st_cols:
+                    sync_conn.execute(
+                        text("ALTER TABLE shared_tsn_files ADD COLUMN video_processing_status VARCHAR(32)")
+                    )
+                    print("[DB] 已添加 shared_tsn_files.video_processing_status")
+                if 'video_processing_progress' not in st_cols:
+                    sync_conn.execute(
+                        text(
+                            "ALTER TABLE shared_tsn_files ADD COLUMN video_processing_progress INTEGER"
+                        )
+                    )
+                    print("[DB] 已添加 shared_tsn_files.video_processing_progress")
+                if 'video_processing_error' not in st_cols:
+                    sync_conn.execute(
+                        text("ALTER TABLE shared_tsn_files ADD COLUMN video_processing_error TEXT")
+                    )
+                    print("[DB] 已添加 shared_tsn_files.video_processing_error")
+
         await conn.run_sync(_check_and_add_columns)

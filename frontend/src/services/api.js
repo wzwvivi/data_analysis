@@ -63,15 +63,23 @@ export const roleConfigApi = {
     api.put(`/role-config/${role}/ports`, { protocol_version_id: protocolVersionId, ports }),
 }
 
-/** 平台共享 TSN（管理员上传，全员可选用） */
+/** 平台共享数据（管理员按试验架次上传，全员可选用） */
 export const sharedTsnApi = {
   list: () => api.get('/shared-tsn'),
+  /** 按试验架次分组的树结构 */
+  listSorties: () => api.get('/shared-tsn/sorties'),
+  assetKinds: () => api.get('/shared-tsn/asset-kinds'),
+  createSortie: (body) => api.post('/shared-tsn/sorties', body),
+  updateSortie: (sortieId, body) => api.patch(`/shared-tsn/sorties/${sortieId}`, body),
+  deleteSortie: (sortieId) => api.delete(`/shared-tsn/sorties/${sortieId}`),
   upload: (formData, onUploadProgress) =>
     api.post('/shared-tsn/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 300000,
+      timeout: 600000,
       onUploadProgress,
     }),
+  /** HEVC→H.264 后台转码进度（轮询） */
+  videoJob: (sharedId) => api.get(`/shared-tsn/files/${sharedId}/video-job`),
   update: (id, body) => api.patch(`/shared-tsn/${id}`, body),
   remove: (id) => api.delete(`/shared-tsn/${id}`),
 }
@@ -527,6 +535,16 @@ export const compareApi = {
       responseType: 'blob',
       timeout: 120000,
     }),
+}
+
+/** 平台总览仪表盘 */
+export const dashboardApi = {
+  getOverview: () => api.get('/dashboard/overview'),
+}
+
+/** 试验工作台（按架次） */
+export const workbenchApi = {
+  getSortie: (sortieId) => api.get(`/workbench/sorties/${sortieId}`),
 }
 
 export default api

@@ -26,7 +26,7 @@ from .auto_flight_analysis import (
 from .compare_task import CompareTask, ComparePortResult, CompareGapRecord, ComparePortTimingResult
 from .user import User
 from .role_access import RolePortAccess
-from .shared_tsn import SharedTsnFile
+from .shared_tsn import SharedSortie, SharedTsnFile
 from .protocol_change import (
     ProtocolVersionDraft,
     DraftPortDefinition,
@@ -99,7 +99,9 @@ __all__ = [
     "ComparePortTimingResult",
     "User",
     "RolePortAccess",
+    "SharedSortie",
     "SharedTsnFile",
+    "SharedSortie",
     "Arinc429Device",
     "Arinc429DeviceProtocolVersion",
     "Arinc429Label",
