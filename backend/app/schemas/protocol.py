@@ -32,8 +32,20 @@ class PortDefinitionResponse(BaseModel):
     data_direction: Optional[str] = None
     period_ms: Optional[float] = None
     description: Optional[str] = None
+    # ── ICD 6.0.x 扩展字段 ──
+    message_id: Optional[str] = None
+    source_interface_id: Optional[str] = None
+    port_id_label: Optional[str] = None
+    diu_id: Optional[str] = None
+    diu_id_set: Optional[str] = None
+    diu_recv_mode: Optional[str] = None
+    tsn_source_ip: Optional[str] = None
+    diu_ip: Optional[str] = None
+    dataset_path: Optional[str] = None
+    data_real_path: Optional[str] = None
+    final_recv_device: Optional[str] = None
     fields: List[FieldDefinitionResponse] = []
-    
+
     class Config:
         from_attributes = True
 

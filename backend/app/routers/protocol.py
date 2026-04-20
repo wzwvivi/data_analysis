@@ -1,14 +1,32 @@
 # -*- coding: utf-8 -*-
-"""协议库路由"""
+"""协议库路由
+
+本模块是「用户选版本」那一侧的只读入口：解析任务、事件分析页都通过
+`GET /api/protocols/versions` 拿候选版本。按 `ProtocolVersion.availability_status`
+过滤，默认仅暴露 `Available`，让 `PendingCode / Deprecated` 状态的版本对终端用户
+完全不可见。网络团队自己的工作台（草稿 / 审批 / 激活）走 `/api/network-config`，
+不跟这里混用。
+"""
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..deps import get_current_user
+from ..models import (
+    Protocol,
+    ProtocolVersion,
+    PortDefinition,
+    AVAILABILITY_AVAILABLE,
+    AVAILABILITY_DEPRECATED,
+)
 from ..services import ProtocolService
 from ..schemas import (
     ProtocolCreate, ProtocolResponse, ProtocolListResponse,
-    ProtocolVersionResponse, PortDefinitionResponse
+    ProtocolVersionResponse,
 )
 
 router = APIRouter(
@@ -16,127 +34,136 @@ router = APIRouter(
     tags=["协议库"],
     dependencies=[Depends(get_current_user)],
 )
-FIXED_PROTOCOL_NAME = "TSN ICD"
-FIXED_PROTOCOL_VERSION = "v6.0.1"
 
 
-async def _get_fixed_visible_version(service: ProtocolService):
-    """从现有配置中选出唯一可见版本，并映射为固定名称/版本号"""
-    protocols = await service.get_protocols()
-
-    candidates = []
-    for p in protocols:
-        for v in p.versions:
-            candidates.append((p, v))
-
-    if not candidates:
-        return None
-
-    # 优先保留包含 tsn2.0 的版本；若不存在则按端口数量和创建时间选择最优候选
-    preferred = [
-        (p, v) for p, v in candidates
-        if "tsn2.0" in (p.name or "").lower() or "tsn2.0" in (v.version or "").lower()
-    ]
-    pool = preferred if preferred else candidates
-    pool.sort(
-        key=lambda pv: (
-            len(pv[1].ports) if hasattr(pv[1], "ports") and pv[1].ports else 0,
-            pv[1].created_at,
-        ),
-        reverse=True,
+async def _fetch_user_visible_versions(
+    db: AsyncSession,
+    *,
+    include_deprecated: bool = False,
+) -> List[ProtocolVersion]:
+    """取所有用户可选的协议版本（默认仅 Available）。"""
+    allowed = [AVAILABILITY_AVAILABLE]
+    if include_deprecated:
+        allowed.append(AVAILABILITY_DEPRECATED)
+    result = await db.execute(
+        select(ProtocolVersion)
+        .where(ProtocolVersion.availability_status.in_(allowed))
+        .options(
+            selectinload(ProtocolVersion.protocol),
+            selectinload(ProtocolVersion.ports),
+        )
+        .order_by(ProtocolVersion.created_at.desc())
     )
-    protocol, version = pool[0]
-    return {
-        "protocol": protocol,
-        "version": version,
-        "protocol_name": FIXED_PROTOCOL_NAME,
-        "version_name": FIXED_PROTOCOL_VERSION,
-    }
+    return list(result.scalars().all())
+
+
+async def _ensure_version_user_visible(
+    db: AsyncSession,
+    version_id: int,
+) -> ProtocolVersion:
+    """对端口/字段等下钻接口做可见性收口；`PendingCode / Deprecated` 版本对用户不可选。"""
+    result = await db.execute(
+        select(ProtocolVersion).where(ProtocolVersion.id == version_id)
+    )
+    pv = result.scalar_one_or_none()
+    if pv is None:
+        raise HTTPException(status_code=404, detail="网络配置版本不存在")
+    if pv.availability_status != AVAILABILITY_AVAILABLE:
+        raise HTTPException(status_code=404, detail="该网络配置版本当前不可用")
+    return pv
 
 
 @router.get("", response_model=ProtocolListResponse)
 async def list_protocols(db: AsyncSession = Depends(get_db)):
-    """获取协议列表（固定为单一 TSN ICD 版本）"""
-    service = ProtocolService(db)
-    picked = await _get_fixed_visible_version(service)
-    if not picked:
-        return ProtocolListResponse(total=0, items=[])
+    """协议列表（按 Available 过滤嵌套版本）"""
+    result = await db.execute(
+        select(Protocol).options(
+            selectinload(Protocol.versions).selectinload(ProtocolVersion.ports)
+        ).order_by(Protocol.id.asc())
+    )
+    protocols = result.scalars().all()
 
-    p = picked["protocol"]
-    v = picked["version"]
-    item = ProtocolResponse(
-        id=p.id,
-        name=picked["protocol_name"],
-        description=p.description,
-        created_at=p.created_at,
-        updated_at=p.updated_at,
-        versions=[
+    items: List[ProtocolResponse] = []
+    for p in protocols:
+        versions = [
             ProtocolVersionResponse(
                 id=v.id,
-                version=picked["version_name"],
+                version=v.version,
                 source_file=v.source_file,
                 description=v.description,
                 created_at=v.created_at,
-                port_count=len(v.ports) if hasattr(v, "ports") else 0,
+                port_count=len(v.ports) if v.ports else 0,
             )
-        ],
-    )
-    return ProtocolListResponse(total=1, items=[item])
+            for v in (p.versions or [])
+            if getattr(v, "availability_status", AVAILABILITY_AVAILABLE) == AVAILABILITY_AVAILABLE
+        ]
+        if not versions:
+            # 协议下全是 PendingCode / Deprecated，对用户列表也不暴露
+            continue
+        items.append(
+            ProtocolResponse(
+                id=p.id,
+                name=p.name,
+                description=p.description,
+                created_at=p.created_at,
+                updated_at=p.updated_at,
+                versions=versions,
+            )
+        )
+    return ProtocolListResponse(total=len(items), items=items)
 
 
 @router.post("", response_model=ProtocolResponse)
 async def create_protocol(
     _data: ProtocolCreate,
-    _db: AsyncSession = Depends(get_db)
-):
-    """创建协议（已禁用）"""
-    raise HTTPException(status_code=403, detail="网络配置为内置固定版本，不允许新增")
-
-
-# ========== 固定路径路由必须在 /{protocol_id} 之前 ==========
-
-@router.post("/import")
-async def import_icd(
     _db: AsyncSession = Depends(get_db),
 ):
-    """导入ICD Excel文件（已禁用）"""
-    raise HTTPException(status_code=403, detail="网络配置上传已禁用，仅保留内置 TSN ICD v6.0.1")
+    """创建协议（禁用：请走 `/api/network-config` 审批发布流程）"""
+    raise HTTPException(
+        status_code=403,
+        detail="请通过网络团队配置管理（审批 → 发布 → 激活）创建新版本",
+    )
+
+
+@router.post("/import")
+async def import_icd(_db: AsyncSession = Depends(get_db)):
+    """导入 ICD Excel（禁用：请走审批流程）"""
+    raise HTTPException(
+        status_code=403,
+        detail="请通过网络团队配置管理（审批 → 发布 → 激活）导入新版本",
+    )
 
 
 @router.get("/versions")
 async def list_all_versions(db: AsyncSession = Depends(get_db)):
-    """获取所有网络配置版本（固定为单一 TSN ICD 版本）"""
-    service = ProtocolService(db)
-    picked = await _get_fixed_visible_version(service)
-    if not picked:
-        return {"total": 0, "items": []}
-
-    p = picked["protocol"]
-    v = picked["version"]
+    """所有可选协议版本扁平列表（供上传/事件分析页选版本下拉）"""
+    versions = await _fetch_user_visible_versions(db)
     return {
-        "total": 1,
-        "items": [{
-            "id": v.id,
-            "protocol_id": p.id,
-            "protocol_name": picked["protocol_name"],
-            "version": picked["version_name"],
-            "source_file": v.source_file,
-            "description": v.description,
-            "created_at": v.created_at,
-            "port_count": len(v.ports) if hasattr(v, "ports") else 0,
-        }],
+        "total": len(versions),
+        "items": [
+            {
+                "id": v.id,
+                "protocol_id": v.protocol_id,
+                "protocol_name": v.protocol.name if v.protocol else None,
+                "version": v.version,
+                "source_file": v.source_file,
+                "description": v.description,
+                "created_at": v.created_at,
+                "availability_status": v.availability_status,
+                "port_count": len(v.ports) if v.ports else 0,
+            }
+            for v in versions
+        ],
     }
 
 
 @router.get("/versions/{version_id}/ports")
 async def get_version_ports(version_id: int, db: AsyncSession = Depends(get_db)):
-    """获取版本下的端口定义"""
+    """版本下端口定义（仅 Available 版本可下钻）"""
+    await _ensure_version_user_visible(db, version_id)
     service = ProtocolService(db)
-    picked = await _get_fixed_visible_version(service)
-    if not picked or version_id != picked["version"].id:
-        raise HTTPException(status_code=404, detail="网络配置版本不存在")
     ports = await service.get_ports_by_version(version_id)
-    
+
     return {
         "total": len(ports),
         "items": [
@@ -149,60 +176,40 @@ async def get_version_ports(version_id: int, db: AsyncSession = Depends(get_db))
                 "multicast_ip": p.multicast_ip,
                 "data_direction": p.data_direction,
                 "period_ms": p.period_ms,
-                "field_count": len(p.fields) if p.fields else 0
+                "protocol_family": p.protocol_family,
+                "field_count": len(p.fields) if p.fields else 0,
             }
             for p in ports
-        ]
+        ],
     }
 
 
 @router.get("/versions/{version_id}/devices")
 async def get_version_devices(version_id: int, db: AsyncSession = Depends(get_db)):
-    """获取版本下的设备列表（含协议族和可选解析器版本）
-    
-    返回设备列表，每个设备包含:
-    - device_name: 设备名称
-    - ports: 端口号列表
-    - messages: 消息名称列表
-    - port_count: 端口数量
-    - direction: 数据方向(source/target/both)
-    - protocol_family: 协议族标识
-    - available_parsers: 该协议族下可选的解析器版本列表
-    """
+    """版本下设备聚合列表（仅 Available 版本可下钻）"""
+    await _ensure_version_user_visible(db, version_id)
     service = ProtocolService(db)
-    picked = await _get_fixed_visible_version(service)
-    if not picked or version_id != picked["version"].id:
-        raise HTTPException(status_code=404, detail="网络配置版本不存在")
-    
-    version = await service.get_version(version_id)
-    if not version:
-        raise HTTPException(status_code=404, detail="网络配置版本不存在")
-    
     devices = await service.get_devices_with_family(version_id)
-    
     return {
         "version_id": version_id,
         "total": len(devices),
-        "items": devices
+        "items": devices,
     }
 
 
 @router.get("/versions/{version_id}/ports/{port_number}")
 async def get_port_detail(
-    version_id: int, 
-    port_number: int, 
-    db: AsyncSession = Depends(get_db)
+    version_id: int,
+    port_number: int,
+    db: AsyncSession = Depends(get_db),
 ):
-    """获取端口详情（包含字段定义）"""
+    """端口详情（含字段定义；仅 Available 版本可下钻）"""
+    await _ensure_version_user_visible(db, version_id)
     service = ProtocolService(db)
-    picked = await _get_fixed_visible_version(service)
-    if not picked or version_id != picked["version"].id:
-        raise HTTPException(status_code=404, detail="网络配置版本不存在")
     port = await service.get_port_by_number(version_id, port_number)
-    
     if not port:
         raise HTTPException(status_code=404, detail="端口定义不存在")
-    
+
     return {
         "id": port.id,
         "port_number": port.port_number,
@@ -212,6 +219,7 @@ async def get_port_detail(
         "multicast_ip": port.multicast_ip,
         "data_direction": port.data_direction,
         "period_ms": port.period_ms,
+        "protocol_family": port.protocol_family,
         "fields": [
             {
                 "id": f.id,
@@ -222,24 +230,24 @@ async def get_port_detail(
                 "scale_factor": f.scale_factor,
                 "unit": f.unit,
                 "description": f.description,
-                "byte_order": f.byte_order
+                "byte_order": f.byte_order,
             }
             for f in port.fields
-        ]
+        ],
     }
 
 
 # ========== 动态路径路由放在最后 ==========
 
+
 @router.get("/{protocol_id}", response_model=ProtocolResponse)
 async def get_protocol(protocol_id: int, db: AsyncSession = Depends(get_db)):
-    """获取协议详情"""
+    """协议详情（只返回 Available 版本）"""
     service = ProtocolService(db)
     protocol = await service.get_protocol(protocol_id)
-    
     if not protocol:
         raise HTTPException(status_code=404, detail="协议不存在")
-    
+
     versions = [
         ProtocolVersionResponse(
             id=v.id,
@@ -247,16 +255,17 @@ async def get_protocol(protocol_id: int, db: AsyncSession = Depends(get_db)):
             source_file=v.source_file,
             description=v.description,
             created_at=v.created_at,
-            port_count=len(v.ports) if hasattr(v, 'ports') else 0
+            port_count=len(v.ports) if hasattr(v, "ports") and v.ports else 0,
         )
         for v in protocol.versions
+        if getattr(v, "availability_status", AVAILABILITY_AVAILABLE) == AVAILABILITY_AVAILABLE
     ]
-    
+
     return ProtocolResponse(
         id=protocol.id,
         name=protocol.name,
         description=protocol.description,
         created_at=protocol.created_at,
         updated_at=protocol.updated_at,
-        versions=versions
+        versions=versions,
     )

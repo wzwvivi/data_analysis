@@ -4,7 +4,7 @@ import {
   Card, Upload, Button, Select, Form, message, Space, Tag, Row, Col, Alert, Divider, Table, Progress, Radio,
 } from 'antd'
 import {
-  InboxOutlined, CloudUploadOutlined, ApiOutlined, DesktopOutlined, SettingOutlined
+  InboxOutlined, CloudUploadOutlined, ApiOutlined, DesktopOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { parseApi, protocolApi, sharedTsnApi } from '../services/api'
 
@@ -239,16 +239,9 @@ function UploadPage() {
       formData.append('shared_tsn_id', String(platformFileId))
     }
     formData.append('device_parser_map', JSON.stringify(deviceParserMap))
-
-    if (selectedVersion) {
-      formData.append('protocol_version_id', selectedVersion)
-    }
-    if (selectedDevices.length > 0) {
-      formData.append('selected_devices', selectedDevices.join(','))
-    }
-    if (selectedPorts.length > 0) {
-      formData.append('selected_ports', selectedPorts.join(','))
-    }
+    if (selectedVersion) formData.append('protocol_version_id', selectedVersion)
+    if (selectedDevices.length > 0) formData.append('selected_devices', selectedDevices.join(','))
+    if (selectedPorts.length > 0) formData.append('selected_ports', selectedPorts.join(','))
 
     try {
       const onProg = (progressEvent) => {
@@ -257,10 +250,9 @@ function UploadPage() {
           setUploadProgress(percent)
         }
       }
-      const res =
-        dataSource === 'local'
-          ? await parseApi.upload(formData, onProg)
-          : await parseApi.uploadFromShared(formData, onProg)
+      const res = dataSource === 'local'
+        ? await parseApi.upload(formData, onProg)
+        : await parseApi.uploadFromShared(formData, onProg)
       message.success('解析任务已创建')
       navigate(`/tasks/${res.data.task_id}`)
     } catch (err) {
@@ -612,8 +604,8 @@ function UploadPage() {
 
               <Form.Item style={{ marginTop: 16 }}>
                 {uploading && dataSource === 'local' && uploadProgress > 0 && (
-                  <Progress 
-                    percent={uploadProgress} 
+                  <Progress
+                    percent={uploadProgress}
                     status="active"
                     style={{ marginBottom: 16 }}
                   />

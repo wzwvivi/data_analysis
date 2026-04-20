@@ -17,6 +17,9 @@ from .routers import (
     shared_tsn_router,
     arinc429_router,
     role_config_router,
+    network_config_router,
+    device_protocol_router,
+    notifications_router,
 )
 from .config import UPLOAD_DIR, DATA_DIR
 from .init_data import init_all_data
@@ -68,6 +71,9 @@ app.include_router(shared_tsn_router)
 app.include_router(arinc429_router)
 app.include_router(role_config_router)
 app.include_router(protocol_router)
+app.include_router(network_config_router)
+app.include_router(device_protocol_router)
+app.include_router(notifications_router)
 app.include_router(parse_router)
 app.include_router(event_analysis_router)
 app.include_router(fcc_event_analysis_router)

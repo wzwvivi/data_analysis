@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_HOURS
 from ..database import get_db
 from ..deps import get_current_user, require_admin, get_visible_ports, list_all_ports_for_protocol
-from ..models import User, ParseTask
+from ..models import User, ProtocolVersion
 from ..permissions import ROLE_ADMIN, ROLE_KEYS, ROLE_META_LIST, get_role_pages, is_valid_role
 from ..services.auth_password import hash_password, verify_password
 
@@ -307,13 +307,14 @@ async def my_permissions(
     role = (user.role or "user").strip()
     pages = get_role_pages(role)
 
-    protocol_versions = await db.execute(
-        select(ParseTask.protocol_version_id)
-        .where(ParseTask.protocol_version_id.is_not(None))
-        .distinct()
+    # 覆盖全量协议版本而不仅仅是「已有解析任务」的版本，保证新用户
+    # 首次查看时也能看到全部网络配置的权限信息。
+    version_rows = await db.execute(
+        select(ProtocolVersion.id).order_by(ProtocolVersion.id.asc())
     )
+    version_ids = list(version_rows.scalars().all())
     visible_ports: dict[str, list[int]] = {}
-    for version_id in protocol_versions.scalars().all():
+    for version_id in version_ids:
         all_ports = await list_all_ports_for_protocol(db, version_id)
         if role == ROLE_ADMIN:
             visible_ports[str(version_id)] = all_ports

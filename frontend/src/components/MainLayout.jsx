@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Menu, Typography, Dropdown, Button, Modal, Form, Input, message } from 'antd'
+import { Layout, Menu, Typography, Dropdown, Button, Modal, Form, Input, message, Breadcrumb, Badge, List, Empty, Tag, Spin, Tooltip } from 'antd'
 import {
   CloudUploadOutlined,
   UnorderedListOutlined,
@@ -11,8 +11,14 @@ import {
   UserOutlined,
   LogoutOutlined,
   FileTextOutlined,
+  SafetyCertificateOutlined,
+  BellOutlined,
+  CheckOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons'
+import dayjs from 'dayjs'
 import { useAuth } from '../context/AuthContext'
+import { notificationApi } from '../services/api'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
@@ -26,11 +32,66 @@ function MainLayout() {
   const [pwdLoading, setPwdLoading] = useState(false)
   const [pwdForm] = Form.useForm()
 
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [notifLoading, setNotifLoading] = useState(false)
+  const [notifItems, setNotifItems] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const notifTimerRef = useRef(null)
+
+  const loadNotifications = useCallback(async (silent = false) => {
+    try {
+      if (!silent) setNotifLoading(true)
+      const res = await notificationApi.list({ limit: 20 })
+      setNotifItems(res.data?.items || [])
+      setUnreadCount(res.data?.unread_count || 0)
+    } catch {
+      // ignore
+    } finally {
+      if (!silent) setNotifLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!user) return
+    loadNotifications(true)
+    notifTimerRef.current = setInterval(() => loadNotifications(true), 60_000)
+    return () => {
+      if (notifTimerRef.current) clearInterval(notifTimerRef.current)
+    }
+  }, [user, loadNotifications])
+
+  const handleNotifClick = async (n) => {
+    try {
+      if (!n.read_at) {
+        await notificationApi.markRead(n.id)
+      }
+    } catch {
+      // ignore
+    }
+    setNotifOpen(false)
+    loadNotifications(true)
+    if (n.link) {
+      const to = n.link.startsWith('/') ? n.link : `/${n.link}`
+      navigate(to)
+    }
+  }
+
+  const handleMarkAllRead = async () => {
+    try {
+      await notificationApi.markAllRead()
+      loadNotifications(true)
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '标记失败')
+    }
+  }
+
   const menuItems = useMemo(() => {
     const items = []
     const networkChildren = []
     if (hasPageAccess('upload')) networkChildren.push({ key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' })
     if (hasPageAccess('tasks')) networkChildren.push({ key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' })
+    if (hasPageAccess('network-config')) networkChildren.push({ key: '/network-config', icon: <SafetyCertificateOutlined />, label: 'TSN 网络配置' })
+    if (hasPageAccess('device-protocol')) networkChildren.push({ key: '/device-protocol', icon: <ApartmentOutlined />, label: '设备协议管理' })
     if (networkChildren.length > 0) {
       items.push({ type: 'group', label: '网络数据分析', children: networkChildren })
     }
@@ -71,6 +132,8 @@ function MainLayout() {
   const getSelectedKey = () => {
     const path = location.pathname
     if (path.startsWith('/tasks/')) return '/tasks'
+    if (path.startsWith('/network-config')) return '/network-config'
+    if (path.startsWith('/device-protocol')) return '/device-protocol'
     if (path.startsWith('/compare')) return '/compare'
     if (path.startsWith('/auto-flight-analysis')) return '/auto-flight-analysis'
     if (path.startsWith('/fcc-event-analysis')) return '/fcc-event-analysis'
@@ -85,6 +148,72 @@ function MainLayout() {
     logout()
     navigate('/login')
   }
+
+  const breadcrumbItems = useMemo(() => {
+    const path = location.pathname
+    const items = [{ title: '首页', href: '/upload' }]
+    const push = (title, href) => items.push({ title, href })
+
+    if (path === '/upload') {
+      push('网络数据分析', null); push('上传解析', null)
+    } else if (path === '/tasks') {
+      push('网络数据分析', null); push('任务中心', null)
+    } else if (/^\/tasks\/[^/]+\/analysis$/.test(path)) {
+      push('网络数据分析', null); push('任务中心', '/tasks'); push('结果分析', null)
+    } else if (/^\/tasks\/[^/]+\/event-analysis$/.test(path)) {
+      push('网络数据分析', null); push('任务中心', '/tasks'); push('事件分析', null)
+    } else if (/^\/tasks\/[^/]+$/.test(path)) {
+      push('网络数据分析', null); push('任务中心', '/tasks'); push('解析结果', null)
+    } else if (path.startsWith('/network-config/drafts')) {
+      push('网络数据分析', null); push('TSN 网络配置', '/network-config'); push('草稿编辑', null)
+    } else if (path.startsWith('/network-config/change-requests')) {
+      push('网络数据分析', null); push('TSN 网络配置', '/network-config'); push('变更请求', null)
+    } else if (path.startsWith('/network-config')) {
+      push('网络数据分析', null); push('TSN 网络配置', null)
+    } else if (path.startsWith('/device-protocol/drafts')) {
+      push('网络数据分析', null); push('设备协议管理', '/device-protocol'); push('草稿编辑', null)
+    } else if (path.startsWith('/device-protocol/change-requests')) {
+      push('网络数据分析', null); push('设备协议管理', '/device-protocol'); push('审批流', null)
+    } else if (path.startsWith('/device-protocol/versions')) {
+      push('网络数据分析', null); push('设备协议管理', '/device-protocol'); push('版本详情', null)
+    } else if (path.startsWith('/device-protocol')) {
+      push('网络数据分析', null); push('设备协议管理', null)
+    } else if (path.startsWith('/compare')) {
+      push('TSN数据异常检查', null)
+    } else if (path.startsWith('/fcc-event-analysis/task/')) {
+      push('飞机行为事件分析', null); push('飞控事件分析', '/fcc-event-analysis'); push('任务详情', null)
+    } else if (path.startsWith('/fcc-event-analysis')) {
+      push('飞机行为事件分析', null); push('飞控事件分析', null)
+    } else if (path.startsWith('/auto-flight-analysis/task/')) {
+      push('飞机行为事件分析', null); push('自动飞行性能分析', '/auto-flight-analysis'); push('任务详情', null)
+    } else if (path.startsWith('/auto-flight-analysis')) {
+      push('飞机行为事件分析', null); push('自动飞行性能分析', null)
+    } else if (path.startsWith('/event-analysis/task/')) {
+      push('飞机行为事件分析', null); push('飞管事件分析', '/event-analysis'); push('任务详情', null)
+    } else if (path.startsWith('/event-analysis')) {
+      push('飞机行为事件分析', null); push('飞管事件分析', null)
+    } else if (path.startsWith('/admin/protocol-manager')) {
+      push('系统配置', null); push('协议管理', null)
+    } else if (path.startsWith('/admin/platform-data')) {
+      push('系统配置', null); push('平台共享数据', null)
+    } else if (path.startsWith('/admin/users')) {
+      push('系统配置', null); push('用户管理', null)
+    }
+
+    return items.map((it, idx) => ({
+      key: `${idx}-${it.title}`,
+      title: it.href ? (
+        <a
+          onClick={(e) => { e.preventDefault(); navigate(it.href) }}
+          style={{ color: '#a1a1aa', cursor: 'pointer' }}
+        >
+          {it.title}
+        </a>
+      ) : (
+        <span style={{ color: idx === items.length - 1 ? '#d4d4d8' : '#71717a' }}>{it.title}</span>
+      ),
+    }))
+  }, [location.pathname, navigate])
 
   const handleChangePassword = async () => {
     try {
@@ -202,24 +331,128 @@ function MainLayout() {
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
-          <div style={{ 
-            color: '#71717a', 
-            fontSize: '12px',
-            fontWeight: 500,
-            letterSpacing: '0.005em',
-          }}>
-              {location.pathname === '/upload' && '网络数据分析 / 上传TSN数据包进行解析'}
-              {location.pathname === '/tasks' && '网络数据分析 / 查看所有解析任务'}
-              {location.pathname.startsWith('/compare') && 'TSN数据异常检查'}
-              {location.pathname.includes('/fcc-event-analysis') && '飞机行为事件分析 / 飞控事件分析'}
-              {location.pathname.includes('/auto-flight-analysis') && '飞机行为事件分析 / 自动飞行性能分析'}
-              {location.pathname.includes('/event-analysis') && !location.pathname.includes('/fcc-event-analysis') && !location.pathname.includes('/auto-flight-analysis') && '飞机行为事件分析 / 飞管事件分析'}
-              {location.pathname.includes('/analysis') && !location.pathname.includes('/event-analysis') && '网络数据分析 / 时序数据分析与可视化'}
-              {location.pathname.startsWith('/tasks/') && !location.pathname.includes('/analysis') && '网络数据分析 / 解析结果查看'}
-              {location.pathname.startsWith('/admin/protocol-manager') && '系统配置 / 协议管理'}
-              {location.pathname.startsWith('/admin/platform-data') && '系统配置 / 平台共享数据'}
-              {location.pathname.startsWith('/admin/users') && '系统配置 / 用户管理'}
-          </div>
+          <Breadcrumb
+            items={breadcrumbItems}
+            separator="/"
+            style={{
+              fontSize: 12,
+              fontWeight: 500,
+              letterSpacing: '0.005em',
+              color: '#71717a',
+            }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Dropdown
+            open={notifOpen}
+            onOpenChange={(open) => {
+              setNotifOpen(open)
+              if (open) loadNotifications()
+            }}
+            placement="bottomRight"
+            trigger={['click']}
+            dropdownRender={() => (
+              <div style={{
+                width: 380,
+                background: 'rgba(24, 24, 27, 0.96)',
+                border: '1px solid rgba(70, 70, 82, 0.4)',
+                borderRadius: 10,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+                backdropFilter: 'blur(12px)',
+                overflow: 'hidden',
+              }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  borderBottom: '1px solid rgba(63,63,70,0.4)',
+                }}>
+                  <span style={{ color: '#e4e4e7', fontWeight: 600, fontSize: 13 }}>
+                    站内通知
+                    {unreadCount > 0 ? (
+                      <Tag color="processing" style={{ marginLeft: 8 }}>{unreadCount} 未读</Tag>
+                    ) : null}
+                  </span>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<CheckOutlined />}
+                    onClick={handleMarkAllRead}
+                    disabled={unreadCount === 0}
+                  >
+                    全部标为已读
+                  </Button>
+                </div>
+                <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                  {notifLoading ? (
+                    <div style={{ padding: 24, textAlign: 'center' }}><Spin /></div>
+                  ) : notifItems.length === 0 ? (
+                    <div style={{ padding: 24 }}>
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无通知" />
+                    </div>
+                  ) : (
+                    <List
+                      dataSource={notifItems}
+                      renderItem={(n) => (
+                        <List.Item
+                          style={{
+                            padding: '10px 14px',
+                            cursor: 'pointer',
+                            background: n.read_at ? 'transparent' : 'rgba(91, 33, 182, 0.08)',
+                            borderBottom: '1px solid rgba(63,63,70,0.25)',
+                          }}
+                          onClick={() => handleNotifClick(n)}
+                        >
+                          <div style={{ width: '100%' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                              <span style={{ color: '#e4e4e7', fontSize: 13, fontWeight: 600 }}>
+                                {n.title}
+                              </span>
+                              {!n.read_at ? (
+                                <span style={{
+                                  width: 8, height: 8, borderRadius: '50%',
+                                  background: '#a855f7', flexShrink: 0,
+                                }} />
+                              ) : null}
+                            </div>
+                            {n.body ? (
+                              <div style={{ color: '#a1a1aa', fontSize: 12, marginBottom: 4, lineHeight: 1.5 }}>
+                                {n.body}
+                              </div>
+                            ) : null}
+                            <div style={{ color: '#71717a', fontSize: 11 }}>
+                              {n.created_at ? dayjs(n.created_at).format('YYYY-MM-DD HH:mm') : ''}
+                            </div>
+                          </div>
+                        </List.Item>
+                      )}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+          >
+            <Tooltip title="站内通知" placement="bottom">
+              <Button
+                type="text"
+                style={{
+                  color: '#d4d4d8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  height: 38,
+                  width: 38,
+                  borderRadius: 10,
+                  padding: 0,
+                }}
+              >
+                <Badge count={unreadCount} overflowCount={99} size="small" offset={[-2, 2]}>
+                  <BellOutlined style={{ fontSize: 16, color: '#d4d4d8' }} />
+                </Badge>
+              </Button>
+            </Tooltip>
+          </Dropdown>
+
           <Dropdown
             menu={{
               items: [
@@ -265,6 +498,7 @@ function MainLayout() {
               </span>
             </Button>
           </Dropdown>
+          </div>
         </Header>
         <Content style={{
           margin: '24px',

@@ -2,25 +2,34 @@
 """解析任务路由"""
 import json
 import math
+import os
 import shutil
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query
+from typing import List, Optional
+
+from fastapi import (
+    APIRouter, Body, Depends, HTTPException, UploadFile, File, Form,
+    BackgroundTasks, Query,
+)
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS
+from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE
 from ..deps import (
     get_current_user,
     ensure_port_visible_or_403,
     get_visible_ports,
 )
+from ..models import ParseTask
 from ..services import ParserService
 from ..services import shared_tsn_service as shared_tsn_svc
 from ..services.port_anomaly_service import PortAnomalyService, STUCK_CONSECUTIVE_FRAMES
 from ..background_jobs import run_parse_task_job
-from ..task_executor import submit_process_job
+from ..task_executor import submit_parse_job, submit_process_job, cancel_parse_future
 from ..schemas import (
     ParseTaskResponse, ParseTaskListResponse,
     ParseResultResponse, ParsedDataResponse
@@ -31,6 +40,17 @@ from ..schemas.parse import (
     PortAnomalyAnalyzeResponse,
 )
 from ..schemas.protocol import ParserProfileResponse, ParserProfileListResponse
+
+
+# ---------- 任务中心增强请求体 ----------
+
+class UpdateTaskMetaRequest(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=255)
+    tags: Optional[List[str]] = None
+
+
+class BulkDeleteRequest(BaseModel):
+    task_ids: List[int] = Field(..., min_length=1)
 
 router = APIRouter(
     prefix="/api/parse",
@@ -219,6 +239,45 @@ async def get_parser_profile(profile_id: int, db: AsyncSession = Depends(get_db)
 
 # ========== 上传和解析接口 ==========
 
+def _streaming_copy_with_size_check(
+    src, dst_path: Path, max_size: int
+) -> int:
+    """流式写入 pcap，超过 max_size 立即中断并清理。返回写入字节数。"""
+    written = 0
+    chunk_size = 1024 * 1024  # 1MB
+    with open(dst_path, "wb") as out:
+        while True:
+            chunk = src.read(chunk_size)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > max_size:
+                out.close()
+                try:
+                    dst_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"文件大小超过限制（最大 {max_size // (1024 ** 3)}GB）",
+                )
+            out.write(chunk)
+    return written
+
+
+async def _set_task_file_size(
+    db: AsyncSession, task_id: int, *, size: Optional[int]
+) -> None:
+    if size is None:
+        return
+    r = await db.execute(select(ParseTask).where(ParseTask.id == task_id))
+    t = r.scalar_one_or_none()
+    if not t:
+        return
+    t.file_size = size
+    await db.commit()
+
+
 @router.post("/upload")
 async def upload_and_parse(
     background_tasks: BackgroundTasks,
@@ -251,8 +310,7 @@ async def upload_and_parse(
     timestamp = int(time.time() * 1000)
     safe_filename = f"{timestamp}_{file.filename}"
     file_path = upload_path / safe_filename
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f, length=1024 * 1024)
+    size = _streaming_copy_with_size_check(file.file, file_path, MAX_UPLOAD_SIZE)
 
     ports, devices = _resolve_ports_devices(selected_ports, selected_devices, dpm)
     task = await service.create_task(
@@ -263,7 +321,8 @@ async def upload_and_parse(
         selected_ports=ports,
         selected_devices=devices,
     )
-    background_tasks.add_task(submit_process_job, run_parse_task_job, task.id)
+    await _set_task_file_size(db, task.id, size=size)
+    background_tasks.add_task(submit_parse_job, run_parse_task_job, task.id)
     return {
         "success": True,
         "task_id": task.id,
@@ -311,7 +370,8 @@ async def upload_from_shared_pcap(
         selected_ports=ports,
         selected_devices=devices,
     )
-    background_tasks.add_task(submit_process_job, run_parse_task_job, task.id)
+    await _set_task_file_size(db, task.id, size=row.file_size)
+    background_tasks.add_task(submit_parse_job, run_parse_task_job, task.id)
     return {
         "success": True,
         "task_id": task.id,
@@ -324,14 +384,45 @@ async def upload_from_shared_pcap(
 async def list_tasks(
     page: int = 1,
     page_size: int = 20,
+    q: Optional[str] = Query(None, description="按文件名/显示名模糊搜索"),
+    status: Optional[str] = Query(None, description="按状态过滤，逗号分隔"),
+    protocol_version_id: Optional[int] = Query(None),
+    source: Optional[str] = Query(None, regex="^(local|shared)$"),
+    date_from: Optional[str] = Query(None, description="创建时间起点，ISO 格式"),
+    date_to: Optional[str] = Query(None, description="创建时间终点，ISO 格式"),
+    tag: Optional[str] = Query(None),
+    device: Optional[str] = Query(None, description="按设备名模糊匹配（device_parser_map 的键）"),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取解析任务列表"""
+    """获取解析任务列表（支持任务中心多维过滤）。"""
     from ..schemas.parse import ParserProfileSummary, DeviceParserInfo
-    
+
+    def _parse_dt(val: Optional[str]) -> Optional[datetime]:
+        if not val:
+            return None
+        try:
+            return datetime.fromisoformat(val)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"日期格式错误: {val}")
+
+    statuses = None
+    if status:
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+
     service = ParserService(db)
     offset = (page - 1) * page_size
-    tasks, total = await service.get_tasks(limit=page_size, offset=offset)
+    tasks, total = await service.get_tasks(
+        limit=page_size,
+        offset=offset,
+        q=q,
+        statuses=statuses,
+        protocol_version_id=protocol_version_id,
+        source=source,
+        date_from=_parse_dt(date_from),
+        date_to=_parse_dt(date_to),
+        tag=tag,
+        device=device,
+    )
     
     # 收集所有解析器ID
     all_profile_ids = set()
@@ -402,31 +493,183 @@ async def list_tasks(
                     protocol_family=p.protocol_family if p else None,
                 ))
         
-        items.append(ParseTaskResponse(
-            id=t.id,
-            filename=t.filename,
-            parser_profile_id=t.parser_profile_id,
-            parser_profile_ids=t.parser_profile_ids,
-            device_parser_map=dpm,
-            device_parsers=device_parsers_list,
-            parser_profile_name=profile.name if profile else None,
-            parser_profile_version=profile.version if profile else None,
-            parser_profiles=parser_profiles,
-            protocol_version_id=t.protocol_version_id,
-            network_config_name=net_config_name,
-            network_config_version=net_config_version,
-            status=t.status,
-            selected_ports=t.selected_ports,
-            selected_devices=t.selected_devices,
-            total_packets=t.total_packets or 0,
-            parsed_packets=t.parsed_packets or 0,
-            progress=getattr(t, "progress", None) or 0,
-            error_message=t.error_message,
-            created_at=t.created_at,
-            completed_at=t.completed_at
+        items.append(_build_task_response(
+            t, profile, parser_profiles, net_config_name, net_config_version,
+            dpm, device_parsers_list,
         ))
-    
+
     return ParseTaskListResponse(total=total, items=items)
+
+
+# ---------- ParseTaskResponse 映射工具 ----------
+
+def _is_shared_source(file_path: Optional[str]) -> bool:
+    if not file_path:
+        return False
+    try:
+        return Path(file_path).resolve().is_relative_to(
+            (UPLOAD_DIR / "shared_tsn").resolve()
+        )
+    except Exception:
+        return False
+
+
+def _estimate_remaining_ms(t: ParseTask) -> Optional[int]:
+    if t.status != "processing" or not t.started_at:
+        return None
+    pct = int(getattr(t, "progress", 0) or 0)
+    if pct <= 0 or pct >= 100:
+        return None
+    elapsed = (datetime.utcnow() - t.started_at).total_seconds()
+    if elapsed <= 0:
+        return None
+    total = elapsed / (pct / 100.0)
+    remaining = max(0.0, total - elapsed)
+    return int(remaining * 1000)
+
+
+def _build_task_response(
+    t: ParseTask,
+    profile,
+    parser_profiles,
+    net_config_name,
+    net_config_version,
+    dpm,
+    device_parsers_list,
+) -> ParseTaskResponse:
+    return ParseTaskResponse(
+        id=t.id,
+        filename=t.filename,
+        display_name=getattr(t, "display_name", None),
+        tags=getattr(t, "tags", None) or None,
+        file_size=getattr(t, "file_size", None),
+        is_shared_source=_is_shared_source(t.file_path),
+        parser_profile_id=t.parser_profile_id,
+        parser_profile_ids=t.parser_profile_ids,
+        device_parser_map=dpm,
+        device_parsers=device_parsers_list,
+        parser_profile_name=profile.name if profile else None,
+        parser_profile_version=profile.version if profile else None,
+        parser_profiles=parser_profiles,
+        protocol_version_id=t.protocol_version_id,
+        network_config_name=net_config_name,
+        network_config_version=net_config_version,
+        status=t.status,
+        stage=getattr(t, "stage", None),
+        selected_ports=t.selected_ports,
+        selected_devices=t.selected_devices,
+        total_packets=t.total_packets or 0,
+        parsed_packets=t.parsed_packets or 0,
+        progress=getattr(t, "progress", None) or 0,
+        cancel_requested=bool(getattr(t, "cancel_requested", 0)),
+        can_rerun=(
+            t.file_path is not None and Path(t.file_path).is_file()
+            and t.status in ("completed", "failed", "cancelled")
+        ),
+        estimated_remaining_ms=_estimate_remaining_ms(t),
+        error_message=t.error_message,
+        created_at=t.created_at,
+        started_at=getattr(t, "started_at", None),
+        completed_at=t.completed_at,
+    )
+
+
+# ---------- 任务中心新增写操作 ----------
+
+@router.patch("/tasks/{task_id}", response_model=ParseTaskResponse)
+async def update_task_meta(
+    task_id: int,
+    body: UpdateTaskMetaRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """重命名 / 设置标签。"""
+    service = ParserService(db)
+    task = await service.update_task_meta(
+        task_id,
+        display_name=body.display_name,
+        tags=body.tags,
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return _build_task_response(task, None, None, None, None, task.device_parser_map, None)
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    service = ParserService(db)
+    t = await service.get_task(task_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    # 若任务仍在运行，先下达取消信号；再尝试从 future 层取消
+    if t.status in ("pending", "processing"):
+        await service.request_cancel(task_id)
+        cancel_parse_future(task_id)
+    ok = await service.delete_task(task_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="删除失败")
+    return {"ok": True, "id": task_id}
+
+
+@router.post("/tasks/bulk-delete")
+async def bulk_delete_tasks(
+    body: BulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    service = ParserService(db)
+    # 先发取消信号给还在跑的任务
+    for tid in body.task_ids:
+        t = await service.get_task(int(tid))
+        if t and t.status in ("pending", "processing"):
+            await service.request_cancel(int(tid))
+            cancel_parse_future(int(tid))
+    deleted = await service.bulk_delete_tasks(body.task_ids)
+    return {"ok": True, "deleted": deleted, "requested": len(body.task_ids)}
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    service = ParserService(db)
+    ok = await service.request_cancel(task_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="任务无法取消或已结束")
+    # 排队中的任务可直接打断 future
+    cancel_parse_future(task_id)
+    return {"ok": True, "id": task_id}
+
+
+@router.post("/tasks/{task_id}/rerun")
+async def rerun_task(
+    task_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """基于现有任务（相同文件 + device_parser_map）创建一个新的解析任务。"""
+    service = ParserService(db)
+    origin = await service.get_task(task_id)
+    if not origin:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not origin.file_path or not Path(origin.file_path).is_file():
+        raise HTTPException(status_code=400, detail="原始文件已被清理，无法重新解析")
+    if not origin.device_parser_map:
+        raise HTTPException(status_code=400, detail="任务缺少设备解析器映射，无法重新解析")
+
+    new_task = await service.create_task(
+        filename=origin.filename,
+        file_path=origin.file_path,
+        device_parser_map=origin.device_parser_map,
+        protocol_version_id=origin.protocol_version_id,
+        selected_ports=origin.selected_ports,
+        selected_devices=origin.selected_devices,
+    )
+    await _set_task_file_size(db, new_task.id, size=origin.file_size)
+    background_tasks.add_task(submit_parse_job, run_parse_task_job, new_task.id)
+    return {"ok": True, "task_id": new_task.id}
 
 
 @router.get("/tasks/{task_id}")

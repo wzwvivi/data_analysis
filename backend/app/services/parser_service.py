@@ -13,7 +13,11 @@ import pyarrow.parquet as pq
 import pyarrow.dataset as ds
 import pyarrow.csv as pacsv
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, String
+
+
+class TaskCancelled(Exception):
+    """Raised from inside the parse loop when the task was user-cancelled."""
 from ..config import DATA_DIR, UPLOAD_DIR
 from ..models import ParseTask, ParseResult, ParserProfile
 from .protocol_service import ProtocolService
@@ -296,28 +300,86 @@ class ParserService:
 
         return atg_records
 
-    async def get_tasks(self, limit: int = 50, offset: int = 0) -> Tuple[List[ParseTask], int]:
-        """获取任务列表"""
-        from sqlalchemy import func
-        count_result = await self.db.execute(select(func.count(ParseTask.id)))
-        total = count_result.scalar()
-        
+    async def get_tasks(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        q: Optional[str] = None,
+        statuses: Optional[List[str]] = None,
+        protocol_version_id: Optional[int] = None,
+        source: Optional[str] = None,  # 'local' / 'shared' / None
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        tag: Optional[str] = None,
+        device: Optional[str] = None,
+    ) -> Tuple[List[ParseTask], int]:
+        """获取任务列表，支持任务中心所需的多维过滤。"""
+        from sqlalchemy import func, or_
+
+        base = select(ParseTask)
+
+        if q:
+            pattern = f"%{q.strip()}%"
+            base = base.where(or_(
+                ParseTask.filename.like(pattern),
+                ParseTask.display_name.like(pattern),
+            ))
+
+        if statuses:
+            base = base.where(ParseTask.status.in_(statuses))
+
+        if protocol_version_id is not None:
+            base = base.where(ParseTask.protocol_version_id == protocol_version_id)
+
+        if source in ("local", "shared"):
+            shared_dir = (UPLOAD_DIR / "shared_tsn").resolve().as_posix()
+            pattern = f"{shared_dir}%"
+            if source == "shared":
+                base = base.where(ParseTask.file_path.like(pattern))
+            else:
+                base = base.where(~ParseTask.file_path.like(pattern))
+
+        if date_from is not None:
+            base = base.where(ParseTask.created_at >= date_from)
+        if date_to is not None:
+            base = base.where(ParseTask.created_at <= date_to)
+
+        if tag:
+            # 简单 LIKE 过滤 JSON 字段（SQLite 不能高效地 json_each，所以走 LIKE）
+            tag_pattern = f'%"{tag}"%'
+            base = base.where(ParseTask.tags.isnot(None)).where(
+                func.cast(ParseTask.tags, String).like(tag_pattern)
+            )
+
+        if device:
+            # 对 device_parser_map（JSON，形如 {"FCC1": 123, "大气数据系统": 456}）做键名模糊匹配
+            dev_pattern = f'%"{device.strip()}%'
+            base = base.where(ParseTask.device_parser_map.isnot(None)).where(
+                func.cast(ParseTask.device_parser_map, String).like(dev_pattern)
+            )
+
+        count_result = await self.db.execute(
+            select(func.count()).select_from(base.subquery())
+        )
+        total = int(count_result.scalar() or 0)
+
         result = await self.db.execute(
-            select(ParseTask)
-            .order_by(ParseTask.created_at.desc())
+            base.order_by(ParseTask.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
         return result.scalars().all(), total
-    
+
     async def update_task_status(
-        self, 
-        task_id: int, 
+        self,
+        task_id: int,
         status: str,
         total_packets: int = None,
         parsed_packets: int = None,
         error_message: str = None,
         progress: int = None,
+        stage: Optional[str] = None,
     ):
         """更新任务状态"""
         task = await self.get_task(task_id)
@@ -331,35 +393,132 @@ class ParserService:
                 task.error_message = error_message
             if progress is not None:
                 task.progress = min(100, max(0, int(progress)))
+            if stage is not None:
+                task.stage = stage
             if status == "completed":
                 task.progress = 100
-            elif status == "failed":
+            elif status in ("failed", "cancelled"):
                 task.progress = 0
-            if status in ("completed", "failed"):
+            if status == "processing" and task.started_at is None:
+                task.started_at = datetime.utcnow()
+            if status in ("completed", "failed", "cancelled"):
                 task.completed_at = datetime.utcnow()
             await self.db.commit()
 
-    @staticmethod
-    def _cleanup_pcap(file_path: str) -> None:
-        """解析完成/失败后删除原始 pcap 文件以释放磁盘空间"""
+    async def request_cancel(self, task_id: int) -> bool:
+        """请求取消任务：仅标记 cancel_requested，由解析循环协作退出。"""
+        task = await self.get_task(task_id)
+        if not task:
+            return False
+        if task.status in ("completed", "failed", "cancelled"):
+            return False
+        task.cancel_requested = 1
+        if task.status == "pending":
+            # 尚未进入解析的任务可以立刻置为 cancelled
+            task.status = "cancelled"
+            task.completed_at = datetime.utcnow()
+            task.progress = 0
+        await self.db.commit()
+        return True
+
+    async def is_cancel_requested(self, task_id: int) -> bool:
+        from sqlalchemy import select as _select
+        r = await self.db.execute(
+            _select(ParseTask.cancel_requested).where(ParseTask.id == task_id)
+        )
+        val = r.scalar_one_or_none()
+        return bool(val)
+
+    async def update_task_meta(
+        self,
+        task_id: int,
+        *,
+        display_name: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+    ) -> Optional[ParseTask]:
+        """重命名 / 打标签。参数为 None 代表不修改。"""
+        task = await self.get_task(task_id)
+        if not task:
+            return None
+        if display_name is not None:
+            display_name = display_name.strip()
+            task.display_name = display_name or None
+        if tags is not None:
+            cleaned = sorted({t.strip() for t in tags if t and t.strip()})
+            task.tags = cleaned or None
+        await self.db.commit()
+        await self.db.refresh(task)
+        return task
+
+    async def delete_task(self, task_id: int, *, delete_pcap: bool = True) -> bool:
+        """删除单个任务及其解析结果与原始文件。"""
+        task = await self.get_task(task_id)
+        if not task:
+            return False
+        file_path = task.file_path
+        # 删结果目录
+        try:
+            result_dir = DATA_DIR / "results" / str(task_id)
+            if result_dir.is_dir():
+                import shutil as _shutil
+                _shutil.rmtree(result_dir, ignore_errors=True)
+        except Exception as exc:
+            print(f"[DeleteTask] 清理结果目录失败 task={task_id}: {exc}")
+        # 删相关 ParseResult 行
+        from sqlalchemy import delete as _delete
+        await self.db.execute(_delete(ParseResult).where(ParseResult.task_id == task_id))
+        await self.db.execute(_delete(ParseTask).where(ParseTask.id == task_id))
+        await self.db.commit()
+        if delete_pcap and file_path:
+            await self._cleanup_pcap_if_orphan(file_path)
+        return True
+
+    async def bulk_delete_tasks(self, task_ids: List[int]) -> int:
+        """批量删除任务，返回删除成功条数。"""
+        ok = 0
+        for tid in task_ids:
+            try:
+                if await self.delete_task(int(tid)):
+                    ok += 1
+            except Exception as exc:
+                print(f"[BulkDeleteTask] 删除 {tid} 失败: {exc}")
+        return ok
+
+    async def _cleanup_pcap_if_orphan(self, file_path: str) -> None:
+        """仅当文件不再被任何任务/共享库引用时才删除。"""
         if not file_path:
             return
         try:
             p = Path(file_path)
             shared_dir = (UPLOAD_DIR / "shared_tsn").resolve()
             try:
-                # 平台共享库文件需要保留，不能在解析后删除
                 if p.resolve().is_relative_to(shared_dir):
-                    print(f"[Cleanup] 跳过共享文件: {p.name}")
+                    print(f"[Cleanup] 保留共享文件: {p.name}")
                     return
             except Exception:
                 pass
+            # 若还有其他任务引用同一个路径，则保留
+            from sqlalchemy import select as _select, func as _func
+            cnt_r = await self.db.execute(
+                _select(_func.count()).select_from(ParseTask).where(ParseTask.file_path == file_path)
+            )
+            cnt = int(cnt_r.scalar_one() or 0)
+            if cnt > 0:
+                print(f"[Cleanup] 仍被 {cnt} 个任务引用，保留: {p.name}")
+                return
             if p.is_file():
                 size_mb = p.stat().st_size / (1024 * 1024)
                 p.unlink()
                 print(f"[Cleanup] 已删除原始文件: {p.name} ({size_mb:.1f} MB)")
         except Exception as exc:
             print(f"[Cleanup] 删除失败: {file_path} -> {exc}")
+
+    # 兼容旧代码：保留同名方法，但改为"只在孤立时清理"——不再解析后强删。
+    @staticmethod
+    def _cleanup_pcap(file_path: str) -> None:
+        """兼容入口：解析成功不再删除用户原始文件，方便后续重新解析。"""
+        # 保留签名但默认不做任何事，真正的清理发生在任务被显式删除时。
+        return None
 
     async def _report_file_read_progress(
         self,
@@ -414,8 +573,12 @@ class ParserService:
                 parsed_arg = parsed_so_far
                 last_parsed_committed[0] = parsed_so_far
             await self.update_task_status(
-                task_id, "processing", progress=pct, parsed_packets=parsed_arg
+                task_id, "processing", progress=pct, parsed_packets=parsed_arg,
+                stage="reading",
             )
+            # 借助进度提交的节流点，顺带巡检一次「是否被用户取消」。
+            if await self.is_cancel_requested(task_id):
+                raise TaskCancelled(f"task {task_id} cancelled by user")
     
     async def get_parser_profile(self, profile_id: int) -> Optional[ParserProfile]:
         """获取解析版本配置"""
@@ -481,7 +644,10 @@ class ParserService:
             return False
         
         print(f"[Parser] 任务文件: {task.file_path}")
-        await self.update_task_status(task_id, "processing", progress=0)
+        if await self.is_cancel_requested(task_id):
+            await self.update_task_status(task_id, "cancelled", progress=0, stage=None)
+            return False
+        await self.update_task_status(task_id, "processing", progress=0, stage="reading")
         
         try:
             # 获取所有端口定义
@@ -739,19 +905,30 @@ class ParserService:
                 shutil.rmtree(spill_dir, ignore_errors=True)
 
             await self.db.commit()
-            await self.update_task_status(task_id, "completed", parsed_packets=total_records)
-            print(f"[Parser] 解析完成，共 {total_records} 条记录")
-            self._cleanup_pcap(task.file_path)
+            await self.update_task_status(
+                task_id, "completed", parsed_packets=total_records, stage=None
+            )
+            print(f"[Parser] 解析完成，共 {total_records} 条记录（原始文件已保留供重新解析）")
             return True
 
+        except TaskCancelled:
+            print(f"[Parser] 任务 {task_id} 已被用户取消")
+            if spill_dir and spill_dir.exists():
+                import shutil
+                shutil.rmtree(spill_dir, ignore_errors=True)
+            await self.update_task_status(
+                task_id, "cancelled", error_message="任务已被取消", stage=None
+            )
+            return False
         except Exception as e:
             import traceback
             traceback.print_exc()
             if spill_dir and spill_dir.exists():
                 import shutil
                 shutil.rmtree(spill_dir, ignore_errors=True)
-            await self.update_task_status(task_id, "failed", error_message=str(e))
-            self._cleanup_pcap(task.file_path)
+            await self.update_task_status(
+                task_id, "failed", error_message=str(e), stage=None
+            )
             return False
     
     async def _parse_with_custom_parser(

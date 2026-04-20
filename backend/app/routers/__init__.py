@@ -9,6 +9,9 @@ from .auth import router as auth_router
 from .shared_tsn import router as shared_tsn_router
 from .arinc429 import router as arinc429_router
 from .role_config import router as role_config_router
+from .network_config import router as network_config_router
+from .device_protocol import router as device_protocol_router
+from .notifications import router as notifications_router
 
 __all__ = [
     "protocol_router",
@@ -21,4 +24,7 @@ __all__ = [
     "shared_tsn_router",
     "arinc429_router",
     "role_config_router",
+    "network_config_router",
+    "device_protocol_router",
+    "notifications_router",
 ]

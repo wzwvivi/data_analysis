@@ -40,6 +40,17 @@ class Protocol(Base):
     versions = relationship("ProtocolVersion", back_populates="protocol", cascade="all, delete-orphan")
 
 
+# ── 协议版本可用性状态枚举（字符串值落库，避免 Enum 迁移痛点） ──
+AVAILABILITY_AVAILABLE = "Available"
+AVAILABILITY_PENDING_CODE = "PendingCode"
+AVAILABILITY_DEPRECATED = "Deprecated"
+AVAILABILITY_STATUSES = (
+    AVAILABILITY_AVAILABLE,
+    AVAILABILITY_PENDING_CODE,
+    AVAILABILITY_DEPRECATED,
+)
+
+
 class ProtocolVersion(Base):
     """协议版本"""
     __tablename__ = "protocol_versions"
@@ -50,6 +61,22 @@ class ProtocolVersion(Base):
     source_file = Column(String(255), comment="来源文件名")
     description = Column(Text, comment="版本描述")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # 版本生命周期：Available(可选池) / PendingCode(待代码就绪) / Deprecated(弃用)
+    availability_status = Column(
+        String(20),
+        default=AVAILABILITY_AVAILABLE,
+        nullable=False,
+        comment="可用性状态: Available / PendingCode / Deprecated",
+    )
+    activated_at = Column(DateTime, nullable=True, comment="进入 Available 的时间")
+    activated_by = Column(String(64), nullable=True, comment="执行激活的管理员用户名")
+    forced_activation = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="是否绕过就绪检查强制激活（审计用）",
+    )
     
     # 关联
     protocol = relationship("Protocol", back_populates="versions")
@@ -69,8 +96,23 @@ class PortDefinition(Base):
     multicast_ip = Column(String(50), comment="组播IP")
     data_direction = Column(String(20), comment="数据方向: uplink/downlink/network")
     period_ms = Column(Float, comment="周期(毫秒)")
-    description = Column(Text, comment="描述")
-    
+    description = Column(Text, comment="描述（对应 ICD 的「备注」列）")
+    # 协议族（权威），如 irs/xpdr/bms800v/...；为空时由 PORT_FAMILY_MAP 兜底
+    protocol_family = Column(String(50), nullable=True, comment="端口所属解析器族")
+
+    # ── ICD 6.0.x 原表头映射（扩展列，不影响历史解析逻辑） ──
+    message_id = Column(String(64), nullable=True, comment="ICD 消息编号")
+    source_interface_id = Column(String(64), nullable=True, comment="ICD 消息源端接口编号（上行/网络交互）")
+    port_id_label = Column(String(64), nullable=True, comment="ICD PortID（上行/网络交互，字面值）")
+    diu_id = Column(String(64), nullable=True, comment="ICD DIU编号")
+    diu_id_set = Column(String(200), nullable=True, comment="ICD DIU编号集合（下行）")
+    diu_recv_mode = Column(String(100), nullable=True, comment="ICD DIU消息接收形式（下行）")
+    tsn_source_ip = Column(String(100), nullable=True, comment="ICD TSN消息源端IP（下行）")
+    diu_ip = Column(String(100), nullable=True, comment="ICD 承接转换的DIU IP（下行）")
+    dataset_path = Column(String(200), nullable=True, comment="ICD DataSet传递路径（下行）")
+    data_real_path = Column(String(200), nullable=True, comment="ICD 数据实际路径（下行）")
+    final_recv_device = Column(String(100), nullable=True, comment="ICD 最终接收端设备（下行）")
+
     # 关联
     protocol_version = relationship("ProtocolVersion", back_populates="ports")
     fields = relationship("FieldDefinition", back_populates="port", cascade="all, delete-orphan")

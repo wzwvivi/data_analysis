@@ -1,4 +1,6 @@
 fastapi==0.109.0
+# uvicorn[standard] 依赖 PyYAML；显式声明避免部分环境下 pip 解析不到
+PyYAML>=5.1,<7
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 pandas==2.2.0

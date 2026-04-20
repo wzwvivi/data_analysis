@@ -43,6 +43,7 @@ PAGE_AUTO_FLIGHT_ANALYSIS_TASK = "auto-flight-analysis/task/:taskId"
 PAGE_COMPARE = "compare"
 PAGE_COMPARE_TASK = "compare/:taskId"
 PAGE_NETWORK_CONFIG = "network-config"
+PAGE_DEVICE_PROTOCOL = "device-protocol"
 PAGE_ADMIN_PROTOCOL_MANAGER = "admin/protocol-manager"
 PAGE_ADMIN_PLATFORM_DATA = "admin/platform-data"
 PAGE_ADMIN_USERS = "admin/users"
@@ -108,6 +109,7 @@ ROLE_PAGE_ACCESS = {
         PAGE_TASK_ANALYSIS,
         PAGE_EVENT_ANALYSIS,
         PAGE_EVENT_ANALYSIS_TASK,
+        PAGE_DEVICE_PROTOCOL,
     ],
     ROLE_DEVICE_TEAM: [
         PAGE_TASKS,
@@ -116,6 +118,7 @@ ROLE_PAGE_ACCESS = {
         PAGE_EVENT_ANALYSIS,
         PAGE_EVENT_ANALYSIS_TASK,
         PAGE_ADMIN_PROTOCOL_MANAGER,
+        PAGE_DEVICE_PROTOCOL,
     ],
     ROLE_NETWORK_TEAM: [
         PAGE_TASKS,
@@ -126,6 +129,7 @@ ROLE_PAGE_ACCESS = {
         PAGE_NETWORK_CONFIG,
         PAGE_COMPARE,
         PAGE_COMPARE_TASK,
+        PAGE_DEVICE_PROTOCOL,
     ],
 }
 

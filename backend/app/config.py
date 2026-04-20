@@ -18,9 +18,11 @@ else:
 
 UPLOAD_DIR = BASE_DIR / "uploads"
 DATA_DIR = BASE_DIR / "data"
+DRAFT_UPLOAD_DIR = UPLOAD_DIR / "drafts"
 
 UPLOAD_DIR.mkdir(exist_ok=True, parents=True)
 DATA_DIR.mkdir(exist_ok=True, parents=True)
+DRAFT_UPLOAD_DIR.mkdir(exist_ok=True, parents=True)
 
 DATABASE_URL = f"sqlite+aiosqlite:///{DATA_DIR}/tsn_analyzer.db"
 

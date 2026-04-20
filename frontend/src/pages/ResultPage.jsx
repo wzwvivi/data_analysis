@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { useLocation, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Card, Table, Tabs, Tag, Button, Space, message, Statistic, Row, Col,
   Spin, Empty, Select, Radio, Checkbox, Alert, Progress, InputNumber, Divider, Segmented,
-  Modal, Collapse, Tooltip,
+  Modal, Collapse, Tooltip, Typography, Popconfirm,
 } from 'antd'
 import {
   DownloadOutlined, LineChartOutlined, ReloadOutlined,
@@ -11,11 +11,13 @@ import {
   DesktopOutlined, FilterOutlined,
   BarChartOutlined, SwapOutlined, WarningOutlined,
   SettingOutlined, PushpinOutlined, AppstoreOutlined,
-  PlusOutlined, DeleteOutlined,
+  PlusOutlined, DeleteOutlined, StopOutlined, EditOutlined,
+  ExperimentOutlined, RedoOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import * as echarts from 'echarts'
 import { parseApi, protocolApi } from '../services/api'
+import { formatBytes } from '../utils/fileFingerprint'
 import dayjs from 'dayjs'
 
 const { Option } = Select
@@ -483,6 +485,8 @@ function buildChineseHintFromField(fieldName) {
 function ResultPage() {
   const { taskId } = useParams()
   const location = useLocation()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [task, setTask] = useState(null)
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(true)
@@ -670,8 +674,69 @@ function ResultPage() {
   }, [activeResult, task?.protocol_version_id])
 
   useEffect(() => {
-    setMainTab(location.pathname.endsWith('/analysis') ? 'analysis' : 'table')
-  }, [location.pathname])
+    // 路径中的 /analysis 优先，其次看 ?tab= 查询参数；没有时回退到 table
+    const paramTab = searchParams.get('tab')
+    if (location.pathname.endsWith('/analysis')) {
+      setMainTab('analysis')
+    } else if (paramTab && ['table', 'analysis', 'anomaly'].includes(paramTab)) {
+      setMainTab(paramTab)
+    } else {
+      setMainTab('table')
+    }
+  }, [location.pathname, searchParams])
+
+  const handleTabChange = (key) => {
+    setMainTab(key)
+    if (location.pathname.endsWith('/analysis')) {
+      // 旧的 /analysis 直接路由下允许切回 table（用 search param 表达）
+      const next = new URLSearchParams(searchParams)
+      next.set('tab', key)
+      navigate(`/tasks/${taskId}?${next.toString()}`, { replace: true })
+      return
+    }
+    const next = new URLSearchParams(searchParams)
+    if (key === 'table') {
+      next.delete('tab')
+    } else {
+      next.set('tab', key)
+    }
+    setSearchParams(next, { replace: true })
+  }
+
+  const handleRenameTask = async () => {
+    if (!task) return
+    const next = window.prompt('任务显示名称', task.display_name || task.filename)
+    if (next == null) return
+    try {
+      await parseApi.updateTaskMeta(task.id, { display_name: (next || '').trim() || null })
+      message.success('已更新')
+      loadTask(true)
+    } catch (err) {
+      message.error(err.response?.data?.detail || '更新失败')
+    }
+  }
+
+  const handleCancelTask = async () => {
+    if (!task) return
+    try {
+      await parseApi.cancelTask(task.id)
+      message.success('已请求取消，稍后将生效')
+      loadTask(true)
+    } catch (err) {
+      message.error(err.response?.data?.detail || '取消失败')
+    }
+  }
+
+  const handleRerunTask = async () => {
+    if (!task) return
+    try {
+      const res = await parseApi.rerunTask(task.id)
+      message.success('已创建重新解析任务')
+      if (res.data?.task_id) navigate(`/tasks/${res.data.task_id}`)
+    } catch (err) {
+      message.error(err.response?.data?.detail || '重试失败')
+    }
+  }
 
   useEffect(() => {
     if (allColumnNames.length === 0) return
@@ -2467,10 +2532,78 @@ function ResultPage() {
     </div>
   )
 
+  const isTaskActive = task.status === 'pending' || task.status === 'processing'
+  const taskDisplayTitle = task.display_name || task.filename
+
   return (
     <div className="fade-in">
       {/* Task overview */}
       <Card style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+          <Space direction="vertical" size={4} style={{ minWidth: 0 }}>
+            <Space size={8} wrap>
+              <Typography.Title level={4} style={{ margin: 0, color: '#f4f4f5', wordBreak: 'break-all' }}>
+                {taskDisplayTitle}
+              </Typography.Title>
+              <Button size="small" type="text" icon={<EditOutlined />} onClick={handleRenameTask}>
+                重命名
+              </Button>
+              {task.is_shared_source && (
+                <Tag style={{ background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa' }}>
+                  平台共享
+                </Tag>
+              )}
+              {task.cancel_requested && task.status === 'processing' && (
+                <Tag color="warning">取消中</Tag>
+              )}
+            </Space>
+            {task.display_name && task.display_name !== task.filename && (
+              <Typography.Text type="secondary" className="mono" style={{ fontSize: 12 }}>
+                {task.filename}
+              </Typography.Text>
+            )}
+            <Space size={8} wrap>
+              {task.file_size != null && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {formatBytes(task.file_size)}
+                </Typography.Text>
+              )}
+              {(task.tags || []).map(t => (
+                <Tag key={t} style={{ margin: 0, background: 'rgba(95, 208, 104, 0.12)', borderColor: '#5fd068', color: '#5fd068' }}>
+                  {t}
+                </Tag>
+              ))}
+            </Space>
+          </Space>
+          <Space wrap>
+            {task.status === 'completed' && (
+              <Button
+                icon={<ExperimentOutlined />}
+                onClick={() => navigate(`/tasks/${task.id}/event-analysis`)}
+              >
+                事件分析
+              </Button>
+            )}
+            {task.can_rerun && (
+              <Button icon={<RedoOutlined />} onClick={handleRerunTask}>
+                重新解析
+              </Button>
+            )}
+            {isTaskActive && !task.cancel_requested && (
+              <Popconfirm
+                title="确认取消该解析任务？"
+                description="当前进度将丢失，已产生的结果不会写入数据库。"
+                okText="取消任务"
+                okButtonProps={{ danger: true }}
+                cancelText="继续运行"
+                onConfirm={handleCancelTask}
+              >
+                <Button danger icon={<StopOutlined />}>取消</Button>
+              </Popconfirm>
+            )}
+          </Space>
+        </div>
+
         <Row gutter={[24, 16]} align="middle">
           <Col xs={24} sm={12} md={8} lg={6}>
             <Statistic
@@ -2558,7 +2691,7 @@ function ResultPage() {
 
       <Tabs
         activeKey={mainTab}
-        onChange={setMainTab}
+        onChange={handleTabChange}
         type="card"
         items={[
           {

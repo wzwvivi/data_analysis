@@ -53,6 +53,13 @@ async def init_db():
                     'selected_ports': 'JSON',
                     'selected_devices': 'JSON',
                     'progress': 'INTEGER DEFAULT 0',
+                    # 任务中心增强字段
+                    'display_name': 'VARCHAR(255)',
+                    'tags': 'JSON',
+                    'file_size': 'INTEGER',
+                    'stage': 'VARCHAR(50)',
+                    'cancel_requested': 'INTEGER DEFAULT 0',
+                    'started_at': 'DATETIME',
                 }
                 for col_name, col_type in cols_to_add.items():
                     if col_name not in existing_cols:
@@ -60,6 +67,7 @@ async def init_db():
                             text(f"ALTER TABLE parse_tasks ADD COLUMN {col_name} {col_type}")
                         )
                         print(f"[DB] 已添加 parse_tasks.{col_name} 列")
+
                 
                 if needs_rebuild:
                     print("[DB] 需要重建 parse_tasks 表以支持 parser_profile_id 为 NULL...")
@@ -145,6 +153,15 @@ async def init_db():
                     text("UPDATE parser_profiles SET is_active = 0 WHERE parser_key IN ('jzxpdr113b_7004_v20260113', 'jzxpdr113b_7005_v20260113') AND is_active = 1")
                 )
                 print("[DB] 已更新解析器配置（protocol_family + 动态端口 + 停用旧解析器）")
+
+            # shared_tsn_files 表迁移：补齐 file_size 列
+            if 'shared_tsn_files' in inspector.get_table_names():
+                st_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(shared_tsn_files)")).fetchall()}
+                if 'file_size' not in st_cols:
+                    sync_conn.execute(
+                        text("ALTER TABLE shared_tsn_files ADD COLUMN file_size INTEGER")
+                    )
+                    print("[DB] 已添加 shared_tsn_files.file_size 列")
 
             # users 表迁移
             if 'users' in inspector.get_table_names():
@@ -282,6 +299,304 @@ async def init_db():
                             text("ALTER TABLE event_analysis_tasks ADD COLUMN progress INTEGER DEFAULT 0")
                         )
                         print("[DB] 已添加 event_analysis_tasks.progress")
+
+            # protocol_versions 表迁移：版本生命周期状态
+            if 'protocol_versions' in inspector.get_table_names():
+                pv_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(protocol_versions)")).fetchall()}
+                pv_add = {
+                    'availability_status': "VARCHAR(20) NOT NULL DEFAULT 'Available'",
+                    'activated_at': 'DATETIME',
+                    'activated_by': 'VARCHAR(64)',
+                    'forced_activation': 'BOOLEAN NOT NULL DEFAULT 0',
+                }
+                for col_name, col_type in pv_add.items():
+                    if col_name not in pv_cols:
+                        sync_conn.execute(
+                            text(f"ALTER TABLE protocol_versions ADD COLUMN {col_name} {col_type}")
+                        )
+                        print(f"[DB] 已添加 protocol_versions.{col_name} 列")
+                # 历史版本一律视为已可用
+                sync_conn.execute(
+                    text(
+                        "UPDATE protocol_versions SET availability_status='Available' "
+                        "WHERE availability_status IS NULL OR availability_status=''"
+                    )
+                )
+
+            # port_definitions 表迁移：端口协议族（权威列），并按 PORT_FAMILY_MAP 回填
+            if 'port_definitions' in inspector.get_table_names():
+                pd_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(port_definitions)")).fetchall()}
+                if 'protocol_family' not in pd_cols:
+                    sync_conn.execute(
+                        text("ALTER TABLE port_definitions ADD COLUMN protocol_family VARCHAR(50)")
+                    )
+                    print("[DB] 已添加 port_definitions.protocol_family 列")
+
+                # ICD 6.0.x 扩展列
+                icd_cols_ext = {
+                    'message_id': 'VARCHAR(64)',
+                    'source_interface_id': 'VARCHAR(64)',
+                    'port_id_label': 'VARCHAR(64)',
+                    'diu_id': 'VARCHAR(64)',
+                    'diu_id_set': 'VARCHAR(200)',
+                    'diu_recv_mode': 'VARCHAR(100)',
+                    'tsn_source_ip': 'VARCHAR(100)',
+                    'diu_ip': 'VARCHAR(100)',
+                    'dataset_path': 'VARCHAR(200)',
+                    'data_real_path': 'VARCHAR(200)',
+                    'final_recv_device': 'VARCHAR(100)',
+                }
+                for col_name, col_type in icd_cols_ext.items():
+                    if col_name not in pd_cols:
+                        sync_conn.execute(
+                            text(f"ALTER TABLE port_definitions ADD COLUMN {col_name} {col_type}")
+                        )
+                        print(f"[DB] 已添加 port_definitions.{col_name} 列（ICD 扩展）")
+                # 延迟导入以避免循环依赖
+                try:
+                    from .services.protocol_service import PORT_FAMILY_MAP  # type: ignore
+                except Exception:
+                    PORT_FAMILY_MAP = {}
+                if PORT_FAMILY_MAP:
+                    backfill = 0
+                    for port_num, family in PORT_FAMILY_MAP.items():
+                        res = sync_conn.execute(
+                            text(
+                                "UPDATE port_definitions SET protocol_family=:f "
+                                "WHERE port_number=:p AND (protocol_family IS NULL OR protocol_family='')"
+                            ),
+                            {"f": family, "p": int(port_num)},
+                        )
+                        backfill += res.rowcount or 0
+                    if backfill:
+                        print(f"[DB] 已按 PORT_FAMILY_MAP 回填 port_definitions.protocol_family ({backfill} 行)")
+
+            # protocol_version_drafts：索引 + 半开唯一约束（每个 base_version 同时最多一个 pending CR）
+            if 'protocol_version_drafts' in inspector.get_table_names():
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_draft_status "
+                        "ON protocol_version_drafts(status)"
+                    )
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_draft_created_by "
+                        "ON protocol_version_drafts(created_by)"
+                    )
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_draft_pending_per_base "
+                        "ON protocol_version_drafts(base_version_id) "
+                        "WHERE status='pending' AND base_version_id IS NOT NULL"
+                    )
+                )
+            if 'draft_port_definitions' in inspector.get_table_names():
+                sync_conn.execute(text("DROP INDEX IF EXISTS uq_draft_port"))
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_draft_port_draft "
+                        "ON draft_port_definitions(draft_id, port_number)"
+                    )
+                )
+                # ICD 6.0.x 扩展列（与 port_definitions 保持一致）
+                dp_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(draft_port_definitions)")).fetchall()}
+                draft_icd_ext = {
+                    'message_id': 'VARCHAR(64)',
+                    'source_interface_id': 'VARCHAR(64)',
+                    'port_id_label': 'VARCHAR(64)',
+                    'diu_id': 'VARCHAR(64)',
+                    'diu_id_set': 'VARCHAR(200)',
+                    'diu_recv_mode': 'VARCHAR(100)',
+                    'tsn_source_ip': 'VARCHAR(100)',
+                    'diu_ip': 'VARCHAR(100)',
+                    'dataset_path': 'VARCHAR(200)',
+                    'data_real_path': 'VARCHAR(200)',
+                    'final_recv_device': 'VARCHAR(100)',
+                }
+                for col_name, col_type in draft_icd_ext.items():
+                    if col_name not in dp_cols:
+                        sync_conn.execute(
+                            text(f"ALTER TABLE draft_port_definitions ADD COLUMN {col_name} {col_type}")
+                        )
+                        print(f"[DB] 已添加 draft_port_definitions.{col_name} 列（ICD 扩展）")
+            if 'draft_field_definitions' in inspector.get_table_names():
+                sync_conn.execute(text("DROP INDEX IF EXISTS uq_draft_field"))
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_draft_field_port "
+                        "ON draft_field_definitions(draft_port_id)"
+                    )
+                )
+            if 'protocol_change_requests' in inspector.get_table_names():
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_cr_overall_status "
+                        "ON protocol_change_requests(overall_status)"
+                    )
+                )
+                # 设备协议集成：补齐 draft_kind / device_draft_id 列 + 回填
+                cr_cols = {
+                    row[1]
+                    for row in sync_conn.execute(
+                        text("PRAGMA table_info(protocol_change_requests)")
+                    ).fetchall()
+                }
+                if 'draft_kind' not in cr_cols:
+                    sync_conn.execute(
+                        text(
+                            "ALTER TABLE protocol_change_requests ADD COLUMN "
+                            "draft_kind VARCHAR(40) NOT NULL DEFAULT 'tsn_network'"
+                        )
+                    )
+                    print("[DB] 已添加 protocol_change_requests.draft_kind 列")
+                if 'device_draft_id' not in cr_cols:
+                    sync_conn.execute(
+                        text(
+                            "ALTER TABLE protocol_change_requests ADD COLUMN "
+                            "device_draft_id INTEGER"
+                        )
+                    )
+                    print("[DB] 已添加 protocol_change_requests.device_draft_id 列")
+                # 存量数据：未标 kind 的默认 tsn_network（TSN 网络配置）
+                sync_conn.execute(
+                    text(
+                        "UPDATE protocol_change_requests SET draft_kind='tsn_network' "
+                        "WHERE draft_kind IS NULL OR draft_kind=''"
+                    )
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_cr_draft_kind "
+                        "ON protocol_change_requests(draft_kind)"
+                    )
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_cr_device_draft_id "
+                        "ON protocol_change_requests(device_draft_id)"
+                    )
+                )
+
+            # ── 设备协议（ARINC429/CAN/RS422）：索引增强 ──
+            if 'device_protocol_specs' in inspector.get_table_names():
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_dev_spec_family_ata "
+                        "ON device_protocol_specs(protocol_family, ata_code)"
+                    )
+                )
+            if 'device_protocol_versions' in inspector.get_table_names():
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_dev_ver_spec_seq "
+                        "ON device_protocol_versions(spec_id, version_seq)"
+                    )
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_dev_ver_git_status "
+                        "ON device_protocol_versions(git_export_status)"
+                    )
+                )
+            if 'device_protocol_drafts' in inspector.get_table_names():
+                # target_version 早期是 NOT NULL；现在需要可为空（publish 时自动算版本号）
+                drf_cols_info = {
+                    row[1]: row
+                    for row in sync_conn.execute(text("PRAGMA table_info(device_protocol_drafts)")).fetchall()
+                }
+                target_col = drf_cols_info.get('target_version')
+                if target_col is not None and target_col[3] == 1:
+                    print("[DB] 重建 device_protocol_drafts 以允许 target_version 为 NULL ...")
+                    sync_conn.execute(text("DROP TABLE IF EXISTS device_protocol_drafts_new"))
+                    sync_conn.execute(
+                        text(
+                            """
+                            CREATE TABLE device_protocol_drafts_new (
+                                id INTEGER PRIMARY KEY,
+                                spec_id INTEGER REFERENCES device_protocol_specs(id),
+                                base_version_id INTEGER REFERENCES device_protocol_versions(id),
+                                protocol_family VARCHAR(50) NOT NULL,
+                                source_type VARCHAR(20) NOT NULL,
+                                name VARCHAR(200) NOT NULL,
+                                target_version VARCHAR(50),
+                                description TEXT,
+                                spec_json JSON NOT NULL,
+                                pending_spec_meta JSON,
+                                status VARCHAR(20) NOT NULL,
+                                submit_note TEXT,
+                                created_by VARCHAR(64),
+                                created_at DATETIME,
+                                updated_at DATETIME,
+                                published_version_id INTEGER REFERENCES device_protocol_versions(id)
+                            )
+                            """
+                        )
+                    )
+                    sync_conn.execute(
+                        text(
+                            """
+                            INSERT INTO device_protocol_drafts_new
+                                (id, spec_id, base_version_id, protocol_family, source_type, name,
+                                 target_version, description, spec_json, pending_spec_meta, status,
+                                 submit_note, created_by, created_at, updated_at, published_version_id)
+                            SELECT id, spec_id, base_version_id, protocol_family, source_type, name,
+                                   target_version, description, spec_json, pending_spec_meta, status,
+                                   submit_note, created_by, created_at, updated_at, published_version_id
+                            FROM device_protocol_drafts
+                            """
+                        )
+                    )
+                    sync_conn.execute(text("DROP TABLE device_protocol_drafts"))
+                    sync_conn.execute(
+                        text("ALTER TABLE device_protocol_drafts_new RENAME TO device_protocol_drafts")
+                    )
+                    print("[DB] device_protocol_drafts 表已重建")
+
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_dev_draft_status "
+                        "ON device_protocol_drafts(status)"
+                    )
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_dev_draft_created_by "
+                        "ON device_protocol_drafts(created_by)"
+                    )
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_device_protocol_drafts_spec_id "
+                        "ON device_protocol_drafts(spec_id)"
+                    )
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_device_protocol_drafts_protocol_family "
+                        "ON device_protocol_drafts(protocol_family)"
+                    )
+                )
+                # 旧版只对 pending 互斥；新版：对 draft + pending 同时互斥，保证
+                # 每个设备同一时刻只允许一条活动草稿（= 一次修改 → 一次审批）
+                sync_conn.execute(
+                    text("DROP INDEX IF EXISTS uq_dev_draft_pending_per_spec")
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_dev_draft_active_per_spec "
+                        "ON device_protocol_drafts(spec_id) "
+                        "WHERE status IN ('draft','pending') AND spec_id IS NOT NULL"
+                    )
+                )
+            if 'notifications' in inspector.get_table_names():
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_notif_user_unread "
+                        "ON notifications(username, read_at)"
+                    )
+                )
 
             # auto_flight_analysis_tasks：自动飞行性能分析任务（支持 pcap 独立分析 + 解析任务分析）
             if 'auto_flight_analysis_tasks' in inspector.get_table_names():

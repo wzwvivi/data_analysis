@@ -74,6 +74,7 @@ async def create_shared_from_upload(
     row = SharedTsnFile(
         original_filename=Path(filename).name,
         file_path=str(dest.resolve()),
+        file_size=len(file_bytes),
         uploaded_by_id=uploaded_by_id,
         experiment_date=None,
         experiment_label=None,

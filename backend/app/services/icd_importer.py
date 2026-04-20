@@ -116,50 +116,71 @@ class ICDImporter:
         version_id: int,
         direction: str
     ) -> Tuple[int, int]:
-        """处理数据表 - 优化版本，批量插入"""
+        """处理数据表 - 优化版本，批量插入，并抽取 ICD 6.0.x 扩展列"""
         port_count = 0
         field_count = 0
         
-        # 找到各列
-        port_col = self._find_column(df.columns, ['UDP', '端口'])
+        # 列定位：ICD 原表头精确 / 优先 + 模糊兜底
+        # 注意：使用 _find_col_exact 做精确匹配，避免 "DIU编号" 被 "DIU编号集合" 先命中
+        port_col = self._find_col_exact(df.columns, 'UDP端口') or self._find_column(df.columns, ['UDP', '端口'])
         if not port_col:
             return 0, 0
-        
         msg_col = self._find_column(df.columns, ['消息名称', '消息名'])
-        # 优先使用"待转换TSN设备"列作为源设备（发送端）
-        source_device_col = self._find_column(df.columns, ['待转换TSN设备', '待转换', '源设备', '源端设备'])
-        target_device_col = self._find_column(df.columns, ['目的端设备', '目标设备'])
-        desc_col = self._find_column(df.columns, ['说明'])
-        ip_col = self._find_column(df.columns, ['组播', 'IP'])
-        period_col = self._find_column(df.columns, ['周期'])
-        dataset_col = self._find_column(df.columns, ['数据集'])
-        offset_col = self._find_column(df.columns, ['偏移'])
-        length_col = self._find_column(df.columns, ['长度'])
-        
-        # 收集所有端口和字段数据
+        source_device_col = self._find_column(df.columns, ['待转换TSN设备', '待转换', '源设备', '源端设备', '消息源设备名称'])
+        target_device_col = (
+            self._find_col_exact(df.columns, 'DataSet目的端设备名称')
+            or self._find_col_exact(df.columns, '消息目的设备')
+            or self._find_column(df.columns, ['目的端设备', '目标设备'])
+        )
+        desc_col = self._find_col_exact(df.columns, '备注') or self._find_column(df.columns, ['说明', '备注'])
+        ip_col = self._find_col_exact(df.columns, '组播组IP') or self._find_column(df.columns, ['组播', 'IP'])
+        period_col = self._find_col_exact(df.columns, '消息周期') or self._find_column(df.columns, ['周期'])
+        dataset_col = self._find_col_exact(df.columns, '消息内数据集') or self._find_column(df.columns, ['数据集'])
+        offset_col = self._find_col_exact(df.columns, '消息内偏移') or self._find_column(df.columns, ['偏移'])
+        length_col = self._find_col_exact(df.columns, '长度') or self._find_column(df.columns, ['长度'])
+
+        # ── ICD 扩展列（严格优先精确匹配） ──
+        msg_id_col = self._find_col_exact(df.columns, '消息编号')
+        src_iface_col = self._find_col_exact(df.columns, '消息源端接口编号')
+        port_id_col = self._find_col_exact(df.columns, 'PortID')
+        # DIU编号 vs DIU编号集合 必须精确
+        diu_id_col = self._find_col_exact(df.columns, 'DIU编号')
+        diu_id_set_col = self._find_col_exact(df.columns, 'DIU编号集合')
+        diu_recv_col = self._find_col_exact(df.columns, 'DIU消息接收形式')
+        tsn_src_ip_col = self._find_col_exact(df.columns, 'TSN消息源端IP')
+        diu_ip_col = self._find_col_exact(df.columns, '承接转换的DIU IP')
+        dataset_path_col = self._find_col_exact(df.columns, 'DataSet传递路径')
+        data_real_col = self._find_col_exact(df.columns, '数据实际路径')
+        final_recv_col = self._find_col_exact(df.columns, '最终接收端设备')
+
+        ext_col_map: Dict[str, str] = {
+            'message_id': msg_id_col,
+            'source_interface_id': src_iface_col,
+            'port_id_label': port_id_col,
+            'diu_id': diu_id_col,
+            'diu_id_set': diu_id_set_col,
+            'diu_recv_mode': diu_recv_col,
+            'tsn_source_ip': tsn_src_ip_col,
+            'diu_ip': diu_ip_col,
+            'dataset_path': dataset_path_col,
+            'data_real_path': data_real_col,
+            'final_recv_device': final_recv_col,
+        }
+
         ports_data = {}  # port_num -> port_info
         fields_data = []  # [(port_num, field_info), ...]
-        
         current_port = None
-        current_msg_name = None
-        current_source_device = None
-        current_target_device = None
-        current_description = None
-        current_ip = None
-        current_period = None
-        
+
         for idx, row in df.iterrows():
             port_val = row.get(port_col)
-            
-            # 检查是否是新端口
             if pd.notna(port_val):
                 try:
                     port_num = int(float(port_val))
                 except (ValueError, TypeError):
                     continue
-                
+
                 current_port = port_num
-                current_msg_name = str(row.get(msg_col)) if msg_col and pd.notna(row.get(msg_col)) else None
+                current_msg_name = self._normalize_cell_text(row.get(msg_col)) if msg_col else ''
                 raw_source_device = row.get(source_device_col) if source_device_col else None
                 raw_target_device = row.get(target_device_col) if target_device_col else None
                 current_source_device = self._build_source_device_name(
@@ -167,40 +188,44 @@ class ICDImporter:
                     source_name=raw_source_device,
                     target_name=raw_target_device,
                 )
-                if not current_source_device:
-                    current_source_device = None
-                current_target_device = self._normalize_cell_text(raw_target_device) or None
-                current_description = str(row.get(desc_col)) if desc_col and pd.notna(row.get(desc_col)) else None
-                current_ip = str(row.get(ip_col)) if ip_col and pd.notna(row.get(ip_col)) else None
-                
+                current_target_device = self._normalize_cell_text(raw_target_device)
+                current_description = self._normalize_cell_text(row.get(desc_col)) if desc_col else ''
+                current_ip = self._normalize_cell_text(row.get(ip_col)) if ip_col else ''
+
+                current_period = None
                 if period_col and pd.notna(row.get(period_col)):
                     try:
                         current_period = float(row.get(period_col))
                     except (ValueError, TypeError):
                         current_period = None
-                
+
+                # 抽 ICD 扩展列
+                ext_values = {
+                    attr: (self._normalize_cell_text(row.get(col)) or None)
+                    for attr, col in ext_col_map.items() if col is not None
+                }
+
                 if current_port not in ports_data:
                     ports_data[current_port] = {
                         'port_number': current_port,
-                        'message_name': current_msg_name,
-                        'source_device': current_source_device,
-                        'target_device': current_target_device,
-                        'description': current_description,
-                        'multicast_ip': current_ip,
+                        'message_name': current_msg_name or None,
+                        'source_device': current_source_device or None,
+                        'target_device': current_target_device or None,
+                        'description': current_description or None,
+                        'multicast_ip': current_ip or None,
                         'data_direction': direction,
                         'period_ms': current_period,
+                        **ext_values,
                     }
-            
-            # 收集字段数据
+
             if current_port and dataset_col and offset_col and length_col:
                 field_name = row.get(dataset_col)
                 offset = row.get(offset_col)
                 length = row.get(length_col)
-                
                 if pd.notna(field_name) and pd.notna(offset) and pd.notna(length):
                     try:
                         fields_data.append((current_port, {
-                            'field_name': str(field_name),
+                            'field_name': str(field_name).strip(),
                             'field_offset': int(float(offset)),
                             'field_length': int(float(length)),
                             'data_type': self._guess_data_type(int(float(length))),
@@ -236,10 +261,21 @@ class ICDImporter:
         return port_count, field_count
 
     @staticmethod
+    def _find_col_exact(columns, target: str):
+        """精确匹配表头（忽略两端空白）。命中则返回原列名，否则 None。"""
+        t = target.strip()
+        for col in columns:
+            if str(col).strip() == t:
+                return col
+        return None
+
+    @staticmethod
     def _normalize_cell_text(value: Any) -> str:
-        """将单元格值规范化为字符串，空值返回空串。"""
+        """将单元格值规范化为字符串，空值返回空串。整数值的 float 去掉 .0。"""
         if value is None or pd.isna(value):
             return ""
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
         text = str(value).strip()
         if text.lower() == "nan":
             return ""

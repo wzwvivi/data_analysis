@@ -17,6 +17,14 @@ import ComparePage from './pages/ComparePage'
 import AdminPlatformDataPage from './pages/AdminPlatformDataPage'
 import AdminUserPage from './pages/AdminUserPage'
 import ProtocolManagerPage from './pages/ProtocolManagerPage'
+import NetworkConfigPage from './pages/NetworkConfigPage'
+import DraftEditorPage from './pages/network-config/DraftEditorPage'
+import ChangeRequestPage from './pages/network-config/ChangeRequestPage'
+import VersionViewerPage from './pages/network-config/VersionViewerPage'
+import DeviceProtocolPage from './pages/DeviceProtocolPage'
+import DeviceDraftJsonEditorPage from './pages/device-protocol/DraftJsonEditorPage'
+import DeviceChangeRequestPage from './pages/device-protocol/ChangeRequestPage'
+import DeviceVersionViewerPage from './pages/device-protocol/VersionViewerPage'
 import { Result } from 'antd'
 
 function PrivateRoute({ children }) {
@@ -98,7 +106,14 @@ function AppRoutes() {
         <Route path="tasks/:taskId" element={<PermissionRoute requiredPage="tasks/:taskId"><ResultPage /></PermissionRoute>} />
         <Route path="tasks/:taskId/analysis" element={<PermissionRoute requiredPage="tasks/:taskId/analysis"><ResultPage /></PermissionRoute>} />
         <Route path="tasks/:taskId/event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><EventAnalysisPage /></PermissionRoute>} />
-        <Route path="network-config" element={<PermissionRoute requiredPage="network-config"><Navigate to="/upload" replace /></PermissionRoute>} />
+        <Route path="network-config" element={<PermissionRoute requiredPage="network-config"><NetworkConfigPage /></PermissionRoute>} />
+        <Route path="network-config/versions/:id" element={<PermissionRoute requiredPage="network-config"><VersionViewerPage /></PermissionRoute>} />
+        <Route path="network-config/drafts/:id" element={<PermissionRoute requiredPage="network-config"><DraftEditorPage /></PermissionRoute>} />
+        <Route path="network-config/change-requests/:id" element={<PermissionRoute requiredPage="network-config"><ChangeRequestPage /></PermissionRoute>} />
+        <Route path="device-protocol" element={<PermissionRoute requiredPage="device-protocol"><DeviceProtocolPage /></PermissionRoute>} />
+        <Route path="device-protocol/drafts/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceDraftJsonEditorPage /></PermissionRoute>} />
+        <Route path="device-protocol/change-requests/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceChangeRequestPage /></PermissionRoute>} />
+        <Route path="device-protocol/versions/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceVersionViewerPage /></PermissionRoute>} />
         <Route path="compare" element={<PermissionRoute requiredPage="compare"><ComparePage /></PermissionRoute>} />
         <Route path="compare/:taskId" element={<PermissionRoute requiredPage="compare/:taskId"><ComparePage /></PermissionRoute>} />
         <Route path="event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="event-analysis/task/:analysisTaskId"><StandaloneEventTaskPage /></PermissionRoute>} />

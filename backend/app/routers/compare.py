@@ -13,7 +13,7 @@ from datetime import datetime
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS
+from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE
 from ..services import CompareService
 from ..services import shared_tsn_service as shared_tsn_svc
 from ..background_jobs import run_compare_task_job
@@ -204,8 +204,22 @@ async def _resolve_compare_slot(
         )
     safe_fn = f"{timestamp}_switch{slot}_{raw_name}"
     dest = upload_path / safe_fn
+    written = 0
+    chunk_size = 1024 * 1024
     with open(dest, "wb") as out:
-        shutil.copyfileobj(file.file, out, length=1024 * 1024)
+        while True:
+            chunk = file.file.read(chunk_size)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > MAX_UPLOAD_SIZE:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"{label}：文件大小超过限制（最大 {MAX_UPLOAD_SIZE // (1024 ** 3)}GB）",
+                )
+            out.write(chunk)
     return raw_name, str(dest)
 
 

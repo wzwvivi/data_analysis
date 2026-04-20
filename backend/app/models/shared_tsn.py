@@ -12,6 +12,7 @@ class SharedTsnFile(Base):
     id = Column(Integer, primary_key=True, index=True)
     original_filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer, nullable=True, comment="文件字节数")
     experiment_date = Column(Date, nullable=True, comment="实验日期")
     experiment_label = Column(String(500), nullable=True, comment="实验说明/名称")
     uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)

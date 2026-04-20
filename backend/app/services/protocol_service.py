@@ -122,15 +122,33 @@ PORT_FAMILY_MAP: Dict[int, str] = {
 }
 
 
-def resolve_port_family(port: int) -> Optional[str]:
-    """根据端口号返回写死的协议族"""
+def resolve_port_family(port: int, db_family: Optional[str] = None) -> Optional[str]:
+    """端口 → 协议族。优先使用传入的 DB 值 (`PortDefinition.protocol_family`)，
+    为空时回退到历史硬编码 `PORT_FAMILY_MAP`。
+
+    这样 TSN 网络配置里新增端口（给定 protocol_family）即可直接生效，
+    无需改代码；存量端口在数据迁移里已按 MAP 回填，行为保持兼容。
+    """
+    if db_family:
+        v = db_family.strip()
+        if v:
+            return v
     return PORT_FAMILY_MAP.get(port)
 
 
-def resolve_device_family(device_name: str, ports: List[int] = None) -> Optional[str]:
-    """根据设备下属端口列表确定协议族（取第一个命中的端口）。"""
+def resolve_device_family(
+    device_name: str,
+    ports: List[int] = None,
+    port_family_map: Optional[Dict[int, str]] = None,
+) -> Optional[str]:
+    """按端口列表推断设备协议族，取第一个命中的端口。
+
+    如果 `port_family_map` 提供（形如 {端口号: 该端口 DB 里的 protocol_family}），
+    优先使用它；否则对每个端口直接走 `PORT_FAMILY_MAP` 硬编码回退。
+    """
     for p in (ports or []):
-        f = resolve_port_family(p)
+        db_val = (port_family_map or {}).get(p)
+        f = resolve_port_family(p, db_family=db_val)
         if f:
             return f
     return None
@@ -358,15 +376,23 @@ class ProtocolService:
     async def get_devices_with_family(self, version_id: int) -> List[dict]:
         """获取设备列表，并附带推断的 protocol_family 及其可选解析器版本。
 
-        使用 PORT_FAMILY_MAP 按端口写死映射确定每个设备的协议族。
+        协议族来源优先级：`PortDefinition.protocol_family`（DB 权威） > `PORT_FAMILY_MAP`（历史回退）。
         """
         devices = await self.get_devices_by_version(version_id)
+
+        ports = await self.get_ports_by_version(version_id)
+        port_family_map = {
+            int(p.port_number): (p.protocol_family or "").strip()
+            for p in ports
+            if (p.protocol_family or "").strip()
+        }
 
         families_cache: Dict[str, List[dict]] = {}
         for dev in devices:
             family = resolve_device_family(
                 dev["device_name"],
                 ports=dev.get("ports", []),
+                port_family_map=port_family_map,
             )
             dev["protocol_family"] = family
 

@@ -111,6 +111,116 @@ export const protocolManagerApi = {
 // 向后兼容旧命名，避免其他页面暂时引用失败
 export const arinc429Api = protocolManagerApi
 
+/** 网络团队配置管理（MR1 只读 + MR2 Draft/审批；MR3 激活闸门） */
+export const networkConfigApi = {
+  // ── 只读（MR1） ──
+  listParserFamilies: () => api.get('/network-config/parser-families'),
+  listVersions: (status = null) =>
+    api.get('/network-config/versions', {
+      params: status ? { status } : {},
+    }),
+  getVersion: (versionId) =>
+    api.get(`/network-config/versions/${versionId}`),
+  getVersionPorts: (versionId) =>
+    api.get(`/network-config/versions/${versionId}/ports`),
+  getPortDetail: (versionId, portNumber) =>
+    api.get(`/network-config/versions/${versionId}/ports/${portNumber}`),
+
+  // ── Draft（MR2） ──
+  listDrafts: (scope = 'all') => api.get('/network-config/drafts', { params: { scope } }),
+  getDraft: (draftId) => api.get(`/network-config/drafts/${draftId}`),
+  createDraftFromVersion: (body) => api.post('/network-config/drafts', { source: 'clone', ...body }),
+  createDraftFromExcel: (formData) =>
+    api.post('/network-config/drafts/from-excel', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    }),
+  updateDraft: (draftId, body) => api.patch(`/network-config/drafts/${draftId}`, body),
+  deleteDraft: (draftId) => api.delete(`/network-config/drafts/${draftId}`),
+
+  addPort: (draftId, body) => api.post(`/network-config/drafts/${draftId}/ports`, body),
+  updatePort: (draftId, portId, body) => api.patch(`/network-config/drafts/${draftId}/ports/${portId}`, body),
+  deletePort: (draftId, portId) => api.delete(`/network-config/drafts/${draftId}/ports/${portId}`),
+  bulkUpsertPorts: (draftId, rows) => api.post(`/network-config/drafts/${draftId}/bulk-upsert-ports`, rows),
+
+  addField: (draftId, portId, body) => api.post(`/network-config/drafts/${draftId}/ports/${portId}/fields`, body),
+  updateField: (draftId, portId, fieldId, body) =>
+    api.patch(`/network-config/drafts/${draftId}/ports/${portId}/fields/${fieldId}`, body),
+  deleteField: (draftId, portId, fieldId) =>
+    api.delete(`/network-config/drafts/${draftId}/ports/${portId}/fields/${fieldId}`),
+
+  checkDraft: (draftId) => api.post(`/network-config/drafts/${draftId}/check`),
+  getDraftDiff: (draftId) => api.get(`/network-config/drafts/${draftId}/diff`),
+  exportDraftExcel: (draftId) =>
+    api.get(`/network-config/drafts/${draftId}/export-excel`, {
+      responseType: 'blob',
+      timeout: 120000,
+    }),
+  submitDraft: (draftId, body = {}) => api.post(`/network-config/drafts/${draftId}/submit`, body),
+
+  // ── 审批 Change Request ──
+  listChangeRequests: (scope = 'all') =>
+    api.get('/network-config/change-requests', { params: { scope } }),
+  getChangeRequest: (crId) => api.get(`/network-config/change-requests/${crId}`),
+  signOffChangeRequest: (crId, body) =>
+    api.post(`/network-config/change-requests/${crId}/sign-off`, body),
+  publishChangeRequest: (crId) => api.post(`/network-config/change-requests/${crId}/publish`),
+
+  // ── 版本运维 ──
+  deprecateVersion: (versionId, body = {}) =>
+    api.post(`/network-config/versions/${versionId}/deprecate`, body),
+}
+
+/** 设备协议（ARINC429 / CAN / RS422 …）*/
+export const deviceProtocolApi = {
+  listFamilies: () => api.get('/device-protocol/families'),
+  getTree: ({ family = null, groupBy = 'ata' } = {}) => {
+    const params = { group_by: groupBy }
+    if (family) params.family = family
+    return api.get('/device-protocol/tree', { params })
+  },
+  listAtaSystems: () => api.get('/device-protocol/ata-systems'),
+  getNextDeviceNumber: (ataCode) =>
+    api.get('/device-protocol/next-device-number', { params: { ata_code: ataCode } }),
+  previewDeviceIdentity: (body) =>
+    api.post('/device-protocol/preview-device-identity', body),
+
+  listSpecs: (family = null) =>
+    api.get('/device-protocol/specs', { params: family ? { family } : {} }),
+  getSpec: (specId) => api.get(`/device-protocol/specs/${specId}`),
+  getVersion: (versionId) => api.get(`/device-protocol/versions/${versionId}`),
+  /** 一键「修改协议」：对某设备自动建/复用一条草稿 */
+  editSpec: (specId) => api.post(`/device-protocol/specs/${specId}/edit-draft`),
+
+  listDrafts: (params = {}) => api.get('/device-protocol/drafts', { params }),
+  getDraft: (draftId) => api.get(`/device-protocol/drafts/${draftId}`),
+  createDraftFromVersion: (body) =>
+    api.post('/device-protocol/drafts', { source: 'clone', ...body }),
+  createDraftScratch: (body) =>
+    api.post('/device-protocol/drafts', { source: 'scratch', ...body }),
+  updateDraft: (draftId, body) => api.patch(`/device-protocol/drafts/${draftId}`, body),
+  deleteDraft: (draftId) => api.delete(`/device-protocol/drafts/${draftId}`),
+  checkDraft: (draftId) => api.post(`/device-protocol/drafts/${draftId}/check`),
+  getDraftDiff: (draftId) => api.get(`/device-protocol/drafts/${draftId}/diff`),
+  submitDraft: (draftId, body = {}) =>
+    api.post(`/device-protocol/drafts/${draftId}/submit`, body),
+
+  listChangeRequests: (params = {}) =>
+    api.get('/device-protocol/change-requests', { params }),
+  getChangeRequest: (crId) => api.get(`/device-protocol/change-requests/${crId}`),
+  signOffChangeRequest: (crId, body) =>
+    api.post(`/device-protocol/change-requests/${crId}/sign-off`, body),
+  publishChangeRequest: (crId) =>
+    api.post(`/device-protocol/change-requests/${crId}/publish`),
+}
+
+/** 站内通知 */
+export const notificationApi = {
+  list: (params = {}) => api.get('/notifications', { params }),
+  markRead: (id) => api.post(`/notifications/${id}/read`),
+  markAllRead: () => api.post('/notifications/read-all'),
+}
+
 // 协议（网络配置）相关API
 export const protocolApi = {
   // 获取协议列表（含嵌套版本）
@@ -164,10 +274,27 @@ export const parseApi = {
       onUploadProgress,
     }),
   
-  // 获取任务列表
-  listTasks: (page = 1, pageSize = 20) => 
-    api.get('/parse/tasks', { params: { page, page_size: pageSize } }),
-  
+  // 获取任务列表（支持任务中心的多维过滤：q/status/source/date_from/date_to/tag/protocol_version_id）
+  listTasks: (params = {}) => {
+    const { page = 1, pageSize = 20, ...rest } = params
+    return api.get('/parse/tasks', { params: { page, page_size: pageSize, ...rest } })
+  },
+
+  // 编辑任务元数据（重命名 / 打标签）
+  updateTaskMeta: (taskId, body) => api.patch(`/parse/tasks/${taskId}`, body),
+
+  // 删除任务
+  deleteTask: (taskId) => api.delete(`/parse/tasks/${taskId}`),
+
+  // 批量删除
+  bulkDeleteTasks: (taskIds) => api.post('/parse/tasks/bulk-delete', { task_ids: taskIds }),
+
+  // 取消任务（协作式，后台循环巡检）
+  cancelTask: (taskId) => api.post(`/parse/tasks/${taskId}/cancel`),
+
+  // 重新解析（新建任务，复用原始文件 + 设备映射）
+  rerunTask: (taskId) => api.post(`/parse/tasks/${taskId}/rerun`),
+
   // 获取任务详情
   getTask: (taskId) => api.get(`/parse/tasks/${taskId}`),
   

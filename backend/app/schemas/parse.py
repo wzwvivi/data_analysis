@@ -35,6 +35,10 @@ class ParseTaskResponse(BaseModel):
     """解析任务响应"""
     id: int
     filename: str
+    display_name: Optional[str] = None
+    tags: Optional[List[str]] = None
+    file_size: Optional[int] = None
+    is_shared_source: bool = False
     parser_profile_id: Optional[int] = None
     parser_profile_ids: Optional[List[int]] = None
     device_parser_map: Optional[Dict[str, int]] = None
@@ -46,15 +50,20 @@ class ParseTaskResponse(BaseModel):
     network_config_name: Optional[str] = None
     network_config_version: Optional[str] = None
     status: str
+    stage: Optional[str] = None
     selected_ports: Optional[List[int]] = None
     selected_devices: Optional[List[str]] = None
     total_packets: int
     parsed_packets: int
     progress: int = 0
+    cancel_requested: bool = False
+    can_rerun: bool = False
+    estimated_remaining_ms: Optional[int] = None
     error_message: Optional[str] = None
     created_at: datetime
+    started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 
