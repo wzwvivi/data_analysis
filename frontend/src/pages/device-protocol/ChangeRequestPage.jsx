@@ -1,24 +1,29 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  Card,
-  Button,
-  Space,
-  Tag,
-  Steps,
-  Descriptions,
-  Modal,
-  message,
-  Typography,
-  Input,
   Alert,
+  Button,
+  Card,
+  Descriptions,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Space,
+  Steps,
+  Table,
+  Tabs,
+  Tag,
+  Timeline,
+  Typography,
+  message,
 } from 'antd'
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
-  RollbackOutlined,
   CloudUploadOutlined,
   ReloadOutlined,
+  RollbackOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { deviceProtocolApi } from '../../services/api'
@@ -33,6 +38,22 @@ const STATUS_COLOR = {
   rejected: 'red',
 }
 
+const DECISION_COLOR = {
+  pending: 'default',
+  approve: 'green',
+  reject: 'red',
+  request_changes: 'orange',
+}
+
+const DECISION_LABEL = {
+  pending: '待会签',
+  approve: '同意',
+  reject: '驳回',
+  request_changes: '要求修改',
+}
+
+const FAMILY_LABEL = { arinc429: 'ARINC 429', can: 'CAN', rs422: 'RS422' }
+
 
 function ChangeRequestPage() {
   const { id } = useParams()
@@ -40,6 +61,11 @@ function ChangeRequestPage() {
   const { user } = useAuth()
   const [cr, setCr] = useState(null)
   const [loading, setLoading] = useState(false)
+
+  const [signOffForm] = Form.useForm()
+  const [signOffOpen, setSignOffOpen] = useState(false)
+  const [signOffDecision, setSignOffDecision] = useState('approve')
+  const [signOffLoading, setSignOffLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -55,6 +81,8 @@ function ChangeRequestPage() {
 
   useEffect(() => { load() }, [load])
 
+  const diff = useMemo(() => cr?.diff_summary || {}, [cr])
+
   if (!cr) return <Card loading={loading} />
 
   const chain = cr.chain_roles || []
@@ -64,27 +92,33 @@ function ChangeRequestPage() {
   const canSignOff = cr.overall_status === 'pending' && (myRole === 'admin' || myRole === currentRole)
   const canPublish = cr.overall_status === 'approved' && myRole === 'admin'
 
-  const onDecide = (decision) => {
-    Modal.confirm({
-      title: decision === 'approve' ? '确认通过会签？' : (decision === 'reject' ? '确认驳回？' : '确认要求修改？'),
-      content: (
-        <Input.TextArea id="cr-note" placeholder={decision === 'approve' ? '可填通过意见（可选）' : '请填写驳回理由'} rows={3} />
-      ),
-      onOk: async () => {
-        const note = document.getElementById('cr-note')?.value || ''
-        if (decision !== 'approve' && !note.trim()) {
-          message.warning('请填写理由')
-          throw new Error('need-note')
-        }
-        try {
-          await deviceProtocolApi.signOffChangeRequest(id, { decision, note })
-          message.success('已会签')
-          load()
-        } catch (e) {
-          message.error(e?.response?.data?.detail || '操作失败')
-        }
-      },
-    })
+  const openSignOff = (decision) => {
+    setSignOffDecision(decision)
+    signOffForm.resetFields()
+    setSignOffOpen(true)
+  }
+
+  const handleSignOff = async () => {
+    let values
+    try {
+      values = await signOffForm.validateFields()
+    } catch {
+      return
+    }
+    setSignOffLoading(true)
+    try {
+      await deviceProtocolApi.signOffChangeRequest(id, {
+        decision: signOffDecision,
+        note: (values.note || '').trim(),
+      })
+      message.success('已会签')
+      setSignOffOpen(false)
+      load()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '操作失败')
+    } finally {
+      setSignOffLoading(false)
+    }
   }
 
   const onPublish = () => {
@@ -114,14 +148,116 @@ function ChangeRequestPage() {
     }
     return {
       title: role,
-      description: entry?.approver
-        ? `${entry.approver} · ${entry.decision}${entry.decided_at ? ` · ${dayjs(entry.decided_at).format('MM-DD HH:mm')}` : ''}`
-        : '',
+      description: (
+        <Space direction="vertical" size={0}>
+          <Tag color={DECISION_COLOR[decision] || 'default'}>
+            {DECISION_LABEL[decision] || decision || '待会签'}
+          </Tag>
+          {entry?.approver && <Text type="secondary" style={{ fontSize: 12 }}>{entry.approver}</Text>}
+          {entry?.decided_at && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {dayjs(entry.decided_at).format('MM-DD HH:mm')}
+            </Text>
+          )}
+          {entry?.note && <Text type="secondary" style={{ fontSize: 12 }}>{entry.note}</Text>}
+        </Space>
+      ),
       status,
     }
   })
 
+  const timelineItems = [
+    cr.submitted_at && {
+      color: 'blue',
+      children: (
+        <div>
+          <Text strong>提交审批</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {cr.submitted_by} · {dayjs(cr.submitted_at).format('YYYY-MM-DD HH:mm')}
+          </Text>
+          {cr.submit_note && (
+            <div style={{ marginTop: 4, color: '#d4d4d8', fontSize: 12 }}>{cr.submit_note}</div>
+          )}
+        </div>
+      ),
+    },
+    ...(cr.chain || [])
+      .filter((s) => s.decision && s.decision !== 'pending')
+      .map((s) => ({
+        color: DECISION_COLOR[s.decision] === 'green' ? 'green' : DECISION_COLOR[s.decision] === 'red' ? 'red' : 'orange',
+        children: (
+          <div>
+            <Text strong>{s.role}</Text>{' '}
+            <Tag color={DECISION_COLOR[s.decision]}>{DECISION_LABEL[s.decision] || s.decision}</Tag>
+            <br />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {s.approver || '-'}
+              {s.decided_at ? ` · ${dayjs(s.decided_at).format('YYYY-MM-DD HH:mm')}` : ''}
+            </Text>
+            {s.note && <div style={{ marginTop: 4, color: '#d4d4d8', fontSize: 12 }}>{s.note}</div>}
+          </div>
+        ),
+      })),
+    cr.published_at && {
+      color: 'green',
+      children: (
+        <div>
+          <Text strong>发布</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {cr.published_by} · {dayjs(cr.published_at).format('YYYY-MM-DD HH:mm')}
+          </Text>
+          {cr.published_version_id && (
+            <div style={{ marginTop: 4, fontSize: 12 }}>
+              version_id = <Text code>{cr.published_version_id}</Text>
+            </div>
+          )}
+        </div>
+      ),
+    },
+  ].filter(Boolean)
+
   const draft = cr.device_draft || {}
+
+  const addedColumns = [
+    { title: 'Key', dataIndex: 'key', width: 180 },
+    { title: '名称', dataIndex: 'name' },
+  ]
+  const removedColumns = addedColumns
+  const changedColumns = [
+    { title: 'Key', dataIndex: 'key', width: 180 },
+    { title: '名称', dataIndex: 'name' },
+    {
+      title: '字段变更',
+      dataIndex: 'changes',
+      render: (changes) => {
+        if (!changes || !Object.keys(changes).length) return <Text type="secondary">—</Text>
+        return (
+          <Space direction="vertical" size={2} style={{ width: '100%' }}>
+            {Object.entries(changes).map(([k, v]) => {
+              const oldVal = v && typeof v === 'object' && 'old' in v ? v.old : undefined
+              const newVal = v && typeof v === 'object' && 'new' in v ? v.new : v
+              return (
+                <div key={k} style={{ fontSize: 12 }}>
+                  <Text type="secondary">{k}:</Text>{' '}
+                  {oldVal !== undefined && (
+                    <>
+                      <Text delete>{JSON.stringify(oldVal)}</Text>
+                      {' → '}
+                    </>
+                  )}
+                  <Text code>{JSON.stringify(newVal)}</Text>
+                </div>
+              )
+            })}
+          </Space>
+        )
+      },
+    },
+  ]
+
+  const metaChangedEntries = Object.entries(diff.meta_changed || {})
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -139,11 +275,11 @@ function ChangeRequestPage() {
             <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
             {canSignOff && (
               <>
-                <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => onDecide('approve')}>
+                <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => openSignOff('approve')}>
                   通过会签
                 </Button>
-                <Button danger icon={<CloseCircleOutlined />} onClick={() => onDecide('reject')}>驳回</Button>
-                <Button onClick={() => onDecide('request_changes')}>要求修改</Button>
+                <Button danger icon={<CloseCircleOutlined />} onClick={() => openSignOff('reject')}>驳回</Button>
+                <Button onClick={() => openSignOff('request_changes')}>要求修改</Button>
               </>
             )}
             {canPublish && (
@@ -163,16 +299,23 @@ function ChangeRequestPage() {
             {currentRole ? <Tag color="processing">{currentRole}</Tag> : <Tag color="green">已走完</Tag>}
           </Descriptions.Item>
           <Descriptions.Item label="草稿" span={3}>
-            <Space>
+            <Space wrap>
               <Text strong>{draft.name}</Text>
-              <Tag>{draft.protocol_family}</Tag>
-              <Text type="secondary">target {draft.target_version}</Text>
+              <Tag color="blue">{FAMILY_LABEL[draft.protocol_family] || draft.protocol_family}</Tag>
+              {draft.target_version && <Text type="secondary">target {draft.target_version}</Text>}
               <Tag>{draft.status}</Tag>
               <Button size="small" onClick={() => navigate(`/device-protocol/drafts/${draft.id}`)}>打开草稿</Button>
             </Space>
           </Descriptions.Item>
+          {cr.submit_note && (
+            <Descriptions.Item label="提交说明" span={3}>
+              <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{cr.submit_note}</Paragraph>
+            </Descriptions.Item>
+          )}
           {cr.final_note && (
-            <Descriptions.Item label="终审/驳回说明" span={3}>{cr.final_note}</Descriptions.Item>
+            <Descriptions.Item label="终审/驳回说明" span={3}>
+              <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{cr.final_note}</Paragraph>
+            </Descriptions.Item>
           )}
         </Descriptions>
 
@@ -181,24 +324,130 @@ function ChangeRequestPage() {
         </Card>
       </Card>
 
-      <Card title="Diff 摘要" size="small">
-        {cr.diff_summary?.summary ? (
-          <Descriptions size="small" bordered column={4}>
-            <Descriptions.Item label="新增">{cr.diff_summary.summary.added || 0}</Descriptions.Item>
-            <Descriptions.Item label="删除">{cr.diff_summary.summary.removed || 0}</Descriptions.Item>
-            <Descriptions.Item label="变更">{cr.diff_summary.summary.changed || 0}</Descriptions.Item>
-            <Descriptions.Item label="元信息">{cr.diff_summary.summary.meta_changed || 0}</Descriptions.Item>
-          </Descriptions>
-        ) : (
+      <Card title="Diff 详情" size="small">
+        {!cr.diff_summary || !cr.diff_summary.summary ? (
           <Alert type="info" message="无 Diff（可能是全量新建）" showIcon />
-        )}
-        {cr.diff_summary && (
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: 'pointer', color: '#a1a1aa' }}>查看原始 Diff JSON</summary>
-            <pre style={{ color: '#d4d4d8', fontSize: 11 }}>{JSON.stringify(cr.diff_summary, null, 2)}</pre>
-          </details>
+        ) : (
+          <>
+            <Descriptions size="small" bordered column={4} style={{ marginBottom: 12 }}>
+              <Descriptions.Item label="新增">{diff.summary?.added || 0}</Descriptions.Item>
+              <Descriptions.Item label="删除">{diff.summary?.removed || 0}</Descriptions.Item>
+              <Descriptions.Item label="变更">{diff.summary?.changed || 0}</Descriptions.Item>
+              <Descriptions.Item label="元信息">{diff.summary?.meta_changed || 0}</Descriptions.Item>
+            </Descriptions>
+            <Tabs
+              items={[
+                {
+                  key: 'added',
+                  label: `新增 (${(diff.items_added || []).length})`,
+                  children: (diff.items_added || []).length === 0 ? (
+                    <Empty description="无新增项" />
+                  ) : (
+                    <Table
+                      size="small"
+                      rowKey={(r) => r.key}
+                      dataSource={diff.items_added}
+                      columns={addedColumns}
+                      pagination={{ pageSize: 10 }}
+                    />
+                  ),
+                },
+                {
+                  key: 'removed',
+                  label: `删除 (${(diff.items_removed || []).length})`,
+                  children: (diff.items_removed || []).length === 0 ? (
+                    <Empty description="无删除项" />
+                  ) : (
+                    <Table
+                      size="small"
+                      rowKey={(r) => r.key}
+                      dataSource={diff.items_removed}
+                      columns={removedColumns}
+                      pagination={{ pageSize: 10 }}
+                    />
+                  ),
+                },
+                {
+                  key: 'changed',
+                  label: `变更 (${(diff.items_changed || []).length})`,
+                  children: (diff.items_changed || []).length === 0 ? (
+                    <Empty description="无字段变更" />
+                  ) : (
+                    <Table
+                      size="small"
+                      rowKey={(r) => r.key}
+                      dataSource={diff.items_changed}
+                      columns={changedColumns}
+                      pagination={{ pageSize: 10 }}
+                    />
+                  ),
+                },
+                {
+                  key: 'meta',
+                  label: `元信息 (${metaChangedEntries.length})`,
+                  children: metaChangedEntries.length === 0 ? (
+                    <Empty description="元信息无变更" />
+                  ) : (
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      {metaChangedEntries.map(([k, v]) => (
+                        <div key={k} style={{ fontSize: 12 }}>
+                          <Tag>{k}</Tag>
+                          <Text delete>{JSON.stringify(v?.old)}</Text>{' → '}
+                          <Text code>{JSON.stringify(v?.new)}</Text>
+                        </div>
+                      ))}
+                    </Space>
+                  ),
+                },
+              ]}
+            />
+          </>
         )}
       </Card>
+
+      <Card title="审批历史" size="small">
+        {timelineItems.length === 0 ? (
+          <Empty description="暂无审批记录" />
+        ) : (
+          <Timeline items={timelineItems} />
+        )}
+      </Card>
+
+      <Modal
+        title={`会签：${DECISION_LABEL[signOffDecision] || signOffDecision}`}
+        open={signOffOpen}
+        onCancel={() => (signOffLoading ? null : setSignOffOpen(false))}
+        onOk={handleSignOff}
+        confirmLoading={signOffLoading}
+        okButtonProps={{
+          danger: signOffDecision !== 'approve',
+          type: signOffDecision === 'approve' ? 'primary' : 'default',
+        }}
+        destroyOnClose
+      >
+        <Form form={signOffForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="note"
+            label={signOffDecision === 'approve' ? '会签说明（可选）' : '理由（必填）'}
+            rules={
+              signOffDecision !== 'approve'
+                ? [{ required: true, message: '驳回 / 要求修改需要填写原因' }]
+                : []
+            }
+          >
+            <Input.TextArea
+              rows={4}
+              maxLength={2000}
+              showCount
+              placeholder={
+                signOffDecision === 'approve'
+                  ? '可填通过意见，会留在审批历史'
+                  : '请详细描述驳回原因或希望调整的内容'
+              }
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Space>
   )
 }

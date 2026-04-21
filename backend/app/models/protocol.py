@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """协议库数据模型"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float, Boolean, JSON
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -77,7 +77,30 @@ class ProtocolVersion(Base):
         nullable=False,
         comment="是否绕过就绪检查强制激活（审计用）",
     )
-    
+
+    # ── MR3 激活闸门 ──
+    activation_report_json = Column(
+        Text, nullable=True,
+        comment="就绪度体检结果（JSON 字符串），由 protocol_activation_service 生成",
+    )
+    activation_report_generated_at = Column(
+        DateTime, nullable=True, comment="体检 JSON 生成时间",
+    )
+    generated_artifacts_json = Column(
+        Text, nullable=True,
+        comment="发布时自动生成的代码产物元数据（JSON 列表：path/sha256/generated_at），正文内容在磁盘上",
+    )
+    activation_force_reason = Column(
+        Text, nullable=True,
+        comment="强制激活时必填的理由（审计用）",
+    )
+    # 提交者在发起审批时勾选的"激活后需知会团队"列表，例如 ["fms","fcc"]
+    # 由 publish 从对应 CR 拷贝过来；激活时据此给相应角色发站内通知。
+    notify_teams = Column(
+        JSON, nullable=True, default=list,
+        comment="激活后知会团队代码列表（fms/fcc/tsn 等）",
+    )
+
     # 关联
     protocol = relationship("Protocol", back_populates="versions")
     ports = relationship("PortDefinition", back_populates="protocol_version", cascade="all, delete-orphan")
@@ -99,6 +122,8 @@ class PortDefinition(Base):
     description = Column(Text, comment="描述（对应 ICD 的「备注」列）")
     # 协议族（权威），如 irs/xpdr/bms800v/...；为空时由 PORT_FAMILY_MAP 兜底
     protocol_family = Column(String(50), nullable=True, comment="端口所属解析器族")
+    # 端口角色（ICD 维度，用于上层模块选择端口），如 tsn_anomaly/fms_event/fcc_event/auto_flight
+    port_role = Column(String(50), nullable=True, comment="端口业务角色（tsn_anomaly/fms_event/fcc_event/auto_flight/other）")
 
     # ── ICD 6.0.x 原表头映射（扩展列，不影响历史解析逻辑） ──
     message_id = Column(String(64), nullable=True, comment="ICD 消息编号")

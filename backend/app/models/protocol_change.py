@@ -132,6 +132,7 @@ class DraftPortDefinition(Base):
     period_ms = Column(Float)
     description = Column(Text)
     protocol_family = Column(String(50), nullable=True)
+    port_role = Column(String(50), nullable=True, comment="端口业务角色（与正式表对齐）")
 
     # ── ICD 6.0.x 原表头映射（扩展列） ──
     message_id = Column(String(64), nullable=True)
@@ -214,6 +215,9 @@ class ProtocolChangeRequest(Base):
     )
     diff_summary = Column(JSON, nullable=True, comment="submit 时刻生成的 diff 快照")
     final_note = Column(Text, nullable=True, comment="终审 / 驳回 记录")
+    # TSN 网络配置专用：提交者勾选的"变更激活后需知会的团队"列表
+    # 例如 ["fms", "fcc"]；激活 ProtocolVersion 时据此发站内通知，不影响审批链。
+    notify_teams = Column(JSON, nullable=True, default=list, comment="激活后知会团队代码列表")
 
     draft = relationship(
         "ProtocolVersionDraft",

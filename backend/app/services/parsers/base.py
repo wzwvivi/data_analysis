@@ -29,7 +29,22 @@ class BaseParser(ABC):
     parser_key: str = ""  # 解析器标识
     name: str = ""  # 解析器名称
     supported_ports: List[int] = []  # 支持的端口列表
-    
+    # MR3 opt-in：子类若声明 protocol_family 且 supported_ports 为空，
+    # can_parse_port 将回落到 generated.port_registry 动态查找。
+    protocol_family: str = ""
+
+    # MR4 Bundle 注入：parser_service 在 parse_pcapng 启动时为每个 parser
+    # 调用 set_bundle()。子类（如 arinc429_mixin / bms800v_parser）可通过
+    # self._runtime_bundle 访问版本化数据，避免硬编码 port→label/CAN-ID。
+    _runtime_bundle: Any = None
+
+    def set_bundle(self, bundle: Any) -> None:
+        """注入运行时 Bundle（MR4）。bundle 可能为 None（未锁定版本）。"""
+        self._runtime_bundle = bundle
+
+    def get_bundle(self) -> Any:
+        return self._runtime_bundle
+
     @abstractmethod
     def parse_packet(
         self,
@@ -60,8 +75,33 @@ class BaseParser(ABC):
         pass
     
     def can_parse_port(self, port: int) -> bool:
-        """检查是否支持解析指定端口"""
-        return port in self.supported_ports
+        """检查是否支持解析指定端口。
+
+        行为分档（MR4 优先级调整）：
+        1. 已注入 Bundle 且声明了 `protocol_family` → 优先查 bundle.family_ports
+           （版本化来源，首选）
+        2. 子类声明了 `supported_ports` → 用它。（老 parser 保持原逻辑）
+        3. 子类声明了 `protocol_family` 且 `supported_ports` 为空 → 回落到
+           `generated.port_registry.FAMILY_PORTS` 动态查询（MR3 兼容路径）
+        4. 都没有 → False
+        """
+        if self._runtime_bundle is not None and self.protocol_family:
+            try:
+                ports = self._runtime_bundle.family_ports.get(self.protocol_family, ()) or ()
+            except AttributeError:
+                ports = ()
+            if ports:
+                return port in ports
+        if self.supported_ports:
+            return port in self.supported_ports
+        if self.protocol_family:
+            try:
+                from app.services.generated import port_registry  # type: ignore
+                ports = port_registry.FAMILY_PORTS.get(self.protocol_family, ())
+                return port in ports
+            except Exception:
+                return False
+        return False
 
 
 class ParserRegistry:

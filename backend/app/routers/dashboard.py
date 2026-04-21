@@ -17,7 +17,8 @@ from ..deps import get_current_user
 from ..models import (
     AutoFlightAnalysisTask,
     CompareTask,
-    EventAnalysisTask,
+    FccEventAnalysisTask,
+    FmsEventAnalysisTask,
     ParseResult,
     ParseTask,
     SharedTsnFile,
@@ -130,22 +131,19 @@ async def _status_breakdown(db: AsyncSession, model) -> StatusBreakdown:
     return _merge_status_rows(r.all())
 
 
-async def _event_summary_by_template(
-    db: AsyncSession, rule_template: str
-) -> EventAnalysisSummary:
+async def _event_summary_for_model(db: AsyncSession, model) -> EventAnalysisSummary:
+    """按拆分后的新表聚合事件分析统计（FMS / FCC 各走自己的表）。"""
     status_rows = await db.execute(
-        select(EventAnalysisTask.status, func.count())
-        .where(EventAnalysisTask.rule_template == rule_template)
-        .group_by(EventAnalysisTask.status)
+        select(model.status, func.count()).group_by(model.status)
     )
     sb = _merge_status_rows(status_rows.all())
 
     sums = await db.execute(
         select(
-            func.coalesce(func.sum(EventAnalysisTask.total_checks), 0),
-            func.coalesce(func.sum(EventAnalysisTask.passed_checks), 0),
-            func.coalesce(func.sum(EventAnalysisTask.failed_checks), 0),
-        ).where(EventAnalysisTask.rule_template == rule_template)
+            func.coalesce(func.sum(model.total_checks), 0),
+            func.coalesce(func.sum(model.passed_checks), 0),
+            func.coalesce(func.sum(model.failed_checks), 0),
+        )
     )
     total_checks, passed_checks, failed_checks = sums.one()
 
@@ -179,8 +177,8 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
         await db.execute(select(func.count(ParseResult.id)))
     ).scalar_one() or 0
 
-    fm_summary = await _event_summary_by_template(db, FM_RULE_TEMPLATE)
-    fcc_summary = await _event_summary_by_template(db, FCC_RULE_TEMPLATE)
+    fm_summary = await _event_summary_for_model(db, FmsEventAnalysisTask)
+    fcc_summary = await _event_summary_for_model(db, FccEventAnalysisTask)
 
     af_breakdown = await _status_breakdown(db, AutoFlightAnalysisTask)
     af_sums = await db.execute(

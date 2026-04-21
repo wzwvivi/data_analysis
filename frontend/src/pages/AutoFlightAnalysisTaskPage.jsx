@@ -329,6 +329,13 @@ function AutoFlightAnalysisTaskPage() {
               value={task?.name || (taskId ? `#${taskId}` : '-')}
               valueStyle={{ fontSize: 14 }}
             />
+            {task?.bundle_version_id && (
+              <div style={{ marginTop: 6 }}>
+                <Tag color="purple" title={`bundle v#${task.bundle_version_id}`}>
+                  TSN {task.bundle_version_label || `v${task.bundle_version_id}`}
+                </Tag>
+              </div>
+            )}
             {task?.created_at && (
               <div style={{ marginTop: 8, color: '#a1a1aa', fontSize: 12 }}>
                 创建时间 {dayjs(task.created_at).format('YYYY-MM-DD HH:mm:ss')}

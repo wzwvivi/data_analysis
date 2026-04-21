@@ -658,6 +658,18 @@ function ComparePage() {
             <div>创建时间: {new Date(task.created_at).toLocaleString('zh-CN')}</div>
           </Col>
         </Row>
+        {task.bundle_version_id ? (
+          <div style={{ marginBottom: 8 }}>
+            <Tag
+              color="purple"
+              title={`本次异常检查基于 TSN 协议版本 #${task.bundle_version_id}`}
+            >
+              TSN {task.bundle_version_label
+                ? task.bundle_version_label
+                : `v${task.bundle_version_id}`}
+            </Tag>
+          </div>
+        ) : null}
 
         {task.status === 'processing' && (
           <Progress percent={task.progress} status="active" />

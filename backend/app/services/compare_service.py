@@ -17,6 +17,8 @@ import statistics
 from ..config import UPLOAD_DIR
 from ..models import CompareTask, ComparePortResult, CompareGapRecord, ComparePortTimingResult
 from .protocol_service import ProtocolService
+from .bundle import BundleNotFoundError, load_bundle
+from .bundle.schema import BundleCompareProfile, BundlePort
 
 
 class CompareService:
@@ -33,15 +35,21 @@ class CompareService:
         file_path_1: str,
         file_path_2: str,
         protocol_version_id: int,
-        jitter_threshold_pct: float = 10.0
+        jitter_threshold_pct: float = 10.0,
+        bundle_version_id: Optional[int] = None,
     ) -> CompareTask:
-        """创建比对任务"""
+        """创建比对任务。
+
+        bundle_version_id 默认等于 protocol_version_id；保留独立字段是为了未来
+        允许用户"按其它 bundle 版本重跑"。
+        """
         task = CompareTask(
             filename_1=filename_1,
             filename_2=filename_2,
             file_path_1=file_path_1,
             file_path_2=file_path_2,
             protocol_version_id=protocol_version_id,
+            bundle_version_id=bundle_version_id or protocol_version_id,
             jitter_threshold_pct=jitter_threshold_pct,
             status="pending"
         )
@@ -102,17 +110,39 @@ class CompareService:
         await self.update_task_status(task_id, "processing", progress=0)
         
         try:
-            # 加载网络配置端口信息
-            print(f"[Compare] 加载网络配置版本 {task.protocol_version_id}")
-            port_defs = await self.protocol_service.get_ports_by_version(task.protocol_version_id)
-            
-            if not port_defs:
-                await self.update_task_status(task_id, "failed", error_message="网络配置版本无端口定义")
+            # 加载 Bundle（严格锁版本；优先 bundle_version_id，回退 protocol_version_id）
+            bundle_vid = task.bundle_version_id or task.protocol_version_id
+            print(f"[Compare] 加载 Bundle v{bundle_vid}")
+            try:
+                bundle = load_bundle(bundle_vid)
+            except BundleNotFoundError:
+                # 兼容：老部署可能还没生成 bundle；试着实时补生成
+                try:
+                    from .bundle import generator as _bundle_gen
+                    await _bundle_gen.generate_bundle(self.db, bundle_vid)
+                    bundle = load_bundle(bundle_vid)
+                    print(f"[Compare] Bundle v{bundle_vid} 已按需补生成")
+                except Exception as exc:
+                    await self.update_task_status(
+                        task_id, "failed",
+                        error_message=f"Bundle v{bundle_vid} 缺失且无法生成：{exc}",
+                    )
+                    return False
+
+            if not bundle.ports:
+                await self.update_task_status(task_id, "failed", error_message="Bundle 无端口定义")
                 return False
-            
-            print(f"[Compare] 网络配置中共有 {len(port_defs)} 个端口")
-            
-            expected_ports = {p.port_number for p in port_defs}
+
+            print(
+                f"[Compare] Bundle v{bundle_vid} 共 {len(bundle.ports)} 个端口 "
+                f"(schema={bundle.schema_version})"
+            )
+
+            expected_ports = set(bundle.ports.keys())
+            profile: BundleCompareProfile = bundle.compare_profile
+            # 任务自身的 jitter 阈值仍由用户前端设置优先；仅在未设置时用 bundle 默认值
+            if task.jitter_threshold_pct is None:
+                task.jitter_threshold_pct = float(profile.default_jitter_threshold_pct)
 
             # 提取两个文件的时间戳数据
             print(f"[Compare] 提取交换机1数据: {task.file_path_1}")
@@ -128,7 +158,7 @@ class CompareService:
             # 检查1: 记录时间同步性
             print(f"[Compare] 执行检查1: 记录时间同步性")
             await self.update_task_status(task_id, "processing", progress=50)
-            await self._check_sync(task, ts_map_1, ts_map_2, expected_ports)
+            await self._check_sync(task, ts_map_1, ts_map_2, expected_ports, profile)
             
             # 检查2+3: 遍历所有端口
             print(f"[Compare] 执行检查2+3: 端口覆盖完整性 + 数据连续性")
@@ -143,8 +173,8 @@ class CompareService:
             both_present_count = 0
             missing_count = 0
             
-            # 构建端口配置字典
-            port_config_map = {p.port_number: p for p in port_defs}
+            # 构建端口配置字典（BundlePort）
+            port_config_map: Dict[int, BundlePort] = dict(bundle.ports)
             
             # 批量收集所有要插入的记录，最后一次性写入数据库
             all_port_results = []
@@ -187,9 +217,15 @@ class CompareService:
                 # 检查3: 周期端口数据连续性
                 if port_config and port_config.period_ms:
                     periodic_port_count += 1
-                    
-                    gaps_1 = self._detect_gaps(ts_list_1, port_config.period_ms)
-                    gaps_2 = self._detect_gaps(ts_list_2, port_config.period_ms)
+
+                    gaps_1 = self._detect_gaps(
+                        ts_list_1, port_config.period_ms,
+                        threshold_factor=profile.gap_threshold_factor,
+                    )
+                    gaps_2 = self._detect_gaps(
+                        ts_list_2, port_config.period_ms,
+                        threshold_factor=profile.gap_threshold_factor,
+                    )
                     
                     port_result.gap_count_switch1 = len(gaps_1)
                     port_result.gap_count_switch2 = len(gaps_2)
@@ -272,7 +308,9 @@ class CompareService:
                     timing_stats = self._analyze_port_timing(
                         ts_list,
                         port_config.period_ms,
-                        task.jitter_threshold_pct or 10.0
+                        task.jitter_threshold_pct or float(profile.default_jitter_threshold_pct),
+                        compliance_pass_pct=profile.jitter_compliance_pass_pct,
+                        compliance_warning_pct=profile.jitter_compliance_warning_pct,
                     )
                     
                     timing_result = ComparePortTimingResult(
@@ -446,8 +484,9 @@ class CompareService:
         ts_map_1: Dict[int, List[float]],
         ts_map_2: Dict[int, List[float]],
         expected_ports: Set[int],
+        profile: Optional[BundleCompareProfile] = None,
     ):
-        """检查1: 记录时间同步性"""
+        """检查1: 记录时间同步性（阈值来自 Bundle compare_profile）"""
         # 同步性只在网络配置端口范围内判断，避免无关端口提前包造成误判
         first_candidates_1 = [
             ts_map_1[p][0] for p in expected_ports if p in ts_map_1 and ts_map_1[p]
@@ -471,10 +510,10 @@ class CompareService:
         task.switch2_first_ts = first_ts_2
         task.time_diff_ms = time_diff_ms
         
-        # 判定: <= 1ms: pass, 1ms < x <= 100ms: warning, > 100ms: fail
-        if time_diff_ms <= 1.0:
+        prof = profile or BundleCompareProfile()
+        if time_diff_ms <= prof.sync_pass_ms:
             task.sync_result = "pass"
-        elif time_diff_ms <= 100.0:
+        elif time_diff_ms <= prof.sync_warning_ms:
             task.sync_result = "warning"
         else:
             task.sync_result = "fail"
@@ -517,7 +556,9 @@ class CompareService:
         self,
         timestamps: List[float],
         expected_period_ms: float,
-        jitter_threshold_pct: float
+        jitter_threshold_pct: float,
+        compliance_pass_pct: float = 95.0,
+        compliance_warning_pct: float = 80.0,
     ) -> dict:
         """
         分析端口传输间隔统计与抖动
@@ -566,10 +607,10 @@ class CompareService:
         
         compliance_rate_pct = (within_threshold_count / len(intervals_ms) * 100.0) if intervals_ms else 0.0
         
-        if compliance_rate_pct >= 95.0:
+        if compliance_rate_pct >= compliance_pass_pct:
             result = 'pass'
             detail = f'达标率 {compliance_rate_pct:.1f}%，周期正确'
-        elif compliance_rate_pct >= 80.0:
+        elif compliance_rate_pct >= compliance_warning_pct:
             result = 'warning'
             detail = f'达标率 {compliance_rate_pct:.1f}%，存在一定抖动'
         else:

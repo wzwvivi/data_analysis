@@ -9,6 +9,7 @@ from .database import init_db, async_session
 from .routers import (
     protocol_router,
     parse_router,
+    fms_event_analysis_router,
     event_analysis_router,
     fcc_event_analysis_router,
     auto_flight_analysis_router,
@@ -23,7 +24,7 @@ from .routers import (
     dashboard_router,
     workbench_router,
 )
-from .config import UPLOAD_DIR, DATA_DIR
+from .config import UPLOAD_DIR, DATA_DIR, FLIGHT_ASSISTANT_URL
 from .init_data import init_all_data
 
 
@@ -77,7 +78,8 @@ app.include_router(network_config_router)
 app.include_router(device_protocol_router)
 app.include_router(notifications_router)
 app.include_router(parse_router)
-app.include_router(event_analysis_router)
+app.include_router(fms_event_analysis_router)
+app.include_router(event_analysis_router)  # Phase 1 back-compat shim
 app.include_router(fcc_event_analysis_router)
 app.include_router(auto_flight_analysis_router)
 app.include_router(compare_router)
@@ -99,3 +101,15 @@ async def root():
 async def health_check():
     """健康检查"""
     return {"status": "healthy"}
+
+
+@app.get("/api/config")
+async def public_config():
+    """前端启动需要的公共配置 (无鉴权)。
+
+    目前只包含飞行助手分析的外链 URL；未启用时返回空字符串，前端据此
+    隐藏菜单入口。真正访问控制仍依赖网络层 (参见 README 安全说明)。
+    """
+    return {
+        "flight_assistant_url": FLIGHT_ASSISTANT_URL,
+    }

@@ -196,6 +196,13 @@ function FccEventAnalysisTaskPage() {
               value={analysisTask?.pcap_filename || (taskId ? `#${taskId}` : '-')}
               valueStyle={{ fontSize: 14, fontFamily: 'JetBrains Mono, monospace' }}
             />
+            {analysisTask?.bundle_version_id && (
+              <div style={{ marginTop: 6 }}>
+                <Tag color="purple" title={`bundle v#${analysisTask.bundle_version_id}`}>
+                  TSN {analysisTask.bundle_version_label || `v${analysisTask.bundle_version_id}`}
+                </Tag>
+              </div>
+            )}
             {analysisTask?.created_at && (
               <div style={{ marginTop: 8, color: '#a1a1aa', fontSize: 12 }}>
                 创建时间 {dayjs(analysisTask.created_at).format('YYYY-MM-DD HH:mm:ss')}

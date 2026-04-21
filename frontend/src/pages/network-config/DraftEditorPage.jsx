@@ -5,6 +5,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Descriptions,
   Divider,
   Drawer,
@@ -55,6 +56,22 @@ const DATA_TYPE_OPTIONS = [
   'int8', 'int16', 'int32', 'int64',
   'float32', 'float64', 'bytes', 'string',
 ].map((t) => ({ value: t, label: t }))
+
+// 端口角色（ICD 维度，用于事件分析模块按角色筛端口）
+// - fcc_event 作为聚合角色保留兼容，实际建议用细粒度 fcc_status/channel/fault
+// - irs_input 供自动飞行分析解析 IRS 竖向速度/加速度
+const PORT_ROLE_OPTIONS = [
+  { value: 'tsn_anomaly', label: 'TSN 异常检查' },
+  { value: 'fms_event',   label: '飞管事件分析' },
+  { value: 'fcc_status',  label: '飞控事件分析 · 状态帧' },
+  { value: 'fcc_channel', label: '飞控事件分析 · 通道选择' },
+  { value: 'fcc_fault',   label: '飞控事件分析 · 故障码' },
+  { value: 'fcc_event',   label: '飞控事件分析（聚合）' },
+  { value: 'auto_flight', label: '自动飞行分析' },
+  { value: 'irs_input',   label: '自动飞行分析 · IRS 输入' },
+  { value: 'other',       label: '其它 / 未分类' },
+]
+const PORT_ROLE_LABELS = Object.fromEntries(PORT_ROLE_OPTIONS.map((o) => [o.value, o.label]))
 
 const BYTE_ORDER_OPTIONS = [
   { value: 'big', label: 'big' },
@@ -549,7 +566,7 @@ function DraftEditorPage() {
       return col
     })
 
-    // 平台专属扩展（非 ICD 表头）：协议族 + 字段详情 + 操作；放最右侧
+    // 平台专属扩展（非 ICD 表头）：协议族 + 端口角色 + 字段详情 + 操作；放最右侧
     const extra = [
       {
         title: '协议族（平台扩展）',
@@ -569,6 +586,19 @@ function DraftEditorPage() {
           if (!v && !r.protocol_family_resolved) return <Tag color="warning">未映射</Tag>
           return <Tag color="blue">{v}</Tag>
         },
+      },
+      {
+        title: '端口角色',
+        dataIndex: 'port_role',
+        editable: true,
+        inputType: 'select',
+        options: PORT_ROLE_OPTIONS,
+        width: 140,
+        filters: PORT_ROLE_OPTIONS.map((o) => ({ text: o.label, value: o.value })),
+        onFilter: (value, record) => (record.port_role || '') === value,
+        render: (v) => v
+          ? <Tag color="geekblue">{PORT_ROLE_LABELS[v] || v}</Tag>
+          : <Tag color="default">未指定</Tag>,
       },
       {
         title: '字段详情',
@@ -798,6 +828,9 @@ function DraftEditorPage() {
           <Form.Item name="protocol_family" label="协议族（平台扩展）">
             <Select options={familyOptions} allowClear showSearch />
           </Form.Item>
+          <Form.Item name="port_role" label="端口角色（事件分析模块按角色筛端口）">
+            <Select options={PORT_ROLE_OPTIONS} allowClear showSearch />
+          </Form.Item>
           <Divider plain style={{ fontSize: 12 }}>ICD 扩展（可选）</Divider>
           <Form.Item name="message_id" label="消息编号"><Input /></Form.Item>
           <Form.Item name="source_interface_id" label="消息源端接口编号（上行/网络）"><Input /></Form.Item>
@@ -822,12 +855,25 @@ function DraftEditorPage() {
         cancelText="取消"
       >
         <Paragraph type="secondary">
-          提交后进入 <Text strong>网络团队 → 设备团队 → TSN 开发团队 → 管理员</Text> 四步会签；
-          期间草稿将被锁定不可编辑，驳回后可重新编辑。
+          提交后仅需 <Text strong>管理员审批</Text>；审批通过后版本进入 PendingCode，
+          等待管理员激活。期间草稿将被锁定不可编辑，驳回后可重新编辑。
         </Paragraph>
-        <Form form={submitForm} layout="vertical">
+        <Form form={submitForm} layout="vertical" initialValues={{ notify_teams: [] }}>
           <Form.Item name="note" label="提交说明（可选）">
             <Input.TextArea rows={4} placeholder="本次修改概要 / 原因 / 影响面" />
+          </Form.Item>
+          <Form.Item
+            name="notify_teams"
+            label="激活后通知团队（可选，可多选）"
+            tooltip="版本被管理员激活时，相应团队会收到站内通知；提交/审批过程不打扰"
+          >
+            <Checkbox.Group
+              options={[
+                { label: '飞管团队', value: 'fms' },
+                { label: '飞控团队', value: 'fcc' },
+                { label: 'TSN / 网络团队', value: 'tsn' },
+              ]}
+            />
           </Form.Item>
         </Form>
       </Modal>

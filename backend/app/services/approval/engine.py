@@ -42,7 +42,7 @@ from ...models import (
     NOTIFICATION_KIND_CR_REJECTED,
     ProtocolChangeRequest,
 )
-from ...permissions import ROLE_ADMIN, ROLE_DEV_TSN
+from ...permissions import ROLE_ADMIN, ROLE_NETWORK_TEAM
 
 
 class EnginePublishError(Exception):
@@ -309,7 +309,7 @@ class ChangeRequestEngine:
         )
         await notify_users_by_role(
             self.db,
-            role=ROLE_DEV_TSN,
+            role=ROLE_NETWORK_TEAM,
             kind=NOTIFICATION_KIND_CR_PUBLISHED,
             title=f"设备协议新版本登记为 PendingCode：{self.handler.draft_label(draft)}",
             body=f"请同步后端解析代码；版本 {outcome.display_version}",

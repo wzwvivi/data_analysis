@@ -61,6 +61,7 @@ from ..services.protocol_draft_service import (
 )
 from ..services.protocol_check_service import run_static_check
 from ..services import protocol_publish_service as publish_service
+from ..services import protocol_activation_service as activation_service
 
 
 def _require_network_config_access(user: User = Depends(get_current_user)) -> User:
@@ -264,6 +265,7 @@ async def get_version_ports(version_id: int, db: AsyncSession = Depends(get_db))
                 "protocol_family_resolved": resolve_port_family(
                     p.port_number, db_family=p.protocol_family
                 ),
+                "port_role": getattr(p, "port_role", None),
                 "field_count": len(p.fields) if p.fields else 0,
                 **{attr: getattr(p, attr, None) for attr in icd_ext},
             }
@@ -304,6 +306,7 @@ async def get_port_detail(
         "protocol_family_resolved": resolve_port_family(
             port.port_number, db_family=port.protocol_family
         ),
+        "port_role": getattr(port, "port_role", None),
         **{attr: getattr(port, attr, None) for attr in icd_ext},
         "fields": [
             {
@@ -683,6 +686,7 @@ async def submit_draft_api(
             submitter_username=user.username,
             submitter_role=user.role or "",
             note=payload.get("note"),
+            notify_teams=payload.get("notify_teams"),
         )
     except publish_service.PublishError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -800,4 +804,218 @@ async def publish_change_request(
         "protocol_version_id": pv.id,
         "availability_status": pv.availability_status,
         "version": pv.version,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# MR3: 激活闸门
+# ══════════════════════════════════════════════════════════════════════
+
+
+@router.get("/versions/{version_id}/activation-report")
+async def get_activation_report(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """读取协议版本的就绪度体检报告；若不存在，自动触发一次生成。"""
+    await _get_version_or_404(db, version_id)
+    return await activation_service.get_activation_report(db, version_id, ensure=True)
+
+
+@router.post("/versions/{version_id}/activation-report/refresh")
+async def refresh_activation_report(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """重新生成 port_registry + 重跑体检（admin / network_team）。"""
+    _require_network_team_write(user)
+    await _get_version_or_404(db, version_id)
+    result = await activation_service.refresh_activation_pipeline(db, version_id)
+    return await activation_service.get_activation_report(db, version_id, ensure=False)
+
+
+@router.post("/versions/{version_id}/activate")
+async def activate_protocol_version(
+    version_id: int,
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """把 PendingCode 版本切换为 Available（仅管理员）。"""
+    force = bool(payload.get("force") or False)
+    reason = payload.get("reason")
+    pv = await activation_service.activate_version(
+        db, version_id, user=user, force=force, reason=reason,
+    )
+    return {
+        "status": "ok",
+        "version_id": pv.id,
+        "version": pv.version,
+        "availability_status": pv.availability_status,
+        "activated_at": pv.activated_at,
+        "activated_by": pv.activated_by,
+        "forced_activation": bool(pv.forced_activation),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# MR4: Bundle 查看接口（代码/数据分离）
+# ══════════════════════════════════════════════════════════════════════
+
+
+@router.get("/versions/{version_id}/bundle")
+async def get_bundle(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """返回指定版本的 bundle.json 原始内容。缺失时自动尝试生成。"""
+    from ..services.bundle import load_bundle, BundleNotFoundError
+    from ..services.bundle import generator as bundle_generator
+    from ..services.bundle.schema import bundle_to_dict
+
+    await _get_version_or_404(db, version_id)
+    try:
+        bundle = load_bundle(version_id)
+    except BundleNotFoundError:
+        try:
+            await bundle_generator.generate_bundle(db, version_id)
+            bundle = load_bundle(version_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"bundle v{version_id} 不存在且自动生成失败：{exc}",
+            ) from exc
+    return bundle_to_dict(bundle)
+
+
+@router.post("/versions/{version_id}/bundle/refresh")
+async def refresh_bundle(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """强制重新生成指定版本的 bundle.json（admin / network_team）。"""
+    _require_network_team_write(user)
+    from ..services.bundle import generator as bundle_generator
+
+    await _get_version_or_404(db, version_id)
+    artifact = await bundle_generator.generate_bundle(db, version_id)
+    return {"status": "ok", "artifact": artifact}
+
+
+@router.get("/versions/{version_id}/bundle/diff")
+async def diff_bundle(
+    version_id: int,
+    against: int = Query(..., description="对比目标版本 ID"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """两个版本 bundle 的高层摘要 diff（端口新增/删除，字段改动等）。"""
+    from ..services.bundle import load_bundle, BundleNotFoundError
+
+    await _get_version_or_404(db, version_id)
+    await _get_version_or_404(db, against)
+    try:
+        cur = load_bundle(version_id)
+        base = load_bundle(against)
+    except BundleNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    cur_ports = set(cur.ports.keys())
+    base_ports = set(base.ports.keys())
+    ports_added = sorted(cur_ports - base_ports)
+    ports_removed = sorted(base_ports - cur_ports)
+
+    fields_changed: List[Dict[str, Any]] = []
+    for pn in sorted(cur_ports & base_ports):
+        cur_map = cur.fields_by_name(pn)
+        base_map = base.fields_by_name(pn)
+        added_f = sorted(set(cur_map.keys()) - set(base_map.keys()))
+        removed_f = sorted(set(base_map.keys()) - set(cur_map.keys()))
+        modified_f: List[str] = []
+        for fn in set(cur_map.keys()) & set(base_map.keys()):
+            a = cur_map[fn]
+            b = base_map[fn]
+            if (a.offset, a.length, a.data_type, a.byte_order) != (b.offset, b.length, b.data_type, b.byte_order):
+                modified_f.append(fn)
+        if added_f or removed_f or modified_f:
+            fields_changed.append({
+                "port": pn,
+                "fields_added": added_f,
+                "fields_removed": removed_f,
+                "fields_modified": sorted(modified_f),
+            })
+
+    return {
+        "current_version_id": version_id,
+        "base_version_id": against,
+        "ports_added": ports_added,
+        "ports_removed": ports_removed,
+        "fields_changed": fields_changed,
+        "event_rules": {
+            "current_templates": sorted(cur.event_rules.keys()),
+            "base_templates": sorted(base.event_rules.keys()),
+        },
+    }
+
+
+@router.get("/versions/{version_id}/bundle/meta")
+async def get_bundle_meta(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """返回 bundle 的元数据卡片（SHA256 + 时间 + 端口/规则计数）。
+
+    前端版本卡片用它做轻量展示，不需要拉整个 JSON。bundle 缺失时懒生成。
+    """
+    from ..services.bundle import (
+        BundleNotFoundError,
+        bundle_path_for,
+        load_bundle,
+    )
+    from ..services.bundle import generator as bundle_generator
+    from ..services.bundle.loader import sha256_path_for
+
+    await _get_version_or_404(db, version_id)
+    try:
+        bundle = load_bundle(version_id)
+    except BundleNotFoundError:
+        try:
+            await bundle_generator.generate_bundle(db, version_id)
+            bundle = load_bundle(version_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"bundle v{version_id} 不存在且自动生成失败：{exc}",
+            ) from exc
+
+    bundle_file = bundle_path_for(version_id)
+    sha_file = sha256_path_for(version_id)
+    sha256: Optional[str] = None
+    if sha_file.is_file():
+        try:
+            sha256 = sha_file.read_text(encoding="utf-8").strip().split()[0] or None
+        except Exception:
+            sha256 = None
+
+    rules_count = sum(len(v) for v in bundle.event_rules.values())
+    return {
+        "version_id": bundle.protocol_version_id,
+        "protocol_version_name": bundle.protocol_version_name,
+        "protocol_name": bundle.protocol_name,
+        "schema_version": bundle.schema_version,
+        "generated_at": bundle.generated_at.isoformat() + "Z",
+        "sha256": sha256,
+        "bundle_path": str(bundle_file),
+        "bundle_bytes": bundle_file.stat().st_size if bundle_file.is_file() else None,
+        "stats": {
+            "ports": len(bundle.ports),
+            "families": len(bundle.family_ports),
+            "event_rules": rules_count,
+            "event_rule_templates": list(bundle.event_rules.keys()),
+        },
     }

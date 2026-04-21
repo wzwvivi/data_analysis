@@ -15,20 +15,38 @@ import struct
 from typing import Dict, List, Any, Optional
 
 from .base import BaseParser, ParserRegistry, FieldLayout
+# 设备协议 payload 内部字段布局（非 ICD 数据）统一在 payload_layouts 声明。
+from ..payload_layouts import (
+    TSN_HEADER_LEN,
+    AUTO_FLIGHT_FRAME_SIZE as FRAME_SIZE,
+    AUTO_FLIGHT_LAYOUT,
+)
 
 
 AUTO_FLIGHT_PORTS = {9031: "FCC1", 9032: "FCC2", 9033: "FCC3", 9034: "BCM"}
-TSN_HEADER_LEN = 8
-FRAME_SIZE = 124
 
 
-def _u8(data: bytes, idx1: int) -> int:
-    return int(data[idx1 - 1])
+def _u8(data: bytes, offset0: int) -> int:
+    return int(data[offset0])
 
 
-def _f32(data: bytes, idx1: int) -> float:
-    start = idx1 - 1
-    return float(struct.unpack("<f", data[start:start + 4])[0])
+def _f32(data: bytes, offset0: int) -> float:
+    return float(struct.unpack_from("<f", data, offset0)[0])
+
+
+def _decode_auto_flight_frame(data: bytes) -> Dict[str, Any]:
+    """按 AUTO_FLIGHT_LAYOUT 解码。返回 {field_name: value}。"""
+    out: Dict[str, Any] = {}
+    for name, (off, typ) in AUTO_FLIGHT_LAYOUT.items():
+        if typ == "u8":
+            if off >= len(data):
+                continue
+            out[name] = _u8(data, off)
+        elif typ == "f32":
+            if off + 4 > len(data):
+                continue
+            out[name] = _f32(data, off)
+    return out
 
 
 @ParserRegistry.register
@@ -112,45 +130,7 @@ class AutoFlightParser(BaseParser):
 
         data = payload[TSN_HEADER_LEN:TSN_HEADER_LEN + FRAME_SIZE]
         try:
-            out.update({
-                "ap_engaged": _u8(data, 1),
-                "at_engaged": _u8(data, 2),
-                "air_ground": _u8(data, 3),
-                "flight_phase": _u8(data, 4),
-                "auto_mode": _u8(data, 5),
-                "current_leg": _u8(data, 6),
-                "lat_mode_armed": _u8(data, 7),
-                "lat_mode_active": _u8(data, 8),
-                "lon_mode_armed": _u8(data, 9),
-                "lon_mode_active": _u8(data, 10),
-                "thr_mode_armed": _u8(data, 11),
-                "thr_mode_active": _u8(data, 12),
-                "af_warning": _u8(data, 13),
-                "lat_track_error_m": _f32(data, 14),
-                "vert_track_error_m": _f32(data, 18),
-                "speed_cmd_mps": _f32(data, 22),
-                "altitude_cmd_m": _f32(data, 26),
-                "vs_cmd_mps": _f32(data, 30),
-                "roll_cmd_deg": _f32(data, 34),
-                "pitch_cmd_deg": _f32(data, 38),
-                "target_heading_deg": _f32(data, 42),
-                "target_thrust_n": _f32(data, 46),
-                "target_rotor_rpm": _f32(data, 50),
-                "current_altitude_m": _f32(data, 56),
-                "current_airspeed_mps": _f32(data, 60),
-                "current_airspeed_acc_mps2": _f32(data, 64),
-                "current_groundspeed_mps": _f32(data, 68),
-                "current_calibrated_airspeed_mps": _f32(data, 72),
-                "current_calibrated_airspeed_acc_mps2": _f32(data, 76),
-                "height_source": _u8(data, 106),
-                "airspeed_source": _u8(data, 107),
-                "ap_active": _u8(data, 108),
-                "at_active": _u8(data, 109),
-                "alt_active": _u8(data, 113),
-                "vs_active": _u8(data, 114),
-                "mission_active": _u8(data, 115),
-                "land_active": _u8(data, 116),
-            })
+            out.update(_decode_auto_flight_frame(data))
         except Exception:
             return out
 

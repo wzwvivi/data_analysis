@@ -128,22 +128,61 @@ async def list_specs(
     return {"total": len(items), "items": items}
 
 
+_AVAILABILITY_VALUES = ("Available", "PendingCode", "Deprecated")
+
+
 @router.get("/specs/{spec_id}")
-async def get_spec_detail(spec_id: int, db: AsyncSession = Depends(get_db)):
+async def get_spec_detail(
+    spec_id: int,
+    availability_status: Optional[str] = Query(
+        None, description="按版本 availability 过滤 versions 列表：Available / PendingCode / Deprecated"
+    ),
+    db: AsyncSession = Depends(get_db),
+):
     spec = await dps.get_spec_by_id(db, spec_id, with_versions=True)
     if not spec:
         raise HTTPException(status_code=404, detail="设备 spec 不存在")
+    if availability_status and availability_status not in _AVAILABILITY_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"availability_status 必须是 {list(_AVAILABILITY_VALUES)} 之一",
+        )
     versions = sorted(spec.versions or [], key=lambda v: v.version_seq or 0, reverse=True)
+    filtered = (
+        [v for v in versions if v.availability_status == availability_status]
+        if availability_status
+        else versions
+    )
     handler = get_family_handler(spec.protocol_family)
     latest_spec_json = versions[0].spec_json if versions else None
     return {
         "spec": dps._spec_to_dict(spec, include_counts=False),
-        "versions": [dps.serialize_version(v) for v in versions],
+        "versions": [dps.serialize_version(v) for v in filtered],
         "summary": handler.summarize_spec(latest_spec_json or {}),
         "labels_view": handler.labels_view(latest_spec_json or {}) if latest_spec_json else [],
         "latest_spec_json": latest_spec_json,
         "latest_version_id": versions[0].id if versions else None,
         "latest_version_name": versions[0].version_name if versions else None,
+    }
+
+
+@router.get("/specs/{spec_id}/versions")
+async def list_spec_versions(
+    spec_id: int,
+    availability_status: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    if availability_status and availability_status not in _AVAILABILITY_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"availability_status 必须是 {list(_AVAILABILITY_VALUES)} 之一",
+        )
+    versions = await dps.get_versions_for_spec(
+        db, spec_id, availability_status=availability_status
+    )
+    return {
+        "total": len(versions),
+        "items": [dps.serialize_version(v) for v in versions],
     }
 
 
@@ -163,6 +202,63 @@ async def get_version_detail(version_id: int, db: AsyncSession = Depends(get_db)
         "labels_view": handler.labels_view(v.spec_json or {}) if handler else [],
         "summary": handler.summarize_spec(v.spec_json or {}) if handler else {},
     }
+
+
+@router.post("/versions/{version_id}/activate")
+async def activate_version_route(
+    version_id: int,
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """PendingCode → Available；``device_team`` 或 ``admin`` 可激活。"""
+    _require_device_write(user)
+    force = bool(payload.get("force") or False)
+    reason = payload.get("reason")
+    try:
+        v = await dps.activate_version(
+            db,
+            version_id=version_id,
+            user=user.username,
+            force=force,
+            reason=reason,
+        )
+    except DeviceProtocolError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return dps.serialize_version(v)
+
+
+@router.post("/versions/{version_id}/deprecate")
+async def deprecate_version_route(
+    version_id: int,
+    payload: Dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Available | PendingCode → Deprecated；仅管理员可弃用（与 TSN 一致）。"""
+    if (user.role or "").strip() != ROLE_ADMIN:
+        raise HTTPException(status_code=403, detail="仅管理员可弃用协议版本")
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="reason 必填")
+    try:
+        v = await dps.deprecate_version(
+            db, version_id=version_id, user=user.username, reason=reason
+        )
+    except DeviceProtocolError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return dps.serialize_version(v)
+
+
+@router.get("/versions/{version_id}/activation-report")
+async def get_version_activation_report(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await dps.get_activation_report(db, version_id)
+    except DeviceProtocolError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ═════════════════════════ Draft ═════════════════════════
@@ -346,13 +442,16 @@ async def submit_draft(
     user: User = Depends(get_current_user),
 ):
     _require_device_write(user)
+    note = payload.get("submit_note")
+    if note is None:
+        note = payload.get("note")
     try:
         cr = await dps.submit_draft(
             db,
             draft_id,
             submitter_username=user.username,
             submitter_role=user.role or "",
-            note=payload.get("note"),
+            note=note,
         )
     except DeviceProtocolError as e:
         raise HTTPException(status_code=400, detail=str(e))

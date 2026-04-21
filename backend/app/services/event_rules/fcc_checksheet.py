@@ -23,8 +23,15 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
-
-TSN_HEADER_LEN = 8
+# 所有 payload 内部 byte offset 集中在 payload_layouts（非 ICD 数据）。
+from ..payload_layouts import (
+    TSN_HEADER_LEN,
+    FCC_STATUS_VOTE_OFFSET,
+    FCC_CHANNEL_IRS_SEL_OFFSET,
+    FCC_CHANNEL_RA_SEL_OFFSET,
+    FCC_FAULT_IRS_BITMAP_OFFSET,
+    FCC_FAULT_RA_BITMAP_OFFSET,
+)
 
 STATUS_PORTS = {9001: "FCC1", 9002: "FCC2", 9003: "FCC3"}
 CHANNEL_PORTS = {9011: "FCC1", 9012: "FCC2", 9013: "FCC3"}
@@ -125,15 +132,28 @@ def _mains_from_vote(vote: int) -> List[str]:
 class FccChecksheet:
     """飞控事件分析规则引擎。"""
 
-    def __init__(self, divergence_tolerance_ms: int = 100):
+    def __init__(
+        self,
+        divergence_tolerance_ms: int = 100,
+        status_ports: Optional[Dict[int, str]] = None,
+        channel_ports: Optional[Dict[int, str]] = None,
+        fault_ports: Optional[Dict[int, str]] = None,
+    ):
+        """
+        :param status_ports/channel_ports/fault_ports: Phase 4 允许上层根据
+            bundle 动态传入这三组端口的 {port: fcc_name} 映射。未传则回落到
+            模块级默认（9001/9011/9021 三组）。
+        """
         self._divergence_tolerance_sec = max(0, divergence_tolerance_ms) / 1000.0
+        self._status_ports = dict(status_ports) if status_ports else dict(STATUS_PORTS)
+        self._channel_ports = dict(channel_ports) if channel_ports else dict(CHANNEL_PORTS)
+        self._fault_ports = dict(fault_ports) if fault_ports else dict(FAULT_PORTS)
 
     # ---- public interface (same contract as Checksheet) ----
 
-    @staticmethod
-    def get_required_ports() -> List[int]:
+    def get_required_ports(self) -> List[int]:
         return sorted(
-            set(STATUS_PORTS) | set(CHANNEL_PORTS) | set(FAULT_PORTS)
+            set(self._status_ports) | set(self._channel_ports) | set(self._fault_ports)
         )
 
     def analyze(
@@ -184,11 +204,11 @@ class FccChecksheet:
             data = _decode_payload(raw_hex)
             if data is None:
                 continue
-            if port in STATUS_PORTS:
+            if port in self._status_ports:
                 self._handle_status(ts, port, data, raw_hex)
-            elif port in CHANNEL_PORTS:
+            elif port in self._channel_ports:
                 self._handle_channel(ts, port, data, raw_hex)
-            elif port in FAULT_PORTS:
+            elif port in self._fault_ports:
                 self._handle_fault(ts, port, data, raw_hex)
 
         last_ts = events[-1][0] if events else 0.0
@@ -207,7 +227,7 @@ class FccChecksheet:
     ) -> List[Tuple[float, int, str]]:
         rows: List[Tuple[float, int, str]] = []
         for port, df in parsed_data.items():
-            if port not in (set(STATUS_PORTS) | set(CHANNEL_PORTS) | set(FAULT_PORTS)):
+            if port not in (set(self._status_ports) | set(self._channel_ports) | set(self._fault_ports)):
                 continue
             for _, r in df.iterrows():
                 rows.append((float(r["timestamp"]), port, str(r["raw_data"])))
@@ -217,8 +237,8 @@ class FccChecksheet:
     # ---- handlers ----
 
     def _handle_status(self, ts: float, port: int, data: bytes, raw_hex: str):
-        fcc = STATUS_PORTS[port]
-        vote = int(data[0])
+        fcc = self._status_ports[port]
+        vote = int(data[FCC_STATUS_VOTE_OFFSET])
         prev_vote = self._vote_by_fcc.get(fcc)
         if prev_vote is not None and prev_vote == vote:
             return
@@ -258,9 +278,13 @@ class FccChecksheet:
                 })
 
     def _handle_channel(self, ts: float, port: int, data: bytes, raw_hex: str):
-        fcc = CHANNEL_PORTS[port]
-        irs_val = int(data[0])
-        ra_val = int(data[1]) if len(data) > 1 else None
+        fcc = self._channel_ports[port]
+        irs_val = int(data[FCC_CHANNEL_IRS_SEL_OFFSET])
+        ra_val = (
+            int(data[FCC_CHANNEL_RA_SEL_OFFSET])
+            if len(data) > FCC_CHANNEL_RA_SEL_OFFSET
+            else None
+        )
 
         prev_irs = self._irs_sel.get(fcc)
         irs_changed = prev_irs is not None and prev_irs != irs_val
@@ -299,10 +323,14 @@ class FccChecksheet:
         self._check_divergence(ts, "ra")
 
     def _handle_fault(self, ts: float, port: int, data: bytes, raw_hex: str):
-        fcc = FAULT_PORTS[port]
+        fcc = self._fault_ports[port]
 
-        irs_byte = int(data[0])
-        ra_byte = int(data[1]) if len(data) > 1 else 0
+        irs_byte = int(data[FCC_FAULT_IRS_BITMAP_OFFSET])
+        ra_byte = (
+            int(data[FCC_FAULT_RA_BITMAP_OFFSET])
+            if len(data) > FCC_FAULT_RA_BITMAP_OFFSET
+            else 0
+        )
 
         for bit, ch_name in [(0, "IRS1"), (1, "IRS2"), (2, "IRS3")]:
             new_val = bool(irs_byte & (1 << bit))

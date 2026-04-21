@@ -79,6 +79,35 @@ class Arinc429Mixin:
         self.decoder = ARINC429Decoder()
         self._port_columns_cache: Dict[int, List[str]] = {}
 
+    # ------------------------------------------------------------------
+    # MR4: Bundle 查询（覆盖硬编码 _PORT_LABELS）
+    # ------------------------------------------------------------------
+    def _get_port_labels(self, port: int) -> Optional[List[int]]:
+        """返回指定端口允许的八进制 label 列表。
+
+        优先级：bundle（版本化）> _PORT_LABELS（硬编码 fallback）> None（无过滤）
+
+        Bundle 里 `bundle.ports[port].arinc_labels` 形如 ['L306','L003']。
+        `Bundle.arinc_label_ints()` 会把它们转成 [0o306, 0o003]。
+        """
+        bundle = getattr(self, "_runtime_bundle", None)
+        if bundle is not None:
+            try:
+                labels = bundle.arinc_label_ints(int(port))
+            except AttributeError:
+                labels = []
+            if labels:
+                return labels
+        if self._PORT_LABELS is not None:
+            return self._PORT_LABELS.get(port)
+        return None
+
+    def set_bundle(self, bundle: Any) -> None:  # type: ignore[override]
+        """Bundle 注入钩子：清空端口列缓存，让 get_output_columns 重算。"""
+        super().set_bundle(bundle) if hasattr(super(), "set_bundle") else None
+        self._runtime_bundle = bundle
+        self._port_columns_cache.clear()
+
     def _extract_status_slots(
         self,
         payload: bytes,
@@ -187,8 +216,9 @@ class Arinc429Mixin:
             return None
 
         port_cols = self.get_output_columns(port)
-        if self._PORT_LABELS is not None:
-            allowed_labels = set(self._PORT_LABELS.get(port, self._LABEL_DEFS.keys()))
+        labels_for_port = self._get_port_labels(port)
+        if labels_for_port is not None:
+            allowed_labels = set(labels_for_port)
         else:
             allowed_labels = set(self._LABEL_DEFS.keys())
 
@@ -233,15 +263,14 @@ class Arinc429Mixin:
         if port in self._port_columns_cache:
             return list(self._port_columns_cache[port])
 
-        if self._PORT_LABELS is not None:
-            labels = self._PORT_LABELS.get(port)
-            if labels is not None:
-                common = self._common_columns()
-                cols = common[:]
-                for lb in sorted(labels):
-                    cols.extend(self._columns_for_label(lb))
-                self._port_columns_cache[port] = cols
-                return list(cols)
+        labels = self._get_port_labels(port)
+        if labels:
+            common = self._common_columns()
+            cols = common[:]
+            for lb in sorted(labels):
+                cols.extend(self._columns_for_label(lb))
+            self._port_columns_cache[port] = cols
+            return list(cols)
 
         self._port_columns_cache[port] = list(self._OUTPUT_COLUMNS)
         return list(self._OUTPUT_COLUMNS)

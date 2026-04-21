@@ -1,11 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { authApi, TOKEN_KEY } from '../services/api'
+import { authApi, configApi, TOKEN_KEY } from '../services/api'
 
 const AuthContext = createContext(null)
+
+const EMPTY_PUBLIC_CONFIG = { flight_assistant_url: '' }
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [permissions, setPermissions] = useState({ pages: [], visible_ports: {} })
+  const [publicConfig, setPublicConfig] = useState(EMPTY_PUBLIC_CONFIG)
   const [ready, setReady] = useState(false)
 
   const loadPermissions = useCallback(async () => {
@@ -19,6 +22,17 @@ export function AuthProvider({ children }) {
     } catch {
       setPermissions({ pages: [], visible_ports: {} })
       return null
+    }
+  }, [])
+
+  const loadPublicConfig = useCallback(async () => {
+    try {
+      const r = await configApi.getPublic()
+      setPublicConfig({
+        flight_assistant_url: (r.data?.flight_assistant_url || '').trim(),
+      })
+    } catch {
+      setPublicConfig(EMPTY_PUBLIC_CONFIG)
     }
   }, [])
 
@@ -44,7 +58,8 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     refreshMe()
-  }, [refreshMe])
+    loadPublicConfig()
+  }, [refreshMe, loadPublicConfig])
 
   const login = async (username, password) => {
     const r = await authApi.login(username, password)
@@ -78,11 +93,13 @@ export function AuthProvider({ children }) {
   const value = {
     user,
     permissions,
+    publicConfig,
     ready,
     login,
     logout,
     refreshMe,
     refreshPermissions: loadPermissions,
+    refreshPublicConfig: loadPublicConfig,
     hasPageAccess,
     hasPortAccess,
     isAdmin: (user?.role || '') === 'admin',

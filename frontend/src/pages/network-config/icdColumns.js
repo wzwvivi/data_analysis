@@ -79,6 +79,7 @@ export function matchPortKeyword(p, keyword) {
   const bag = [
     p.port_number, p.message_name, p.source_device, p.target_device,
     p.multicast_ip, p.description, p.protocol_family, p.protocol_family_resolved,
+    p.port_role,
     p.message_id, p.source_interface_id, p.port_id_label, p.diu_id, p.diu_id_set,
     p.diu_recv_mode, p.tsn_source_ip, p.diu_ip, p.dataset_path,
     p.data_real_path, p.final_recv_device,

@@ -6,9 +6,9 @@ import LoginPage from './pages/LoginPage'
 import UploadPage from './pages/UploadPage'
 import TaskListPage from './pages/TaskListPage'
 import ResultPage from './pages/ResultPage'
-import EventAnalysisPage from './pages/EventAnalysisPage'
-import StandaloneEventPage from './pages/StandaloneEventPage'
-import StandaloneEventTaskPage from './pages/StandaloneEventTaskPage'
+import FmsEventAnalysisPage from './pages/FmsEventAnalysisPage'
+import StandaloneFmsEventPage from './pages/StandaloneFmsEventPage'
+import StandaloneFmsEventTaskPage from './pages/StandaloneFmsEventTaskPage'
 import FccEventAnalysisPage from './pages/FccEventAnalysisPage'
 import FccEventAnalysisTaskPage from './pages/FccEventAnalysisTaskPage'
 import AutoFlightAnalysisPage from './pages/AutoFlightAnalysisPage'
@@ -110,7 +110,8 @@ function AppRoutes() {
         <Route path="tasks" element={<PermissionRoute requiredPage="tasks"><TaskListPage /></PermissionRoute>} />
         <Route path="tasks/:taskId" element={<PermissionRoute requiredPage="tasks/:taskId"><ResultPage /></PermissionRoute>} />
         <Route path="tasks/:taskId/analysis" element={<PermissionRoute requiredPage="tasks/:taskId/analysis"><ResultPage /></PermissionRoute>} />
-        <Route path="tasks/:taskId/event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><EventAnalysisPage /></PermissionRoute>} />
+        <Route path="tasks/:taskId/event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
+        <Route path="tasks/:taskId/fms-event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
         <Route path="network-config" element={<PermissionRoute requiredPage="network-config"><NetworkConfigPage /></PermissionRoute>} />
         <Route path="network-config/versions/:id" element={<PermissionRoute requiredPage="network-config"><VersionViewerPage /></PermissionRoute>} />
         <Route path="network-config/drafts/:id" element={<PermissionRoute requiredPage="network-config"><DraftEditorPage /></PermissionRoute>} />
@@ -121,8 +122,11 @@ function AppRoutes() {
         <Route path="device-protocol/versions/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceVersionViewerPage /></PermissionRoute>} />
         <Route path="compare" element={<PermissionRoute requiredPage="compare"><ComparePage /></PermissionRoute>} />
         <Route path="compare/:taskId" element={<PermissionRoute requiredPage="compare/:taskId"><ComparePage /></PermissionRoute>} />
-        <Route path="event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="event-analysis/task/:analysisTaskId"><StandaloneEventTaskPage /></PermissionRoute>} />
-        <Route path="event-analysis" element={<PermissionRoute requiredPage="event-analysis"><StandaloneEventPage /></PermissionRoute>} />
+        {/* 飞管事件分析（Phase 1 renamed，旧 /event-analysis 路径保留一段兼容期） */}
+        <Route path="fms-event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fms-event-analysis/task/:analysisTaskId"><StandaloneFmsEventTaskPage /></PermissionRoute>} />
+        <Route path="fms-event-analysis" element={<PermissionRoute requiredPage="fms-event-analysis"><StandaloneFmsEventPage /></PermissionRoute>} />
+        <Route path="event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fms-event-analysis/task/:analysisTaskId"><StandaloneFmsEventTaskPage /></PermissionRoute>} />
+        <Route path="event-analysis" element={<PermissionRoute requiredPage="fms-event-analysis"><StandaloneFmsEventPage /></PermissionRoute>} />
         <Route path="fcc-event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fcc-event-analysis/task/:analysisTaskId"><FccEventAnalysisTaskPage /></PermissionRoute>} />
         <Route path="fcc-event-analysis" element={<PermissionRoute requiredPage="fcc-event-analysis"><FccEventAnalysisPage /></PermissionRoute>} />
         <Route path="auto-flight-analysis/task/:taskId" element={<PermissionRoute requiredPage="auto-flight-analysis/task/:taskId"><AutoFlightAnalysisTaskPage /></PermissionRoute>} />

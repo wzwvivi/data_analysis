@@ -17,7 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..approval_policy import DEFAULT_APPROVAL_CHAIN, role_can_sign_off
+from ..approval_policy import (
+    DEFAULT_APPROVAL_CHAIN,
+    normalize_notify_teams,
+    role_can_sign_off,
+)
 from ..models import (
     APPROVAL_APPROVE,
     APPROVAL_PENDING,
@@ -105,6 +109,7 @@ async def submit_draft(
     submitter_username: str,
     submitter_role: str,
     note: Optional[str] = None,
+    notify_teams: Optional[List[str]] = None,
 ) -> ProtocolChangeRequest:
     draft = await _get_draft(db, draft_id)
     if draft.status != DRAFT_STATUS_DRAFT:
@@ -131,6 +136,7 @@ async def submit_draft(
     diff = await ProtocolDraftService(db).compute_diff(draft_id)
 
     # 创建 CR（显式标记为 TSN 网络配置，供通用审批引擎区分）
+    normalized_teams = normalize_notify_teams(notify_teams)
     cr = ProtocolChangeRequest(
         draft_id=draft.id,
         draft_kind="tsn_network",
@@ -139,6 +145,7 @@ async def submit_draft(
         current_step=1,  # step0 = 提交者本身
         overall_status=CR_STATUS_PENDING,
         diff_summary=diff,
+        notify_teams=normalized_teams or None,
     )
     db.add(cr)
     await db.flush()
@@ -167,14 +174,20 @@ async def submit_draft(
     draft.submit_note = note
     draft.updated_at = datetime.utcnow()
 
-    # 推送下一位审批人
+    # 推送下一位审批人（新链下直接是 admin）
     next_role = DEFAULT_APPROVAL_CHAIN[cr.current_step]
+    body_lines = [
+        f"草稿 #{draft.id} / 目标版本 {draft.target_version}",
+        f"提交人 {submitter_username}",
+    ]
+    if normalized_teams:
+        body_lines.append("知会团队：" + ", ".join(normalized_teams))
     await notify_users_by_role(
         db,
         role=next_role,
         kind=NOTIFICATION_KIND_CR_PENDING,
-        title=f"有新的 TSN 协议变更待您会签：{draft.name}",
-        body=f"草稿 #{draft.id} / 目标版本 {draft.target_version}，提交人 {submitter_username}",
+        title=f"有新的 TSN 协议变更待您审核：{draft.name}",
+        body=" / ".join(body_lines),
         link=_cr_link(cr.id),
     )
 
@@ -284,6 +297,8 @@ async def publish_cr(
         source_file=f"draft#{draft.id}",
         description=(draft.description or "") + f"\n[由 CR#{cr.id} 发布]",
         availability_status=AVAILABILITY_PENDING_CODE,
+        # 激活时才真正发出"TSN 协议已变更"的通知；这里把提交者的选择原样透传
+        notify_teams=list(cr.notify_teams or []),
     )
     db.add(pv)
     await db.flush()
@@ -318,8 +333,8 @@ async def publish_cr(
     draft.published_version_id = pv.id
     draft.updated_at = datetime.utcnow()
 
-    # 通知提交者 + admin + TSN 开发团队（代码就绪由他们闭环）
-    from ..permissions import ROLE_DEV_TSN
+    # 通知提交者 + TSN/网络团队（代码就绪由他们闭环）
+    from ..permissions import ROLE_NETWORK_TEAM
     await notify_usernames(
         db,
         usernames=[cr.submitted_by] if cr.submitted_by else [],
@@ -330,7 +345,7 @@ async def publish_cr(
     )
     await notify_users_by_role(
         db,
-        role=ROLE_DEV_TSN,
+        role=ROLE_NETWORK_TEAM,
         kind=NOTIFICATION_KIND_CR_PUBLISHED,
         title=f"TSN 协议新版本登记为 PendingCode：{draft.name}",
         body=f"请确认后端解析是否需要同步；版本号 v{draft.target_version}",
@@ -339,6 +354,18 @@ async def publish_cr(
 
     await db.commit()
     await db.refresh(pv)
+
+    # ── MR3 激活闸门：发布即自动生成 port_registry + 体检报告 ──
+    # 失败不回滚发布，仅记录日志；管理员可在 UI 点"刷新体检"重试
+    try:
+        from . import protocol_activation_service as activation_service
+        await activation_service.refresh_activation_pipeline(db, pv.id)
+    except Exception as exc:  # pragma: no cover - 失败只记 warning
+        import logging
+        logging.getLogger(__name__).warning(
+            "publish_cr: 激活流水线生成失败 (version_id=%s): %s", pv.id, exc,
+        )
+
     return pv
 
 
@@ -398,6 +425,7 @@ def serialize_cr(cr: ProtocolChangeRequest) -> Dict[str, Any]:
             for a in sorted(cr.approvals, key=lambda x: x.step_index)
         ],
         "diff_summary": cr.diff_summary,
+        "notify_teams": list(cr.notify_teams or []),
         "draft": {
             "id": cr.draft.id,
             "name": cr.draft.name,

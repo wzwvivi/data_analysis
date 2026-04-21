@@ -242,6 +242,7 @@ async def init_db():
                 print("[DB] 已统一 S模式应答机 显示名称（parser_profiles、parse_results、device_parser_map）")
 
             # event_analysis_tasks：独立事件分析（parse_task_id 可空 + pcap 路径）
+            # Phase 1b 之前的旧表维护逻辑：仅在旧表还存在时做原地补列
             if 'event_analysis_tasks' in inspector.get_table_names():
                 ea_cols = list(sync_conn.execute(text("PRAGMA table_info(event_analysis_tasks)")).fetchall())
                 ea_col_names = {row[1] for row in ea_cols}
@@ -300,6 +301,49 @@ async def init_db():
                         )
                         print("[DB] 已添加 event_analysis_tasks.progress")
 
+            # event_analysis_tasks / compare_tasks：MR4 Bundle 版本锁定列
+            if 'event_analysis_tasks' in inspector.get_table_names():
+                ea_cols2 = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(event_analysis_tasks)")).fetchall()}
+                if 'bundle_version_id' not in ea_cols2:
+                    sync_conn.execute(text(
+                        "ALTER TABLE event_analysis_tasks ADD COLUMN bundle_version_id INTEGER "
+                        "REFERENCES protocol_versions(id)"
+                    ))
+                    print("[DB] 已添加 event_analysis_tasks.bundle_version_id")
+
+            # ── Phase 1b 拆表：event_analysis_tasks → fms_* + fcc_* ──
+            # 触发条件：旧表还存在 + 没被标记为 legacy；新表由 Base.metadata.create_all 建出
+            tables_now = set(inspector.get_table_names())
+            if (
+                'event_analysis_tasks' in tables_now
+                and 'event_analysis_tasks__legacy' not in tables_now
+            ):
+                try:
+                    _split_event_analysis_tables(sync_conn)
+                except Exception as exc:
+                    print(f"[DB] Phase 1b 拆表失败，已回滚： {exc}")
+                    raise
+
+            if 'compare_tasks' in inspector.get_table_names():
+                ct_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(compare_tasks)")).fetchall()}
+                if 'bundle_version_id' not in ct_cols:
+                    sync_conn.execute(text(
+                        "ALTER TABLE compare_tasks ADD COLUMN bundle_version_id INTEGER "
+                        "REFERENCES protocol_versions(id)"
+                    ))
+                    print("[DB] 已添加 compare_tasks.bundle_version_id")
+
+            # 飞控事件分析与 TSN 事件分析共用 event_analysis_tasks 表，已有列；
+            # 自动飞行性能分析使用独立表 auto_flight_analysis_tasks，需要补列
+            if 'auto_flight_analysis_tasks' in inspector.get_table_names():
+                af_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(auto_flight_analysis_tasks)")).fetchall()}
+                if 'bundle_version_id' not in af_cols:
+                    sync_conn.execute(text(
+                        "ALTER TABLE auto_flight_analysis_tasks ADD COLUMN bundle_version_id INTEGER "
+                        "REFERENCES protocol_versions(id)"
+                    ))
+                    print("[DB] 已添加 auto_flight_analysis_tasks.bundle_version_id")
+
             # protocol_versions 表迁移：版本生命周期状态
             if 'protocol_versions' in inspector.get_table_names():
                 pv_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(protocol_versions)")).fetchall()}
@@ -308,6 +352,11 @@ async def init_db():
                     'activated_at': 'DATETIME',
                     'activated_by': 'VARCHAR(64)',
                     'forced_activation': 'BOOLEAN NOT NULL DEFAULT 0',
+                    # MR3 激活闸门扩展列
+                    'activation_report_json': 'TEXT',
+                    'activation_report_generated_at': 'DATETIME',
+                    'generated_artifacts_json': 'TEXT',
+                    'activation_force_reason': 'TEXT',
                 }
                 for col_name, col_type in pv_add.items():
                     if col_name not in pv_cols:
@@ -352,6 +401,14 @@ async def init_db():
                             text(f"ALTER TABLE port_definitions ADD COLUMN {col_name} {col_type}")
                         )
                         print(f"[DB] 已添加 port_definitions.{col_name} 列（ICD 扩展）")
+
+                # port_role：端口角色（Phase 2 新增，ICD 维度）
+                if 'port_role' not in pd_cols:
+                    sync_conn.execute(text(
+                        "ALTER TABLE port_definitions ADD COLUMN port_role VARCHAR(50)"
+                    ))
+                    print("[DB] 已添加 port_definitions.port_role 列")
+
                 # 延迟导入以避免循环依赖
                 try:
                     from .services.protocol_service import PORT_FAMILY_MAP  # type: ignore
@@ -370,6 +427,57 @@ async def init_db():
                         backfill += res.rowcount or 0
                     if backfill:
                         print(f"[DB] 已按 PORT_FAMILY_MAP 回填 port_definitions.protocol_family ({backfill} 行)")
+
+                # port_role 回填：按 message_name 关键字推断一次（仅对空值）
+                role_rules = [
+                    ("fcc_event",   "%FCC%"),
+                    ("fcc_event",   "%飞控%"),
+                    ("auto_flight", "%AFCS%"),
+                    ("auto_flight", "%自动飞行%"),
+                    ("auto_flight", "%自主飞行%"),
+                    ("fms_event",   "%FMS%"),
+                    ("fms_event",   "%飞管%"),
+                    ("tsn_anomaly", "%"),
+                ]
+                total_role_backfill = 0
+                for role, pattern in role_rules:
+                    if pattern == "%":
+                        # 兜底：剩余尚未分类的端口默认归 tsn_anomaly
+                        res = sync_conn.execute(text(
+                            "UPDATE port_definitions SET port_role=:r "
+                            "WHERE port_role IS NULL OR port_role=''"
+                        ), {"r": role})
+                    else:
+                        res = sync_conn.execute(text(
+                            "UPDATE port_definitions SET port_role=:r "
+                            "WHERE (port_role IS NULL OR port_role='') AND "
+                            "      (message_name LIKE :p OR description LIKE :p)"
+                        ), {"r": role, "p": pattern})
+                    total_role_backfill += res.rowcount or 0
+                if total_role_backfill:
+                    print(f"[DB] 已按 message_name/description 回填 port_definitions.port_role ({total_role_backfill} 行)")
+
+                # Phase C：在 fcc_event 聚合角色之上，按默认端口号号段进一步细分：
+                #   9001-9009 → fcc_status, 9011-9019 → fcc_channel, 9021-9029 → fcc_fault
+                # IRS 端口（1001-1003）→ irs_input（供自动飞行分析 bundle 驱动）
+                # 只覆盖当前被回填为 fcc_event / tsn_anomaly / 空值 的行，手工设定过的细粒度 role 保持不变。
+                fine_rules = [
+                    ("fcc_status",  "port_number BETWEEN 9001 AND 9009"),
+                    ("fcc_channel", "port_number BETWEEN 9011 AND 9019"),
+                    ("fcc_fault",   "port_number BETWEEN 9021 AND 9029"),
+                    ("irs_input",   "port_number BETWEEN 1001 AND 1003"),
+                ]
+                fine_total = 0
+                for role, condition in fine_rules:
+                    res = sync_conn.execute(text(
+                        "UPDATE port_definitions SET port_role=:r "
+                        f"WHERE {condition} AND "
+                        "      (port_role IS NULL OR port_role='' "
+                        "       OR port_role IN ('fcc_event','tsn_anomaly','other'))"
+                    ), {"r": role})
+                    fine_total += res.rowcount or 0
+                if fine_total:
+                    print(f"[DB] 已按默认端口号细分 FCC/IRS port_role ({fine_total} 行)")
 
             # protocol_version_drafts：索引 + 半开唯一约束（每个 base_version 同时最多一个 pending CR）
             if 'protocol_version_drafts' in inspector.get_table_names():
@@ -421,6 +529,12 @@ async def init_db():
                             text(f"ALTER TABLE draft_port_definitions ADD COLUMN {col_name} {col_type}")
                         )
                         print(f"[DB] 已添加 draft_port_definitions.{col_name} 列（ICD 扩展）")
+
+                if 'port_role' not in dp_cols:
+                    sync_conn.execute(text(
+                        "ALTER TABLE draft_port_definitions ADD COLUMN port_role VARCHAR(50)"
+                    ))
+                    print("[DB] 已添加 draft_port_definitions.port_role 列")
             if 'draft_field_definitions' in inspector.get_table_names():
                 sync_conn.execute(text("DROP INDEX IF EXISTS uq_draft_field"))
                 sync_conn.execute(
@@ -437,12 +551,13 @@ async def init_db():
                     )
                 )
                 # 设备协议集成：补齐 draft_kind / device_draft_id 列 + 回填
-                cr_cols = {
-                    row[1]
+                cr_cols_info = {
+                    row[1]: row
                     for row in sync_conn.execute(
                         text("PRAGMA table_info(protocol_change_requests)")
                     ).fetchall()
                 }
+                cr_cols = set(cr_cols_info.keys())
                 if 'draft_kind' not in cr_cols:
                     sync_conn.execute(
                         text(
@@ -459,6 +574,75 @@ async def init_db():
                         )
                     )
                     print("[DB] 已添加 protocol_change_requests.device_draft_id 列")
+                # draft_id 早期是 NOT NULL（仅 TSN 场景）；现在设备协议场景为 NULL，
+                # 需要重建表放宽 NOT NULL 约束。SQLite 不支持 ALTER COLUMN DROP NOT NULL。
+                draft_id_col = cr_cols_info.get('draft_id')
+                if draft_id_col is not None and draft_id_col[3] == 1:
+                    print("[DB] 重建 protocol_change_requests 以允许 draft_id 为 NULL ...")
+                    # 重新读一次所有列，兼容刚 ADD COLUMN 的新字段
+                    fresh_cols = [
+                        row[1]
+                        for row in sync_conn.execute(
+                            text("PRAGMA table_info(protocol_change_requests)")
+                        ).fetchall()
+                    ]
+                    sync_conn.execute(text("DROP TABLE IF EXISTS protocol_change_requests_new"))
+                    # 注：不恢复 submit_note 字段（模型在 draft 上），submit_note / published_* 等字段
+                    # 历史上就不存在于该表，保持原语义。
+                    sync_conn.execute(
+                        text(
+                            """
+                            CREATE TABLE protocol_change_requests_new (
+                                id INTEGER PRIMARY KEY,
+                                draft_id INTEGER REFERENCES protocol_version_drafts(id),
+                                device_draft_id INTEGER REFERENCES device_protocol_drafts(id),
+                                draft_kind VARCHAR(40) NOT NULL DEFAULT 'tsn_network',
+                                submitted_by VARCHAR(64),
+                                submitted_at DATETIME,
+                                current_step INTEGER NOT NULL DEFAULT 0,
+                                overall_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                                diff_summary JSON,
+                                final_note TEXT
+                            )
+                            """
+                        )
+                    )
+                    # 动态拼列名（只迁移同时存在于新旧表的字段）
+                    new_table_cols = [
+                        'id', 'draft_id', 'device_draft_id', 'draft_kind',
+                        'submitted_by', 'submitted_at', 'current_step',
+                        'overall_status', 'diff_summary', 'final_note',
+                    ]
+                    shared = [c for c in new_table_cols if c in fresh_cols]
+                    col_list = ', '.join(shared)
+                    sync_conn.execute(
+                        text(
+                            f"""
+                            INSERT INTO protocol_change_requests_new ({col_list})
+                            SELECT {col_list} FROM protocol_change_requests
+                            """
+                        )
+                    )
+                    sync_conn.execute(text("DROP TABLE protocol_change_requests"))
+                    sync_conn.execute(
+                        text(
+                            "ALTER TABLE protocol_change_requests_new "
+                            "RENAME TO protocol_change_requests"
+                        )
+                    )
+                    # 重建索引
+                    sync_conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_cr_draft_id "
+                            "ON protocol_change_requests(draft_id)"
+                        )
+                    )
+                    sync_conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_cr_overall_status "
+                            "ON protocol_change_requests(overall_status)"
+                        )
+                    )
                 # 存量数据：未标 kind 的默认 tsn_network（TSN 网络配置）
                 sync_conn.execute(
                     text(
@@ -498,6 +682,34 @@ async def init_db():
                     text(
                         "CREATE INDEX IF NOT EXISTS ix_dev_ver_git_status "
                         "ON device_protocol_versions(git_export_status)"
+                    )
+                )
+                # 幂等补列：版本生命周期（forced_activation / activation_report_json / deprecated_*)
+                ver_cols = {
+                    row[1]
+                    for row in sync_conn.execute(
+                        text("PRAGMA table_info(device_protocol_versions)")
+                    ).fetchall()
+                }
+                _lifecycle_cols = [
+                    ("forced_activation", "BOOLEAN NOT NULL DEFAULT 0"),
+                    ("activation_report_json", "JSON"),
+                    ("deprecated_at", "DATETIME"),
+                    ("deprecated_by", "VARCHAR(64)"),
+                    ("deprecation_reason", "TEXT"),
+                ]
+                for col_name, col_ddl in _lifecycle_cols:
+                    if col_name not in ver_cols:
+                        print(f"[DB] ALTER device_protocol_versions ADD COLUMN {col_name}")
+                        sync_conn.execute(
+                            text(
+                                f"ALTER TABLE device_protocol_versions ADD COLUMN {col_name} {col_ddl}"
+                            )
+                        )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_dev_ver_availability "
+                        "ON device_protocol_versions(availability_status)"
                     )
                 )
             if 'device_protocol_drafts' in inspector.get_table_names():
@@ -666,4 +878,274 @@ async def init_db():
                     )
                     print("[DB] 已添加 shared_tsn_files.video_processing_error")
 
+            # ── 角色合并迁移：dev_tsn 并入 network_team（TSN/网络团队） ──
+            # 背景：原 dev_tsn（TSN 开发团队）与 network_team（网络团队）合为同一团队，
+            # 审批链从 4 步压缩为 3 步（去掉独立的 dev_tsn 会签节点）。
+            if 'users' in inspector.get_table_names():
+                migrated_users = sync_conn.execute(
+                    text("UPDATE users SET role='network_team' WHERE role='dev_tsn'")
+                ).rowcount or 0
+                if migrated_users > 0:
+                    print(f"[DB] 角色迁移：{migrated_users} 个 dev_tsn 账号 → network_team")
+
+            if 'change_request_approvals' in inspector.get_table_names():
+                # 先把审批历史记录里的角色名规整为 network_team（保留审计）
+                migrated_appr = sync_conn.execute(
+                    text(
+                        "UPDATE change_request_approvals SET role='network_team' "
+                        "WHERE role='dev_tsn'"
+                    )
+                ).rowcount or 0
+                if migrated_appr > 0:
+                    print(f"[DB] 审批记录角色重命名：{migrated_appr} 行 dev_tsn → network_team")
+
+                # 压缩进行中审批链：仅针对原 4 步（max step_index=3）的 pending CR，
+                # 删除原 step_index=2（dev_tsn 会签位），把 step_index=3（admin）提前到 2。
+                old_chain_rows = sync_conn.execute(
+                    text(
+                        "SELECT cr_id FROM change_request_approvals "
+                        "WHERE cr_id IN ("
+                        "  SELECT id FROM protocol_change_requests WHERE overall_status='pending'"
+                        ") "
+                        "GROUP BY cr_id HAVING MAX(step_index) = 3"
+                    )
+                ).fetchall()
+                old_ids = [row[0] for row in old_chain_rows]
+                if old_ids:
+                    ids_csv = ",".join(str(int(i)) for i in old_ids)
+                    sync_conn.execute(
+                        text(
+                            f"DELETE FROM change_request_approvals "
+                            f"WHERE cr_id IN ({ids_csv}) AND step_index = 2"
+                        )
+                    )
+                    sync_conn.execute(
+                        text(
+                            f"UPDATE change_request_approvals SET step_index = 2 "
+                            f"WHERE cr_id IN ({ids_csv}) AND step_index = 3"
+                        )
+                    )
+                    # 若 current_step 指向已移除的 dev_tsn（=2）或原 admin（=3），
+                    # 都收敛到新链的 admin 步 (=2)；否则不变
+                    sync_conn.execute(
+                        text(
+                            f"UPDATE protocol_change_requests SET current_step = 2 "
+                            f"WHERE id IN ({ids_csv}) AND current_step >= 2"
+                        )
+                    )
+                    print(
+                        f"[DB] 审批链压缩：{len(old_ids)} 条进行中 CR 已压缩为 3 步链"
+                    )
+
+            # ── 审批链再压缩：TSN 3 步（network_team → device_team → admin）→ 2 步（network_team → admin） ──
+            # 背景：设备团队会签位下线，TSN 网络配置审批仅保留 TSN 团队自审 + 管理员终审。
+            #      只影响 TSN 网络配置类 (draft_kind='tsn_network') 且仍在 pending 的 CR；
+            #      历史已完结（approved/rejected/published）的记录不动，保留审计原貌。
+            if 'change_request_approvals' in inspector.get_table_names():
+                two_step_targets = sync_conn.execute(
+                    text(
+                        "SELECT DISTINCT cr_id FROM change_request_approvals "
+                        "WHERE cr_id IN ("
+                        "  SELECT id FROM protocol_change_requests "
+                        "  WHERE overall_status='pending' "
+                        "    AND (draft_kind IS NULL OR draft_kind='tsn_network')"
+                        ") "
+                        "GROUP BY cr_id HAVING MAX(step_index)=2"
+                    )
+                ).fetchall()
+                tsn_ids = [row[0] for row in two_step_targets]
+                if tsn_ids:
+                    ids_csv = ",".join(str(int(i)) for i in tsn_ids)
+                    sync_conn.execute(text(
+                        f"DELETE FROM change_request_approvals "
+                        f"WHERE cr_id IN ({ids_csv}) AND step_index=1 AND role='device_team'"
+                    ))
+                    sync_conn.execute(text(
+                        f"UPDATE change_request_approvals SET step_index=1 "
+                        f"WHERE cr_id IN ({ids_csv}) AND step_index=2"
+                    ))
+                    # current_step 收敛：原指向 device_team(1) 或 admin(2) 统统改为新 admin(1)
+                    sync_conn.execute(text(
+                        f"UPDATE protocol_change_requests SET current_step=1 "
+                        f"WHERE id IN ({ids_csv}) AND current_step>=1"
+                    ))
+                    print(f"[DB] TSN 审批链再压缩：{len(tsn_ids)} 条 pending CR 从 3 步合并为 2 步")
+
+            # ── notify_teams 列：CR + ProtocolVersion 双表都加（提交时存 CR、发布时拷贝到 version） ──
+            if 'protocol_change_requests' in inspector.get_table_names():
+                cr_cols = {row[1] for row in sync_conn.execute(
+                    text("PRAGMA table_info(protocol_change_requests)")
+                ).fetchall()}
+                if 'notify_teams' not in cr_cols:
+                    sync_conn.execute(text(
+                        "ALTER TABLE protocol_change_requests ADD COLUMN notify_teams JSON"
+                    ))
+                    print("[DB] 已添加 protocol_change_requests.notify_teams")
+
+            if 'protocol_versions' in inspector.get_table_names():
+                pv_cols = {row[1] for row in sync_conn.execute(
+                    text("PRAGMA table_info(protocol_versions)")
+                ).fetchall()}
+                if 'notify_teams' not in pv_cols:
+                    sync_conn.execute(text(
+                        "ALTER TABLE protocol_versions ADD COLUMN notify_teams JSON"
+                    ))
+                    print("[DB] 已添加 protocol_versions.notify_teams")
+
         await conn.run_sync(_check_and_add_columns)
+
+    await _ensure_bundles_for_available_versions()
+
+
+def _split_event_analysis_tables(sync_conn) -> None:
+    """Phase 1b：把 event_analysis_tasks 拆成 fms_event_analysis_tasks + fcc_event_analysis_tasks。
+
+    策略（只执行一次，以 event_analysis_tasks__legacy 作为哨兵）：
+      1. 按 rule_template 把旧任务行分别复制到 fms_event_analysis_tasks / fcc_event_analysis_tasks；
+      2. 同步复制明细表 event_check_results / event_timeline_events；
+      3. 把旧的 3 张表重命名为 *__legacy 保留，方便回滚；
+      4. 整体放在同一个 transaction（外层 engine.begin）里执行，失败自动回滚。
+
+    注意：新表结构由 SQLAlchemy ``Base.metadata.create_all`` 保证已经存在。
+    """
+    from sqlalchemy import text
+
+    # 旧表明细行 id 可能和新表冲突（独立 fms/fcc 自增），因此这里按原 id 保留，
+    # 新表是空的（刚 create_all 出来，没人用过），不会冲突。
+    # 确保新表确实存在并且是空的（双保险）
+    fms_task_count = sync_conn.execute(text("SELECT COUNT(*) FROM fms_event_analysis_tasks")).scalar()
+    fcc_task_count = sync_conn.execute(text("SELECT COUNT(*) FROM fcc_event_analysis_tasks")).scalar()
+    if fms_task_count or fcc_task_count:
+        print(
+            f"[DB] Phase 1b 跳过：fms/fcc 新表非空（fms={fms_task_count}, fcc={fcc_task_count}），"
+            "视为已迁移，仅将旧表标记为 __legacy"
+        )
+    else:
+        # 1) 分流任务行（默认模板按飞管处理，rule_template 仅 fcc_v1 时归 FCC）
+        print("[DB] Phase 1b 开始拆表 event_analysis_tasks → fms/fcc ...")
+        sync_conn.execute(text(
+            """
+            INSERT INTO fms_event_analysis_tasks (
+                id, parse_task_id, bundle_version_id, pcap_filename, pcap_file_path,
+                name, rule_template, status, progress, error_message,
+                total_checks, passed_checks, failed_checks, created_at, completed_at
+            )
+            SELECT
+                id, parse_task_id, bundle_version_id, pcap_filename, pcap_file_path,
+                name, rule_template, status,
+                COALESCE(progress, 0), error_message,
+                COALESCE(total_checks, 0), COALESCE(passed_checks, 0), COALESCE(failed_checks, 0),
+                created_at, completed_at
+            FROM event_analysis_tasks
+            WHERE COALESCE(rule_template, '') != 'fcc_v1'
+            """
+        ))
+        sync_conn.execute(text(
+            """
+            INSERT INTO fcc_event_analysis_tasks (
+                id, parse_task_id, bundle_version_id, pcap_filename, pcap_file_path,
+                name, rule_template, status, progress, error_message,
+                total_checks, passed_checks, failed_checks, created_at, completed_at
+            )
+            SELECT
+                id, parse_task_id, bundle_version_id, pcap_filename, pcap_file_path,
+                name, rule_template, status,
+                COALESCE(progress, 0), error_message,
+                COALESCE(total_checks, 0), COALESCE(passed_checks, 0), COALESCE(failed_checks, 0),
+                created_at, completed_at
+            FROM event_analysis_tasks
+            WHERE COALESCE(rule_template, '') = 'fcc_v1'
+            """
+        ))
+
+        # 2) 分流明细：event_check_results / event_timeline_events
+        #    注意：原表列 `analysis_task_id` 指向 event_analysis_tasks.id，我们拆分后
+        #    仍然用同一个 id 空间，所以直接按 task 归属分流即可。
+        sync_conn.execute(text(
+            """
+            INSERT INTO fms_event_check_results
+            SELECT r.* FROM event_check_results r
+            JOIN event_analysis_tasks t ON t.id = r.analysis_task_id
+            WHERE COALESCE(t.rule_template, '') != 'fcc_v1'
+            """
+        ))
+        sync_conn.execute(text(
+            """
+            INSERT INTO fcc_event_check_results
+            SELECT r.* FROM event_check_results r
+            JOIN event_analysis_tasks t ON t.id = r.analysis_task_id
+            WHERE COALESCE(t.rule_template, '') = 'fcc_v1'
+            """
+        ))
+        sync_conn.execute(text(
+            """
+            INSERT INTO fms_event_timeline_events
+            SELECT e.* FROM event_timeline_events e
+            JOIN event_analysis_tasks t ON t.id = e.analysis_task_id
+            WHERE COALESCE(t.rule_template, '') != 'fcc_v1'
+            """
+        ))
+        sync_conn.execute(text(
+            """
+            INSERT INTO fcc_event_timeline_events
+            SELECT e.* FROM event_timeline_events e
+            JOIN event_analysis_tasks t ON t.id = e.analysis_task_id
+            WHERE COALESCE(t.rule_template, '') = 'fcc_v1'
+            """
+        ))
+
+        fms_after = sync_conn.execute(text("SELECT COUNT(*) FROM fms_event_analysis_tasks")).scalar()
+        fcc_after = sync_conn.execute(text("SELECT COUNT(*) FROM fcc_event_analysis_tasks")).scalar()
+        print(f"[DB] Phase 1b 迁移完成：fms={fms_after} 条，fcc={fcc_after} 条")
+
+    # 3) 旧表重命名为 __legacy（保留回滚手段）
+    sync_conn.execute(text("ALTER TABLE event_analysis_tasks RENAME TO event_analysis_tasks__legacy"))
+    # 旧的明细表也一起归档
+    legacy_tables = {"event_check_results", "event_timeline_events"}
+    for tbl in legacy_tables:
+        # 如果同名表存在则改名
+        exists = sync_conn.execute(
+            text(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=:n"
+            ),
+            {"n": tbl},
+        ).scalar()
+        if exists:
+            sync_conn.execute(text(f"ALTER TABLE {tbl} RENAME TO {tbl}__legacy"))
+    print("[DB] Phase 1b 旧表已改名为 *__legacy，保留备份")
+
+
+async def _ensure_bundles_for_available_versions() -> None:
+    """启动时对所有 Available 版本确保存在 bundle.json，缺失的自动补生成。
+
+    幂等：已有的 bundle.json 不会被覆盖。对 PendingCode / Deprecated 版本不做处理。
+    """
+    try:
+        from sqlalchemy import select as _select
+        from .models import ProtocolVersion, AVAILABILITY_AVAILABLE  # lazy import
+        from .services.bundle import generator as _bundle_gen
+        from .services.bundle.generator import bundle_exists
+    except Exception as exc:
+        print(f"[Bundle] 启动检查跳过（导入失败）: {exc}")
+        return
+
+    try:
+        async with async_session() as db:
+            res = await db.execute(
+                _select(ProtocolVersion).where(
+                    ProtocolVersion.availability_status == AVAILABILITY_AVAILABLE
+                )
+            )
+            versions = list(res.scalars().all())
+            missing: list[int] = [v.id for v in versions if not bundle_exists(v.id)]
+            if not missing:
+                return
+            print(f"[Bundle] 启动一致性检查：为 {len(missing)} 个 Available 版本补生成 bundle.json -> {missing}")
+            for vid in missing:
+                try:
+                    await _bundle_gen.generate_bundle(db, vid)
+                    print(f"[Bundle]   v{vid}: 已生成")
+                except Exception as e:
+                    print(f"[Bundle]   v{vid}: 生成失败 {type(e).__name__}: {e}")
+    except Exception as exc:
+        print(f"[Bundle] 启动检查失败: {exc}")

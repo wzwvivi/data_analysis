@@ -7,7 +7,7 @@ import {
 import {
   UploadOutlined, ReloadOutlined, PlayCircleOutlined,
 } from '@ant-design/icons'
-import { autoFlightAnalysisApi, sharedTsnApi, parseApi } from '../services/api'
+import { autoFlightAnalysisApi, sharedTsnApi, parseApi, networkConfigApi } from '../services/api'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import dayjs from 'dayjs'
 
@@ -27,6 +27,38 @@ function AutoFlightAnalysisPage() {
   const [localFile, setLocalFile] = useState(null)
   const [parseTasks, setParseTasks] = useState([])
   const [parseTaskId, setParseTaskId] = useState(null)
+
+  // MR4：网络配置版本（bundle）选择
+  const [availableVersions, setAvailableVersions] = useState([])
+  const [bundleVersionId, setBundleVersionId] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await networkConfigApi.listVersions('Available')
+        if (cancelled) return
+        const items = (res.data?.items || res.data || []).filter(v =>
+          (v.availability_status || v.status) === 'Available'
+        )
+        setAvailableVersions(items)
+        if (items.length > 0) {
+          setBundleVersionId((prev) => prev ?? items[0].id)
+        }
+      } catch {
+        setAvailableVersions([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // 当选择"基于解析任务"且目标解析任务已绑定版本时，自动切到该版本（可被用户手动改回）
+  useEffect(() => {
+    if (!parseTaskId) return
+    const task = parseTasks.find((t) => t.id === parseTaskId)
+    const inherit = task?.protocol_version_id
+    if (inherit) setBundleVersionId(inherit)
+  }, [parseTaskId, parseTasks])
 
   const loadTaskList = useCallback(async () => {
     setListLoading(true)
@@ -68,8 +100,13 @@ function AutoFlightAnalysisPage() {
       message.warning('请先选择文件')
       return
     }
+    if (!bundleVersionId) {
+      message.warning('请选择网络配置版本')
+      return
+    }
     const formData = new FormData()
     formData.append('file', localFile)
+    formData.append('bundle_version_id', String(bundleVersionId))
     setUploading(true)
     setUploadProgress(0)
     try {
@@ -92,8 +129,13 @@ function AutoFlightAnalysisPage() {
       message.warning('请选择平台数据')
       return
     }
+    if (!bundleVersionId) {
+      message.warning('请选择网络配置版本')
+      return
+    }
     const formData = new FormData()
     formData.append('shared_tsn_id', String(platformId))
+    formData.append('bundle_version_id', String(bundleVersionId))
     setUploading(true)
     try {
       const res = await autoFlightAnalysisApi.fromShared(formData)
@@ -114,6 +156,11 @@ function AutoFlightAnalysisPage() {
     }
     const formData = new FormData()
     formData.append('parse_task_id', String(parseTaskId))
+    // bundle_version_id 省略时后端会默认继承 ParseTask.protocol_version_id；
+    // 这里若用户显式选择则传入，覆盖默认继承行为。
+    if (bundleVersionId) {
+      formData.append('bundle_version_id', String(bundleVersionId))
+    }
     setUploading(true)
     try {
       const res = await autoFlightAnalysisApi.fromParseTask(formData)
@@ -147,6 +194,16 @@ function AutoFlightAnalysisPage() {
         if (s === 'shared') return <Tag color="purple">平台共享</Tag>
         return <Tag>本地上传</Tag>
       },
+    },
+    {
+      title: 'TSN 版本',
+      key: 'bundle_version',
+      width: 110,
+      render: (_, record) => record.bundle_version_id ? (
+        <Tag color="purple" title={`bundle v#${record.bundle_version_id}`}>
+          {record.bundle_version_label || `v${record.bundle_version_id}`}
+        </Tag>
+      ) : <span style={{ color: '#71717a' }}>-</span>,
     },
     {
       title: '状态',
@@ -199,6 +256,26 @@ function AutoFlightAnalysisPage() {
               <Radio.Button value="parse">已有解析任务</Radio.Button>
             </Radio.Group>
           </div>
+
+          <Space wrap align="center">
+            <span style={{ color: '#a1a1aa' }}>网络配置版本</span>
+            <Select
+              value={bundleVersionId}
+              onChange={setBundleVersionId}
+              style={{ width: 260 }}
+              placeholder="选择用于本次分析的 TSN 协议版本"
+              notFoundContent="暂无可用版本"
+              options={availableVersions.map(v => ({
+                value: v.id,
+                label: `${v.version || `v${v.id}`}${v.protocol_name ? ` · ${v.protocol_name}` : ''}`,
+              }))}
+            />
+            {dataSource === 'parse' && parseTaskId && (
+              <span style={{ color: '#71717a', fontSize: 12 }}>
+                默认跟随所选解析任务版本
+              </span>
+            )}
+          </Space>
 
           {dataSource === 'platform' ? (
             <div>
@@ -286,7 +363,7 @@ function AutoFlightAnalysisPage() {
           dataSource={taskList}
           columns={historyColumns}
           pagination={false}
-          scroll={{ x: 980 }}
+          scroll={{ x: 1090 }}
         />
       </Card>
     </div>

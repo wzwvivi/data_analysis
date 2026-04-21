@@ -63,10 +63,24 @@ class BMS270VParser(BaseParser):
     supported_ports: List[int] = _ALL_PORTS
 
     def can_parse_port(self, port: int) -> bool:
+        bundle = getattr(self, "_runtime_bundle", None)
+        if bundle is not None:
+            frames = bundle.can_frames_for(port)
+            if frames:
+                return True
         return port in _PORT_MAP
 
     def get_output_columns(self, port: int) -> List[str]:
         return _PORT_COLUMNS.get(port, list(_BASE_COLUMNS))
+
+    def _get_can_frames(self, port: int) -> List[Tuple[int, int]]:
+        """MR4: 端口→[(can_id_int, byte_offset)]，bundle 优先、硬编码兜底。"""
+        bundle = getattr(self, "_runtime_bundle", None)
+        if bundle is not None:
+            frames = bundle.can_frames_for(port)
+            if frames:
+                return [(int(c), int(o)) for c, o in frames]
+        return _PORT_MAP.get(port) or []
 
     def parse_packet(
         self,
@@ -78,7 +92,7 @@ class BMS270VParser(BaseParser):
         if not payload:
             return None
 
-        frame_list = _PORT_MAP.get(port)
+        frame_list = self._get_can_frames(port)
         if not frame_list:
             return None
 

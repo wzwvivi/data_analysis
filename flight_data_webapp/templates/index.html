@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flight Data Analyzer</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/echarts.min.js"></script>
+</head>
+<body>
+    <header class="header">
+        <h1>Flight Data Analyzer</h1>
+        <div class="header-actions">
+            <button class="btn btn-primary" onclick="toggleUploadPanel()">Upload Data</button>
+            <button class="btn btn-sm btn-theme" id="btn-theme" onclick="toggleTheme()" title="Toggle Dark/Light Mode">Light</button>
+        </div>
+    </header>
+
+    <!-- Upload Modal -->
+    <div id="upload-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Upload CSV Folder</h2>
+                <button class="btn-close" onclick="toggleUploadPanel()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="upload-area" id="upload-area">
+                    <div class="upload-icon">&#128193;</div>
+                    <p>Select a folder containing CSV files</p>
+                    <input type="file" id="folder-input" webkitdirectory directory multiple
+                           accept=".csv" onchange="handleFolderSelect(event)">
+                    <label for="folder-input" class="btn btn-secondary">Choose Folder</label>
+                </div>
+                <div id="upload-info" class="hidden">
+                    <p id="upload-file-count"></p>
+                    <div class="form-group">
+                        <label for="batch-name">Batch Name (optional):</label>
+                        <input type="text" id="batch-name" placeholder="Auto-generated if empty">
+                    </div>
+                    <button class="btn btn-primary" onclick="startUpload()">Start Upload & Process</button>
+                </div>
+                <div id="upload-progress" class="hidden">
+                    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+                    <p id="progress-text">Uploading...</p>
+                    <p id="progress-detail" class="progress-detail"></p>
+                </div>
+                <div id="upload-result" class="hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <!-- Dataset Selector -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Datasets</h3>
+                    <button class="btn btn-sm btn-danger" id="btn-delete-batch"
+                            onclick="deleteBatch()" style="display:none;">Delete Batch</button>
+                </div>
+                <div class="form-group">
+                    <select id="batch-select" onchange="onBatchChange()">
+                        <option value="">-- Select Batch --</option>
+                    </select>
+                </div>
+                <div id="dataset-list" class="dataset-list"></div>
+            </div>
+
+            <!-- Column Selector -->
+            <div class="panel">
+                <h3>Columns</h3>
+                <input type="text" id="col-search" placeholder="Search columns..." oninput="filterColumns()">
+                <div class="col-actions">
+                    <button class="btn btn-sm" onclick="selectAllCols()">All</button>
+                    <button class="btn btn-sm" onclick="deselectAllCols()">None</button>
+                    <button class="btn btn-sm" onclick="selectNumericCols()">Numeric</button>
+                </div>
+                <div id="column-list" class="column-list"></div>
+            </div>
+
+            <!-- Time Range -->
+            <div class="panel">
+                <h3>Time Range</h3>
+                <div class="time-range">
+                    <div class="form-group">
+                        <label>From:</label>
+                        <input type="text" id="time-min" placeholder="HH:MM:SS.ms or seconds">
+                        <span id="time-min-label" class="time-label"></span>
+                    </div>
+                    <div class="form-group">
+                        <label>To:</label>
+                        <input type="text" id="time-max" placeholder="HH:MM:SS.ms or seconds">
+                        <span id="time-max-label" class="time-label"></span>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="resetTimeRange()">Reset</button>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="panel">
+                <button class="btn btn-primary btn-block" onclick="applyFilters()">Apply Filters</button>
+            </div>
+        </aside>
+        <button class="sidebar-toggle" id="btn-sidebar" onclick="toggleSidebar()" title="Toggle Sidebar">&#9776;</button>
+
+        <!-- Content Area -->
+        <main class="content">
+            <!-- Flight Analysis Panel -->
+            <div id="analysis-panel" class="analysis-panel hidden"></div>
+
+            <!-- Data Table -->
+            <div class="table-container" id="table-container">
+                <div class="table-header">
+                    <h3>Data Table <span id="current-ds-name"></span></h3>
+                    <div class="table-controls">
+                        <span id="table-info"></span>
+                        <button class="btn btn-sm" id="btn-prev" onclick="prevPage()" disabled>&lt; Prev</button>
+                        <span id="page-info"></span>
+                        <button class="btn btn-sm" id="btn-next" onclick="nextPage()" disabled>Next &gt;</button>
+                        <button class="btn btn-sm" id="btn-export" onclick="exportData()" title="Export CSV" disabled>Export CSV</button>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table id="data-table">
+                        <thead id="table-head"></thead>
+                        <tbody id="table-body"></tbody>
+                    </table>
+                </div>
+                <div id="table-placeholder" class="placeholder">
+                    <p>Select a dataset from the sidebar to view data</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

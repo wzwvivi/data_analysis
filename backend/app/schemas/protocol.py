@@ -32,6 +32,8 @@ class PortDefinitionResponse(BaseModel):
     data_direction: Optional[str] = None
     period_ms: Optional[float] = None
     description: Optional[str] = None
+    protocol_family: Optional[str] = None
+    port_role: Optional[str] = None
     # ── ICD 6.0.x 扩展字段 ──
     message_id: Optional[str] = None
     source_interface_id: Optional[str] = None

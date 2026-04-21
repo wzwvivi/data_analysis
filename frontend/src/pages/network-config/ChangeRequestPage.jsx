@@ -31,9 +31,10 @@ import { useAuth } from '../../context/AuthContext'
 const { Text, Paragraph, Title } = Typography
 
 const ROLE_LABEL = {
-  network_team: '网络团队',
+  network_team: 'TSN/网络团队',
   device_team: '设备团队',
-  dev_tsn: 'TSN 开发团队',
+  // 历史审批记录兼容：旧 dev_tsn 节点统一显示为 TSN/网络团队
+  dev_tsn: 'TSN/网络团队',
   admin: '管理员',
 }
 

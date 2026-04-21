@@ -23,6 +23,8 @@ from ..models import ParseTask, ParseResult, ParserProfile
 from .protocol_service import ProtocolService
 from .parsers import ParserRegistry, BaseParser, FieldLayout
 from .fcc_context_service import build_fcc_irs_context
+from .bundle import BundleNotFoundError, load_bundle
+from .bundle import generator as bundle_generator
 
 # ATG 端口：仅与 IRS 核对，不做 RTK 时间核对（ICD：8050/8052 对应 IRS 流）
 ATG_IRS_ONLY_PORTS = frozenset({8050, 8052})
@@ -650,6 +652,25 @@ class ParserService:
         await self.update_task_status(task_id, "processing", progress=0, stage="reading")
         
         try:
+            # MR4: 加载 Bundle（严格锁 ParseTask.protocol_version_id，缺失尝试即时生成）
+            runtime_bundle = None
+            if task.protocol_version_id:
+                try:
+                    runtime_bundle = load_bundle(task.protocol_version_id)
+                    print(
+                        f"[Parser] 已加载 Bundle v{task.protocol_version_id}"
+                        f" (schema={runtime_bundle.schema_version}, "
+                        f"ports={len(runtime_bundle.ports)})"
+                    )
+                except BundleNotFoundError:
+                    try:
+                        await bundle_generator.generate_bundle(self.db, task.protocol_version_id)
+                        runtime_bundle = load_bundle(task.protocol_version_id)
+                        print(f"[Parser] Bundle v{task.protocol_version_id} 已按需补生成")
+                    except Exception as exc:
+                        print(f"[Parser] Bundle v{task.protocol_version_id} 无法生成: {exc}")
+                        runtime_bundle = None
+
             # 获取所有端口定义
             port_device_map: Dict[int, str] = {}
             if task.protocol_version_id:
@@ -693,6 +714,11 @@ class ParserService:
                     if not parser:
                         print(f"[Parser]   警告: 解析器 {profile.parser_key} 未注册")
                         continue
+                    # MR4: 注入版本化 Bundle（parser 内部按需读取 arinc_labels / can_frames）
+                    try:
+                        parser.set_bundle(runtime_bundle)
+                    except Exception as exc:
+                        print(f"[Parser]   警告: {profile.parser_key} set_bundle 失败: {exc}")
                     merged_plan[pid] = (parser, set(), [], profile.name)
                 
                 merged_plan[pid][1].update(dev_ports)

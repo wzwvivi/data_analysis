@@ -292,13 +292,20 @@ async def create_spec(
 
 
 async def get_versions_for_spec(
-    db: AsyncSession, spec_id: int
+    db: AsyncSession,
+    spec_id: int,
+    *,
+    availability_status: Optional[str] = None,
 ) -> List[DeviceProtocolVersion]:
-    res = await db.execute(
-        select(DeviceProtocolVersion)
-        .where(DeviceProtocolVersion.spec_id == spec_id)
-        .order_by(DeviceProtocolVersion.version_seq.desc())
+    stmt = select(DeviceProtocolVersion).where(
+        DeviceProtocolVersion.spec_id == spec_id
     )
+    if availability_status:
+        stmt = stmt.where(
+            DeviceProtocolVersion.availability_status == availability_status
+        )
+    stmt = stmt.order_by(DeviceProtocolVersion.version_seq.desc())
+    res = await db.execute(stmt)
     return list(res.scalars().all())
 
 
@@ -437,6 +444,11 @@ def serialize_version(v: DeviceProtocolVersion) -> Dict[str, Any]:
         "availability_status": v.availability_status,
         "activated_at": v.activated_at,
         "activated_by": v.activated_by,
+        "forced_activation": bool(getattr(v, "forced_activation", False)),
+        "activation_report_json": getattr(v, "activation_report_json", None),
+        "deprecated_at": getattr(v, "deprecated_at", None),
+        "deprecated_by": getattr(v, "deprecated_by", None),
+        "deprecation_reason": getattr(v, "deprecation_reason", None),
         "git_commit_hash": v.git_commit_hash,
         "git_tag": v.git_tag,
         "git_export_status": v.git_export_status,
@@ -465,6 +477,167 @@ def serialize_draft(draft: DeviceProtocolDraft) -> Dict[str, Any]:
         "created_at": draft.created_at,
         "updated_at": draft.updated_at,
         "published_version_id": draft.published_version_id,
+    }
+
+
+# ═════════════════════════ Version 生命周期（activate / deprecate）═════════════════════════
+
+
+def _build_activation_report(
+    handler: FamilyHandler,
+    spec_json: Dict[str, Any] | None,
+    *,
+    forced: bool,
+    reason: Optional[str],
+    actor: Optional[str],
+) -> Dict[str, Any]:
+    validation = handler.validate_spec(spec_json or {})
+    return {
+        "ok": validation.is_ok,
+        "errors": list(validation.errors),
+        "warnings": list(validation.warnings),
+        "error_count": len(validation.errors),
+        "warning_count": len(validation.warnings),
+        "forced": bool(forced),
+        "reason": (reason or "").strip() or None,
+        "checked_at": datetime.utcnow().isoformat() + "Z",
+        "checked_by": actor,
+        "summary": handler.summarize_spec(spec_json or {}),
+    }
+
+
+async def activate_version(
+    db: AsyncSession,
+    *,
+    version_id: int,
+    user: str,
+    force: bool = False,
+    reason: Optional[str] = None,
+) -> DeviceProtocolVersion:
+    """PendingCode → Available。
+
+    - 先跑 ``handler.validate_spec`` 生成体检报告，写入 ``activation_report_json``
+    - 有 error 且非 force → 拒绝；force 必须带 reason
+    - 非 PendingCode 状态拒绝
+    """
+    version = await get_version(db, version_id)
+    if version is None:
+        raise DeviceProtocolError(f"设备协议版本 {version_id} 不存在")
+
+    if version.availability_status == AVAILABILITY_AVAILABLE:
+        raise DeviceProtocolError("该版本已经是 Available 状态")
+    if version.availability_status == AVAILABILITY_DEPRECATED:
+        raise DeviceProtocolError("已弃用版本不可激活")
+    if version.availability_status != AVAILABILITY_PENDING_CODE:
+        raise DeviceProtocolError(
+            f"仅 PendingCode 状态可激活（当前：{version.availability_status}）"
+        )
+
+    spec_res = await db.execute(
+        select(DeviceProtocolSpec).where(DeviceProtocolSpec.id == version.spec_id)
+    )
+    spec = spec_res.scalar_one_or_none()
+    if spec is None:
+        raise DeviceProtocolError(f"设备协议 {version.spec_id} 不存在")
+
+    handler = get_family_handler(spec.protocol_family)
+    report = _build_activation_report(
+        handler,
+        version.spec_json,
+        forced=bool(force),
+        reason=reason,
+        actor=user,
+    )
+
+    if report["error_count"] > 0 and not force:
+        version.activation_report_json = report
+        await db.commit()
+        raise DeviceProtocolError(
+            f"体检报告存在 {report['error_count']} 项错误，请先修复或使用强制激活并填写理由。"
+        )
+    if force and not (reason or "").strip():
+        raise DeviceProtocolError("强制激活必须填写理由")
+
+    version.availability_status = AVAILABILITY_AVAILABLE
+    version.activated_at = datetime.utcnow()
+    version.activated_by = user
+    version.forced_activation = bool(force)
+    version.activation_report_json = report
+
+    await db.commit()
+    await db.refresh(version)
+    return version
+
+
+async def deprecate_version(
+    db: AsyncSession,
+    *,
+    version_id: int,
+    user: str,
+    reason: str,
+) -> DeviceProtocolVersion:
+    """Available | PendingCode → Deprecated，reason 必填。"""
+    if not (reason or "").strip():
+        raise DeviceProtocolError("弃用必须填写理由")
+
+    version = await get_version(db, version_id)
+    if version is None:
+        raise DeviceProtocolError(f"设备协议版本 {version_id} 不存在")
+
+    if version.availability_status == AVAILABILITY_DEPRECATED:
+        raise DeviceProtocolError("该版本已处于 Deprecated 状态")
+
+    version.availability_status = AVAILABILITY_DEPRECATED
+    version.deprecated_at = datetime.utcnow()
+    version.deprecated_by = user
+    version.deprecation_reason = reason.strip()
+
+    await db.commit()
+    await db.refresh(version)
+    return version
+
+
+async def get_activation_report(
+    db: AsyncSession, version_id: int
+) -> Dict[str, Any]:
+    """返回缓存的激活报告；若缺失则按当前 spec 重新生成（不持久化）。"""
+    version = await get_version(db, version_id)
+    if version is None:
+        raise DeviceProtocolError(f"设备协议版本 {version_id} 不存在")
+
+    cached = getattr(version, "activation_report_json", None)
+    if cached:
+        return {
+            "version_id": version.id,
+            "availability_status": version.availability_status,
+            "report": cached,
+            "cached": True,
+        }
+
+    spec_res = await db.execute(
+        select(DeviceProtocolSpec).where(DeviceProtocolSpec.id == version.spec_id)
+    )
+    spec = spec_res.scalar_one_or_none()
+    handler = get_family_handler(spec.protocol_family) if spec else None
+    if handler is None:
+        return {
+            "version_id": version.id,
+            "availability_status": version.availability_status,
+            "report": None,
+            "cached": False,
+        }
+    report = _build_activation_report(
+        handler,
+        version.spec_json,
+        forced=False,
+        reason=None,
+        actor=None,
+    )
+    return {
+        "version_id": version.id,
+        "availability_status": version.availability_status,
+        "report": report,
+        "cached": False,
     }
 
 
@@ -1172,4 +1345,10 @@ def serialize_cr(cr: ProtocolChangeRequest) -> Dict[str, Any]:
             "base_version_id": draft.base_version_id,
             "pending_spec_meta": draft.pending_spec_meta,
         }
+        # submit_note 实际存在 draft 上（submit 时刻由 engine 写入）
+        base["submit_note"] = draft.submit_note
+        base["published_version_id"] = draft.published_version_id
+    else:
+        base["submit_note"] = None
+        base["published_version_id"] = None
     return base

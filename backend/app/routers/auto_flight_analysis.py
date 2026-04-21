@@ -42,6 +42,9 @@ class AutoFlightTaskResponse(BaseModel):
     steady_count: int = 0
     created_at: datetime
     completed_at: Optional[datetime] = None
+    # MR4：本次分析所用的 TSN 协议版本（bundle），用于审计展示
+    bundle_version_id: Optional[int] = None
+    bundle_version_label: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -54,7 +57,7 @@ class AutoFlightTaskListResponse(BaseModel):
     items: List[AutoFlightTaskResponse]
 
 
-def _task_to_resp(t) -> AutoFlightTaskResponse:
+def _task_to_resp(t, bundle_version_label: Optional[str] = None) -> AutoFlightTaskResponse:
     return AutoFlightTaskResponse(
         id=t.id,
         parse_task_id=t.parse_task_id,
@@ -68,15 +71,46 @@ def _task_to_resp(t) -> AutoFlightTaskResponse:
         steady_count=t.steady_count or 0,
         created_at=t.created_at,
         completed_at=t.completed_at,
+        bundle_version_id=getattr(t, "bundle_version_id", None),
+        bundle_version_label=bundle_version_label,
     )
+
+
+async def _resolve_bundle_version_label(db: AsyncSession, version_id: Optional[int]) -> Optional[str]:
+    if not version_id:
+        return None
+    from sqlalchemy import select as _select
+    from ..models import ProtocolVersion
+    res = await db.execute(_select(ProtocolVersion.version).where(ProtocolVersion.id == int(version_id)))
+    row = res.first()
+    return row[0] if row else None
+
+
+async def _build_label_map(db: AsyncSession, tasks) -> dict:
+    vids = {int(t.bundle_version_id) for t in tasks if getattr(t, "bundle_version_id", None)}
+    if not vids:
+        return {}
+    from sqlalchemy import select as _select
+    from ..models import ProtocolVersion
+    res = await db.execute(
+        _select(ProtocolVersion.id, ProtocolVersion.version)
+        .where(ProtocolVersion.id.in_(vids))
+    )
+    return {int(r[0]): r[1] for r in res.all()}
 
 
 @router.post("/standalone/upload")
 async def upload_standalone(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    bundle_version_id: Optional[int] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
+    """上传 pcap/pcapng 并启动自动飞行性能分析。
+
+    - `bundle_version_id`（可选，MR4）：本次分析绑定的 TSN 协议版本，仅用于
+      审计展示（当前分析使用固定端口，不消费 bundle 内容）。
+    """
     raw_name = file.filename or "capture.pcapng"
     suffix = Path(raw_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
@@ -92,15 +126,27 @@ async def upload_standalone(
     dest.write_bytes(data)
 
     service = AutoFlightAnalysisService(db)
-    task = await service.create_task_from_pcap(raw_name, str(dest.resolve()), source_type="standalone")
+    task = await service.create_task_from_pcap(
+        raw_name,
+        str(dest.resolve()),
+        source_type="standalone",
+        bundle_version_id=bundle_version_id,
+    )
     background_tasks.add_task(submit_process_job, run_auto_flight_analysis_task_job, task.id)
-    return {"success": True, "task_id": task.id, "status": "processing", "message": "已开始自动飞行性能分析"}
+    return {
+        "success": True,
+        "task_id": task.id,
+        "status": "processing",
+        "bundle_version_id": task.bundle_version_id,
+        "message": "已开始自动飞行性能分析",
+    }
 
 
 @router.post("/standalone/from-shared")
 async def from_shared(
     background_tasks: BackgroundTasks,
     shared_tsn_id: int = Form(...),
+    bundle_version_id: Optional[int] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     """使用平台共享 TSN 文件创建自动飞行性能分析（直接读取共享源文件，不复制）。"""
@@ -116,28 +162,64 @@ async def from_shared(
         raise HTTPException(status_code=400, detail=f"共享文件不存在: {row.file_path}")
 
     service = AutoFlightAnalysisService(db)
-    task = await service.create_task_from_pcap(row.original_filename, str(src.resolve()), source_type="shared")
+    task = await service.create_task_from_pcap(
+        row.original_filename,
+        str(src.resolve()),
+        source_type="shared",
+        bundle_version_id=bundle_version_id,
+    )
     background_tasks.add_task(submit_process_job, run_auto_flight_analysis_task_job, task.id)
-    return {"success": True, "task_id": task.id, "status": "processing", "message": "已使用平台共享数据开始自动飞行性能分析"}
+    return {
+        "success": True,
+        "task_id": task.id,
+        "status": "processing",
+        "bundle_version_id": task.bundle_version_id,
+        "message": "已使用平台共享数据开始自动飞行性能分析",
+    }
 
 
 @router.post("/from-parse-task")
 async def from_parse_task(
     background_tasks: BackgroundTasks,
     parse_task_id: int = Form(...),
+    bundle_version_id: Optional[int] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
+    """基于已有解析任务启动自动飞行性能分析。
+
+    `bundle_version_id` 省略时默认继承 ParseTask.protocol_version_id。
+    """
     service = AutoFlightAnalysisService(db)
-    task = await service.create_task_from_parse(parse_task_id)
+    task = await service.create_task_from_parse(
+        parse_task_id, bundle_version_id=bundle_version_id
+    )
     background_tasks.add_task(submit_process_job, run_auto_flight_analysis_task_job, task.id)
-    return {"success": True, "task_id": task.id, "status": "processing", "message": f"已基于解析任务#{parse_task_id}开始自动飞行性能分析"}
+    return {
+        "success": True,
+        "task_id": task.id,
+        "status": "processing",
+        "bundle_version_id": task.bundle_version_id,
+        "message": f"已基于解析任务#{parse_task_id}开始自动飞行性能分析",
+    }
 
 
 @router.get("/tasks", response_model=AutoFlightTaskListResponse)
 async def list_tasks(page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db)):
     service = AutoFlightAnalysisService(db)
     items, total = await service.list_tasks(page=page, page_size=page_size)
-    return AutoFlightTaskListResponse(total=total, page=page, page_size=page_size, items=[_task_to_resp(x) for x in items])
+    label_map = await _build_label_map(db, items)
+    return AutoFlightTaskListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        items=[
+            _task_to_resp(
+                x,
+                bundle_version_label=label_map.get(int(x.bundle_version_id)) if x.bundle_version_id else None,
+            )
+            for x in items
+        ],
+    )
 
 
 @router.get("/tasks/{task_id}", response_model=AutoFlightTaskResponse)
@@ -146,7 +228,8 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
     task = await service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    return _task_to_resp(task)
+    label = await _resolve_bundle_version_label(db, task.bundle_version_id)
+    return _task_to_resp(task, bundle_version_label=label)
 
 
 @router.get("/tasks/{task_id}/touchdowns")

@@ -34,6 +34,9 @@ class CompareTaskResponse(BaseModel):
     filename_1: str
     filename_2: str
     protocol_version_id: int
+    # MR4：本次异常检查所用的 TSN 协议版本（bundle）
+    bundle_version_id: Optional[int] = None
+    bundle_version_label: Optional[str] = None
     status: str
     progress: int
     error_message: Optional[str] = None
@@ -277,39 +280,61 @@ async def list_tasks(
     service = CompareService(db)
     offset = (page - 1) * page_size
     tasks, total = await service.get_tasks(limit=page_size, offset=offset)
-    
-    items = [
-        CompareTaskResponse(
-            id=t.id,
-            filename_1=t.filename_1,
-            filename_2=t.filename_2,
-            protocol_version_id=t.protocol_version_id,
-            status=t.status,
-            progress=t.progress or 0,
-            error_message=t.error_message,
-            switch1_first_ts=t.switch1_first_ts,
-            switch2_first_ts=t.switch2_first_ts,
-            time_diff_ms=t.time_diff_ms,
-            sync_result=t.sync_result,
-            expected_port_count=t.expected_port_count or 0,
-            both_present_count=t.both_present_count or 0,
-            missing_count=t.missing_count or 0,
-            periodic_port_count=t.periodic_port_count or 0,
-            ports_with_gaps=t.ports_with_gaps or 0,
-            total_gap_count=t.total_gap_count or 0,
-            jitter_threshold_pct=t.jitter_threshold_pct or 10.0,
-            timing_checked_port_count=t.timing_checked_port_count or 0,
-            timing_pass_count=t.timing_pass_count or 0,
-            timing_warning_count=t.timing_warning_count or 0,
-            timing_fail_count=t.timing_fail_count or 0,
-            overall_result=t.overall_result,
-            created_at=t.created_at,
-            completed_at=t.completed_at
-        )
+
+    # MR4：批量解析 bundle_version_id → label，避免 N+1
+    vids = {
+        int(getattr(t, "bundle_version_id", None) or t.protocol_version_id)
         for t in tasks
-    ]
+    }
+    label_map: dict = {}
+    if vids:
+        from sqlalchemy import select as _select
+        from ..models import ProtocolVersion
+        res = await db.execute(
+            _select(ProtocolVersion.id, ProtocolVersion.version)
+            .where(ProtocolVersion.id.in_(vids))
+        )
+        label_map = {int(r[0]): r[1] for r in res.all()}
+
+    items = [_compare_task_to_response(t, label_map) for t in tasks]
     
     return CompareTaskListResponse(total=total, items=items)
+
+
+def _compare_task_to_response(t, label_map: Optional[dict] = None) -> "CompareTaskResponse":
+    bvid = getattr(t, "bundle_version_id", None) or t.protocol_version_id
+    label = None
+    if label_map is not None and bvid is not None:
+        label = label_map.get(int(bvid))
+    return CompareTaskResponse(
+        id=t.id,
+        filename_1=t.filename_1,
+        filename_2=t.filename_2,
+        protocol_version_id=t.protocol_version_id,
+        bundle_version_id=bvid,
+        bundle_version_label=label,
+        status=t.status,
+        progress=t.progress or 0,
+        error_message=t.error_message,
+        switch1_first_ts=t.switch1_first_ts,
+        switch2_first_ts=t.switch2_first_ts,
+        time_diff_ms=t.time_diff_ms,
+        sync_result=t.sync_result,
+        expected_port_count=t.expected_port_count or 0,
+        both_present_count=t.both_present_count or 0,
+        missing_count=t.missing_count or 0,
+        periodic_port_count=t.periodic_port_count or 0,
+        ports_with_gaps=t.ports_with_gaps or 0,
+        total_gap_count=t.total_gap_count or 0,
+        jitter_threshold_pct=t.jitter_threshold_pct or 10.0,
+        timing_checked_port_count=t.timing_checked_port_count or 0,
+        timing_pass_count=t.timing_pass_count or 0,
+        timing_warning_count=t.timing_warning_count or 0,
+        timing_fail_count=t.timing_fail_count or 0,
+        overall_result=t.overall_result,
+        created_at=t.created_at,
+        completed_at=t.completed_at,
+    )
 
 
 @router.get("/tasks/{task_id}", response_model=CompareTaskResponse)
@@ -320,37 +345,23 @@ async def get_task(
     """获取比对任务详情"""
     service = CompareService(db)
     task = await service.get_task(task_id)
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
-    return CompareTaskResponse(
-        id=task.id,
-        filename_1=task.filename_1,
-        filename_2=task.filename_2,
-        protocol_version_id=task.protocol_version_id,
-        status=task.status,
-        progress=task.progress or 0,
-        error_message=task.error_message,
-        switch1_first_ts=task.switch1_first_ts,
-        switch2_first_ts=task.switch2_first_ts,
-        time_diff_ms=task.time_diff_ms,
-        sync_result=task.sync_result,
-        expected_port_count=task.expected_port_count or 0,
-        both_present_count=task.both_present_count or 0,
-        missing_count=task.missing_count or 0,
-        periodic_port_count=task.periodic_port_count or 0,
-        ports_with_gaps=task.ports_with_gaps or 0,
-        total_gap_count=task.total_gap_count or 0,
-        jitter_threshold_pct=task.jitter_threshold_pct or 10.0,
-        timing_checked_port_count=task.timing_checked_port_count or 0,
-        timing_pass_count=task.timing_pass_count or 0,
-        timing_warning_count=task.timing_warning_count or 0,
-        timing_fail_count=task.timing_fail_count or 0,
-        overall_result=task.overall_result,
-        created_at=task.created_at,
-        completed_at=task.completed_at
-    )
+
+    bvid = getattr(task, "bundle_version_id", None) or task.protocol_version_id
+    label_map: dict = {}
+    if bvid:
+        from sqlalchemy import select as _select
+        from ..models import ProtocolVersion
+        res = await db.execute(
+            _select(ProtocolVersion.version).where(ProtocolVersion.id == int(bvid))
+        )
+        row = res.first()
+        if row:
+            label_map[int(bvid)] = row[0]
+
+    return _compare_task_to_response(task, label_map)
 
 
 @router.get("/tasks/{task_id}/ports", response_model=ComparePortResultListResponse)

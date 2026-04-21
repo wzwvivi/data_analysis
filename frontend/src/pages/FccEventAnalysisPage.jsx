@@ -7,7 +7,7 @@ import {
 import {
   UploadOutlined, ReloadOutlined, PlayCircleOutlined,
 } from '@ant-design/icons'
-import { fccEventAnalysisApi, sharedTsnApi } from '../services/api'
+import { fccEventAnalysisApi, sharedTsnApi, networkConfigApi } from '../services/api'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import dayjs from 'dayjs'
 
@@ -34,6 +34,30 @@ function FccEventAnalysisPage() {
   const [platformId, setPlatformId] = useState(null)
   const [localFile, setLocalFile] = useState(null)
   const [tolerance, setTolerance] = useState(100)
+
+  // MR4：网络配置版本（bundle）选择，仅用于审计展示
+  const [availableVersions, setAvailableVersions] = useState([])
+  const [bundleVersionId, setBundleVersionId] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await networkConfigApi.listVersions('Available')
+        if (cancelled) return
+        const items = (res.data?.items || res.data || []).filter(v =>
+          (v.availability_status || v.status) === 'Available'
+        )
+        setAvailableVersions(items)
+        if (items.length > 0) {
+          setBundleVersionId((prev) => prev ?? items[0].id)
+        }
+      } catch {
+        setAvailableVersions([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const loadTaskList = useCallback(async () => {
     setListLoading(true)
@@ -64,9 +88,14 @@ function FccEventAnalysisPage() {
       message.warning('请先选择文件')
       return
     }
+    if (!bundleVersionId) {
+      message.warning('请选择网络配置版本')
+      return
+    }
     const formData = new FormData()
     formData.append('file', localFile)
     formData.append('divergence_tolerance_ms', String(tolerance))
+    formData.append('bundle_version_id', String(bundleVersionId))
     setUploading(true)
     setUploadProgress(0)
     try {
@@ -89,9 +118,14 @@ function FccEventAnalysisPage() {
       message.warning('请选择平台数据')
       return
     }
+    if (!bundleVersionId) {
+      message.warning('请选择网络配置版本')
+      return
+    }
     const formData = new FormData()
     formData.append('shared_tsn_id', String(platformId))
     formData.append('divergence_tolerance_ms', String(tolerance))
+    formData.append('bundle_version_id', String(bundleVersionId))
     setUploading(true)
     try {
       const res = await fccEventAnalysisApi.fromShared(formData)
@@ -115,6 +149,16 @@ function FccEventAnalysisPage() {
       ),
     },
     { title: '文件', dataIndex: 'pcap_filename', key: 'pcap_filename', ellipsis: true },
+    {
+      title: 'TSN 版本',
+      key: 'bundle_version',
+      width: 110,
+      render: (_, record) => record.bundle_version_id ? (
+        <Tag color="purple" title={`bundle v#${record.bundle_version_id}`}>
+          {record.bundle_version_label || `v${record.bundle_version_id}`}
+        </Tag>
+      ) : <span style={{ color: '#71717a' }}>-</span>,
+    },
     {
       title: '状态',
       dataIndex: 'status',
@@ -170,6 +214,18 @@ function FccEventAnalysisPage() {
               onChange={setTolerance}
               style={{ width: 200 }}
               options={TOLERANCE_OPTIONS}
+            />
+            <span style={{ color: '#a1a1aa', marginLeft: 16 }}>网络配置版本</span>
+            <Select
+              value={bundleVersionId}
+              onChange={setBundleVersionId}
+              style={{ width: 260 }}
+              placeholder="选择用于本次分析的 TSN 协议版本"
+              notFoundContent="暂无可用版本"
+              options={availableVersions.map(v => ({
+                value: v.id,
+                label: `${v.version || `v${v.id}`}${v.protocol_name ? ` · ${v.protocol_name}` : ''}`,
+              }))}
             />
           </Space>
 

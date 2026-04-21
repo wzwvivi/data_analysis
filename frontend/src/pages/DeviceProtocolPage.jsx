@@ -23,6 +23,11 @@ import {
   Divider,
   AutoComplete,
   Tooltip,
+  Checkbox,
+  Statistic,
+  Badge,
+  Row,
+  Col,
 } from 'antd'
 import {
   ApartmentOutlined,
@@ -33,6 +38,11 @@ import {
   SearchOutlined,
   EditOutlined,
   ThunderboltOutlined,
+  CheckCircleOutlined,
+  StopOutlined,
+  FileSearchOutlined,
+  BranchesOutlined,
+  WarningOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { deviceProtocolApi } from '../services/api'
@@ -87,6 +97,7 @@ function DeviceProtocolPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const canWrite = ['admin', 'device_team'].includes((user?.role || '').trim())
+  const isAdmin = (user?.role || '').trim() === 'admin'
 
   const [collapsed, setCollapsed] = useState(false)
   const [families, setFamilies] = useState([])
@@ -105,6 +116,8 @@ function DeviceProtocolPage() {
 
   const [drafts, setDrafts] = useState([])
   const [changeRequests, setChangeRequests] = useState([])
+  const [pendingForMe, setPendingForMe] = useState([])
+  const [allSpecs, setAllSpecs] = useState([])
   const [draftsLoading, setDraftsLoading] = useState(false)
   const [crsLoading, setCrsLoading] = useState(false)
 
@@ -114,6 +127,24 @@ function DeviceProtocolPage() {
   const [createLoading, setCreateLoading] = useState(false)
   const [createForm] = Form.useForm()
   const [identityPreview, setIdentityPreview] = useState(null)
+
+  // ── 版本生命周期 Modal 状态 ──
+  const [activateOpen, setActivateOpen] = useState(false)
+  const [activateTarget, setActivateTarget] = useState(null)
+  const [activateForm] = Form.useForm()
+  const [activateLoading, setActivateLoading] = useState(false)
+  const [activateReport, setActivateReport] = useState(null)
+  const [activateReportLoading, setActivateReportLoading] = useState(false)
+
+  const [deprecateOpen, setDeprecateOpen] = useState(false)
+  const [deprecateTarget, setDeprecateTarget] = useState(null)
+  const [deprecateForm] = Form.useForm()
+  const [deprecateLoading, setDeprecateLoading] = useState(false)
+
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportTarget, setReportTarget] = useState(null)
+  const [reportData, setReportData] = useState(null)
+  const [reportLoading, setReportLoading] = useState(false)
 
   const loadFamilies = useCallback(async () => {
     try {
@@ -163,14 +194,33 @@ function DeviceProtocolPage() {
   const loadCRs = useCallback(async (fam = null) => {
     setCrsLoading(true)
     try {
-      const params = {}
-      if (fam) params.family = fam
-      const { data } = await deviceProtocolApi.listChangeRequests(params)
+      const { data } = await deviceProtocolApi.listChangeRequests({ family: fam || undefined })
       setChangeRequests(data?.items || [])
     } catch (e) {
       message.error(e?.response?.data?.detail || '加载审批列表失败')
     } finally {
       setCrsLoading(false)
+    }
+  }, [])
+
+  const loadPendingForMe = useCallback(async (fam = null) => {
+    try {
+      const { data } = await deviceProtocolApi.listChangeRequests({
+        scope: 'pending_for_me',
+        family: fam || undefined,
+      })
+      setPendingForMe(data?.items || [])
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  const loadAllSpecs = useCallback(async (fam = null) => {
+    try {
+      const { data } = await deviceProtocolApi.listSpecs(fam || null)
+      setAllSpecs(data?.items || [])
+    } catch {
+      /* ignore */
     }
   }, [])
 
@@ -180,6 +230,8 @@ function DeviceProtocolPage() {
     loadTree(null, groupBy)
     loadDrafts(null)
     loadCRs(null)
+    loadPendingForMe(null)
+    loadAllSpecs(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -187,6 +239,48 @@ function DeviceProtocolPage() {
     () => filterTreeByKeyword(tree, keyword),
     [tree, keyword],
   )
+
+  const deviceStats = useMemo(() => {
+    const isDeviceMode = selectedMeta?.type === 'device' && specDetail?.spec
+    if (isDeviceMode) {
+      const specId = specDetail.spec.id
+      const versions = specDetail.versions || []
+      const deviceDrafts = drafts.filter(
+        (d) => d.spec_id === specId && ['draft', 'pending'].includes(d.status),
+      )
+      const devicePending = pendingForMe.filter(
+        (cr) => cr.device_draft?.spec_id === specId,
+      )
+      return {
+        scope: 'device',
+        deviceName: specDetail.spec.device_name,
+        versionCount: versions.length,
+        availableCount: versions.filter((v) => v.availability_status === 'Available').length,
+        pendingCodeCount: versions.filter((v) => v.availability_status === 'PendingCode').length,
+        deprecatedCount: versions.filter((v) => v.availability_status === 'Deprecated').length,
+        activeDraftCount: deviceDrafts.length,
+        pendingForMeCount: devicePending.length,
+      }
+    }
+    const globalVersionCount = allSpecs.reduce(
+      (acc, s) => acc + (s.version_count || 0),
+      0,
+    )
+    const availableCount = allSpecs.filter(
+      (s) => s.latest_version?.availability_status === 'Available',
+    ).length
+    const activeDraftCount = drafts.filter((d) =>
+      ['draft', 'pending'].includes(d.status),
+    ).length
+    return {
+      scope: 'global',
+      specCount: allSpecs.length,
+      versionCount: globalVersionCount,
+      availableCount,
+      activeDraftCount,
+      pendingForMeCount: pendingForMe.length,
+    }
+  }, [drafts, allSpecs, pendingForMe, selectedMeta, specDetail])
 
   const antdTreeData = useMemo(() => {
     const mapNode = (n) => {
@@ -265,6 +359,116 @@ function DeviceProtocolPage() {
     if (selectedMeta?.type === 'device') loadSpec(selectedMeta.spec_id)
     loadDrafts(familyFilter, selectedMeta?.type === 'device' ? selectedMeta.spec_id : null)
     loadCRs(familyFilter)
+    loadPendingForMe(familyFilter)
+    loadAllSpecs(familyFilter)
+  }
+
+  // ── 基于某个版本迭代（克隆草稿） ──
+  const handleCloneFromVersion = async (version) => {
+    if (!version?.id) return
+    try {
+      const { data } = await deviceProtocolApi.createDraftFromVersion({
+        base_version_id: version.id,
+      })
+      message.success(`已基于 ${version.version_name} 创建草稿 #${data.id}`)
+      navigate(`/device-protocol/drafts/${data.id}`)
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '创建草稿失败')
+    }
+  }
+
+  // ── 激活 ──
+  const openActivateModal = async (version) => {
+    setActivateTarget(version)
+    setActivateOpen(true)
+    activateForm.resetFields()
+    activateForm.setFieldsValue({ force: false, reason: '' })
+    setActivateReport(null)
+    setActivateReportLoading(true)
+    try {
+      const { data } = await deviceProtocolApi.getActivationReport(version.id)
+      setActivateReport(data?.report || null)
+    } catch {
+      setActivateReport(null)
+    } finally {
+      setActivateReportLoading(false)
+    }
+  }
+
+  const handleActivate = async () => {
+    if (!activateTarget) return
+    let values
+    try {
+      values = await activateForm.validateFields()
+    } catch {
+      return
+    }
+    const force = !!values.force
+    const reason = (values.reason || '').trim()
+    if (force && !reason) {
+      message.error('强制激活必须填写理由')
+      return
+    }
+    setActivateLoading(true)
+    try {
+      await deviceProtocolApi.activateVersion(activateTarget.id, {
+        force,
+        reason: reason || undefined,
+      })
+      message.success(`已激活 ${activateTarget.version_name}`)
+      setActivateOpen(false)
+      reloadAll()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '激活失败')
+    } finally {
+      setActivateLoading(false)
+    }
+  }
+
+  // ── 弃用 ──
+  const openDeprecateModal = (version) => {
+    setDeprecateTarget(version)
+    deprecateForm.resetFields()
+    setDeprecateOpen(true)
+  }
+
+  const handleDeprecate = async () => {
+    if (!deprecateTarget) return
+    let values
+    try {
+      values = await deprecateForm.validateFields()
+    } catch {
+      return
+    }
+    setDeprecateLoading(true)
+    try {
+      await deviceProtocolApi.deprecateVersion(deprecateTarget.id, {
+        reason: (values.reason || '').trim(),
+      })
+      message.success(`已弃用 ${deprecateTarget.version_name}`)
+      setDeprecateOpen(false)
+      reloadAll()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '弃用失败')
+    } finally {
+      setDeprecateLoading(false)
+    }
+  }
+
+  // ── 查看激活报告 ──
+  const openReportModal = async (version) => {
+    setReportTarget(version)
+    setReportData(null)
+    setReportOpen(true)
+    setReportLoading(true)
+    try {
+      const { data } = await deviceProtocolApi.getActivationReport(version.id)
+      setReportData(data)
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '加载激活报告失败')
+    } finally {
+      setReportLoading(false)
+    }
   }
 
   // ── 修改协议（一键入口） ──
@@ -358,20 +562,35 @@ function DeviceProtocolPage() {
 
   // ── Tables ──
   const versionColumns = [
-    { title: '版本', dataIndex: 'version_name', key: 'version_name', render: (t) => <Tag color="purple">{t}</Tag> },
     {
-      title: '状态',
+      title: '版本',
+      dataIndex: 'version_name',
+      key: 'version_name',
+      width: 110,
+      render: (t) => <Tag color="purple">{t}</Tag>,
+    },
+    {
+      title: '可用性',
       dataIndex: 'availability_status',
       key: 'availability_status',
-      render: (s) => {
+      width: 130,
+      render: (s, rec) => {
         const map = { Available: 'green', PendingCode: 'gold', Deprecated: 'default' }
-        return <Tag color={map[s] || 'default'}>{s}</Tag>
+        return (
+          <Space size={4} direction="vertical">
+            <Tag color={map[s] || 'default'}>{s}</Tag>
+            {rec.forced_activation ? (
+              <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>强制激活</Tag>
+            ) : null}
+          </Space>
+        )
       },
     },
     {
       title: 'Git 导出',
       dataIndex: 'git_export_status',
       key: 'git_export_status',
+      width: 120,
       render: (s, rec) => {
         const map = { exported: 'green', pending: 'default', skipped: 'default', failed: 'red' }
         return (
@@ -384,21 +603,68 @@ function DeviceProtocolPage() {
         )
       },
     },
-    { title: '发布人', dataIndex: 'created_by', key: 'created_by' },
+    { title: '发布人', dataIndex: 'created_by', key: 'created_by', width: 110 },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
+      width: 160,
       render: (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-'),
     },
     {
       title: '操作',
       key: 'op',
-      render: (_, rec) => (
-        <Button size="small" onClick={() => navigate(`/device-protocol/versions/${rec.id}`)}>
-          查看
-        </Button>
-      ),
+      render: (_, rec) => {
+        const status = rec.availability_status
+        const hasReport = !!rec.activation_report_json
+        return (
+          <Space wrap size={4}>
+            <Button size="small" onClick={() => navigate(`/device-protocol/versions/${rec.id}`)}>
+              查看
+            </Button>
+            {canWrite && status === 'PendingCode' && (
+              <Button
+                size="small"
+                type="primary"
+                icon={<CheckCircleOutlined />}
+                onClick={() => openActivateModal(rec)}
+              >
+                激活
+              </Button>
+            )}
+            {isAdmin && (status === 'PendingCode' || status === 'Available') && (
+              <Button
+                size="small"
+                danger
+                icon={<StopOutlined />}
+                onClick={() => openDeprecateModal(rec)}
+              >
+                弃用
+              </Button>
+            )}
+            {(hasReport || status !== 'PendingCode') && (
+              <Button
+                size="small"
+                icon={<FileSearchOutlined />}
+                onClick={() => openReportModal(rec)}
+              >
+                激活报告
+              </Button>
+            )}
+            {canWrite && (
+              <Tooltip title="基于此版本创建新草稿，发布时自动升主版本号">
+                <Button
+                  size="small"
+                  icon={<BranchesOutlined />}
+                  onClick={() => handleCloneFromVersion(rec)}
+                >
+                  基于此版本迭代
+                </Button>
+              </Tooltip>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 
@@ -638,7 +904,19 @@ function DeviceProtocolPage() {
           },
           {
             key: 'drafts',
-            label: '草稿 / 审批',
+            label: (
+              <Space size={6}>
+                <span>草稿 / 审批</span>
+                {pendingForMe.filter((cr) =>
+                  cr.device_draft?.spec_id === spec.id,
+                ).length > 0 && (
+                  <Badge
+                    count={pendingForMe.filter((cr) => cr.device_draft?.spec_id === spec.id).length}
+                    size="small"
+                  />
+                )}
+              </Space>
+            ),
             children: (
               <Space direction="vertical" size={16} style={{ width: '100%' }}>
                 <Card title={`草稿（${drafts.length}）`} size="small">
@@ -723,6 +1001,8 @@ function DeviceProtocolPage() {
                   loadTree(v || null, groupBy)
                   loadDrafts(v || null, null)
                   loadCRs(v || null)
+                  loadPendingForMe(v || null)
+                  loadAllSpecs(v || null)
                 }}
                 options={families.map((f) => ({
                   label: FAMILY_LABEL[f.family] || f.family.toUpperCase(),
@@ -775,6 +1055,65 @@ function DeviceProtocolPage() {
           {!canWrite && (
             <Alert type="info" showIcon message="当前账号无写权限：仅设备团队 / 管理员可新建设备、修改协议" />
           )}
+          <Card
+            size="small"
+            bodyStyle={{ padding: '12px 16px' }}
+            title={
+              <Space size={8}>
+                <Text style={{ fontSize: 13, color: '#a1a1aa' }}>协议视图</Text>
+                {deviceStats.scope === 'device' ? (
+                  <Tag color="blue" style={{ margin: 0 }}>
+                    当前设备：{deviceStats.deviceName}
+                  </Tag>
+                ) : (
+                  <Tag style={{ margin: 0 }}>全局概览（{allSpecs.length} 台设备）</Tag>
+                )}
+              </Space>
+            }
+          >
+            <Row gutter={16}>
+              <Col span={6}>
+                <Statistic
+                  title={deviceStats.scope === 'device' ? '该设备版本数' : '版本总数'}
+                  value={deviceStats.versionCount}
+                  valueStyle={{ color: '#3b82f6' }}
+                  prefix={<BranchesOutlined />}
+                />
+              </Col>
+              <Col span={6}>
+                <Statistic
+                  title={
+                    deviceStats.scope === 'device'
+                      ? `Available / PendingCode / Deprecated`
+                      : '已发布（最新版 Available）'
+                  }
+                  value={
+                    deviceStats.scope === 'device'
+                      ? `${deviceStats.availableCount} / ${deviceStats.pendingCodeCount} / ${deviceStats.deprecatedCount}`
+                      : deviceStats.availableCount
+                  }
+                  valueStyle={{ color: '#52c41a' }}
+                  prefix={<CheckCircleOutlined />}
+                />
+              </Col>
+              <Col span={6}>
+                <Statistic
+                  title={deviceStats.scope === 'device' ? '该设备草稿' : '进行中草稿'}
+                  value={deviceStats.activeDraftCount}
+                  valueStyle={{ color: '#1677ff' }}
+                  prefix={<EditOutlined />}
+                />
+              </Col>
+              <Col span={6}>
+                <Statistic
+                  title="待我审批"
+                  value={deviceStats.pendingForMeCount}
+                  valueStyle={{ color: deviceStats.pendingForMeCount > 0 ? '#fa541c' : undefined }}
+                  prefix={<WarningOutlined />}
+                />
+              </Col>
+            </Row>
+          </Card>
           {renderDeviceContent()}
         </Space>
       </Content>
@@ -849,6 +1188,207 @@ function DeviceProtocolPage() {
             }
           />
         </Form>
+      </Modal>
+
+      {/* 激活 Modal */}
+      <Modal
+        title={
+          <Space>
+            <CheckCircleOutlined style={{ color: '#52c41a' }} />
+            <span>激活版本 {activateTarget?.version_name}</span>
+          </Space>
+        }
+        open={activateOpen}
+        onCancel={() => (activateLoading ? null : setActivateOpen(false))}
+        onOk={handleActivate}
+        okText="确认激活"
+        cancelText="取消"
+        confirmLoading={activateLoading}
+        destroyOnClose
+        width={600}
+      >
+        <Form form={activateForm} layout="vertical" preserve={false} initialValues={{ force: false }}>
+          {activateReportLoading ? (
+            <div style={{ textAlign: 'center', padding: 12 }}><Spin /></div>
+          ) : activateReport ? (
+            <Alert
+              type={activateReport.error_count > 0 ? 'error' : (activateReport.warning_count > 0 ? 'warning' : 'success')}
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={
+                activateReport.error_count > 0
+                  ? `体检存在 ${activateReport.error_count} 项错误`
+                  : (activateReport.warning_count > 0
+                      ? `体检通过，含 ${activateReport.warning_count} 项警告`
+                      : '体检全部通过，可以直接激活')
+              }
+              description={
+                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                  {(activateReport.errors || []).slice(0, 5).map((err, i) => (
+                    <div key={`err-${i}`} style={{ color: '#ff4d4f', fontSize: 12 }}>· {err}</div>
+                  ))}
+                  {(activateReport.warnings || []).slice(0, 5).map((w, i) => (
+                    <div key={`warn-${i}`} style={{ color: '#faad14', fontSize: 12 }}>· {w}</div>
+                  ))}
+                </Space>
+              }
+            />
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="暂无缓存激活报告，确认激活时将自动生成"
+            />
+          )}
+          <Form.Item name="force" valuePropName="checked">
+            <Checkbox>
+              <Space>
+                <WarningOutlined style={{ color: '#faad14' }} />
+                强制激活（忽略错误项）
+              </Space>
+            </Checkbox>
+          </Form.Item>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, cur) => prev.force !== cur.force}
+          >
+            {({ getFieldValue }) => (
+              <Form.Item
+                name="reason"
+                label={getFieldValue('force') ? '强制激活理由（必填）' : '激活备注（可选）'}
+                rules={
+                  getFieldValue('force')
+                    ? [{ required: true, message: '强制激活必须填写理由' }]
+                    : []
+                }
+              >
+                <Input.TextArea rows={3} maxLength={1000} showCount placeholder="例如：先行上线以解除阻塞，errors 已记录，后续版本修复" />
+              </Form.Item>
+            )}
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 弃用 Modal */}
+      <Modal
+        title={
+          <Space>
+            <StopOutlined style={{ color: '#ff4d4f' }} />
+            <span>弃用版本 {deprecateTarget?.version_name}</span>
+          </Space>
+        }
+        open={deprecateOpen}
+        onCancel={() => (deprecateLoading ? null : setDeprecateOpen(false))}
+        onOk={handleDeprecate}
+        okText="确认弃用"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+        confirmLoading={deprecateLoading}
+        destroyOnClose
+        width={520}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="弃用后该版本不可激活，Parser 侧不会被选中"
+          description="操作会留痕；若需继续演进，请使用「基于此版本迭代」创建新草稿。"
+        />
+        <Form form={deprecateForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="reason"
+            label="弃用原因（必填）"
+            rules={[{ required: true, message: '请详细填写弃用原因' }]}
+          >
+            <Input.TextArea rows={4} maxLength={1000} showCount placeholder="例如：引入 Label 217 解析错误，现已回退至 V3.1" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 激活报告 Modal */}
+      <Modal
+        title={
+          <Space>
+            <FileSearchOutlined />
+            <span>激活报告 {reportTarget?.version_name}</span>
+          </Space>
+        }
+        open={reportOpen}
+        onCancel={() => setReportOpen(false)}
+        onOk={() => setReportOpen(false)}
+        okText="关闭"
+        cancelButtonProps={{ style: { display: 'none' } }}
+        destroyOnClose
+        width={720}
+      >
+        {reportLoading ? (
+          <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+        ) : !reportData?.report ? (
+          <Empty description="暂无激活报告" />
+        ) : (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Descriptions size="small" column={2} bordered>
+              <Descriptions.Item label="当前状态">
+                <Tag
+                  color={
+                    reportData.availability_status === 'Available'
+                      ? 'green'
+                      : reportData.availability_status === 'Deprecated'
+                        ? 'default'
+                        : 'gold'
+                  }
+                >
+                  {reportData.availability_status}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="是否缓存">
+                {reportData.cached ? <Tag color="blue">缓存</Tag> : <Tag>实时计算</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="体检结果">
+                <Tag color={reportData.report.ok ? 'green' : 'red'}>
+                  {reportData.report.ok ? 'OK' : '有错误'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="强制激活">
+                {reportData.report.forced ? <Tag color="orange">是</Tag> : <Tag>否</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="错误 / 警告" span={2}>
+                <Space>
+                  <Tag color={reportData.report.error_count > 0 ? 'red' : 'default'}>
+                    错误 {reportData.report.error_count || 0}
+                  </Tag>
+                  <Tag color={reportData.report.warning_count > 0 ? 'orange' : 'default'}>
+                    警告 {reportData.report.warning_count || 0}
+                  </Tag>
+                </Space>
+              </Descriptions.Item>
+              {reportData.report.reason && (
+                <Descriptions.Item label="强制激活理由" span={2}>
+                  <Text>{reportData.report.reason}</Text>
+                </Descriptions.Item>
+              )}
+              <Descriptions.Item label="检查人">{reportData.report.checked_by || '-'}</Descriptions.Item>
+              <Descriptions.Item label="检查时间">
+                {reportData.report.checked_at ? dayjs(reportData.report.checked_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
+              </Descriptions.Item>
+            </Descriptions>
+            {(reportData.report.errors || []).length > 0 && (
+              <Card size="small" type="inner" title={`错误 (${reportData.report.errors.length})`}>
+                {reportData.report.errors.map((e, i) => (
+                  <div key={i} style={{ color: '#ff4d4f', fontSize: 12 }}>· {e}</div>
+                ))}
+              </Card>
+            )}
+            {(reportData.report.warnings || []).length > 0 && (
+              <Card size="small" type="inner" title={`警告 (${reportData.report.warnings.length})`}>
+                {reportData.report.warnings.map((w, i) => (
+                  <div key={i} style={{ color: '#faad14', fontSize: 12 }}>· {w}</div>
+                ))}
+              </Card>
+            )}
+          </Space>
+        )}
       </Modal>
     </Layout>
   )

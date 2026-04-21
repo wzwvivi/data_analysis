@@ -6,6 +6,8 @@ services:
       - SERVER_CPU_CORES=2
       - TASK_PROCESS_WORKERS=1
       - APP_BASE_DIR=/app_runtime
+      # 浏览器打开飞行助手用的绝对 URL；局域网访问时请在 .env 里设 FLIGHT_ASSISTANT_URL=http://<本机IP>:8082
+      - FLIGHT_ASSISTANT_URL=${FLIGHT_ASSISTANT_URL:-http://localhost:8082}
     ports:
       - "8081:8081"
     volumes:
@@ -17,6 +19,22 @@ services:
     container_name: tsn-frontend
     ports:
       - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  flight-assistant:
+    build: ./flight_data_webapp
+    container_name: tsn-flight-assistant
+    environment:
+      - FLIGHT_DATA_DB_PATH=/runtime/data/tsn_analyzer.db
+      - FLIGHT_DATA_UPLOAD_DIR=/runtime/uploads/flight_assistant
+      - TZ=Asia/Shanghai
+    ports:
+      # 注意: 生产环境建议改为 "127.0.0.1:8082:5000" 或只挂在内网, 见 README 安全说明
+      - "8082:5000"
+    volumes:
+      - ./backend-runtime:/runtime
     depends_on:
       - backend
     restart: unless-stopped

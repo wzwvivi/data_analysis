@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from .protocol import router as protocol_router
 from .parse import router as parse_router
-from .event_analysis import router as event_analysis_router
+from .fms_event_analysis import router as fms_event_analysis_router
+from .event_analysis import router as event_analysis_router  # Phase 1 back-compat
 from .fcc_event_analysis import router as fcc_event_analysis_router
 from .auto_flight_analysis import router as auto_flight_analysis_router
 from .compare import router as compare_router
@@ -18,6 +19,7 @@ from .workbench import router as workbench_router
 __all__ = [
     "protocol_router",
     "parse_router",
+    "fms_event_analysis_router",
     "event_analysis_router",
     "fcc_event_analysis_router",
     "auto_flight_analysis_router",

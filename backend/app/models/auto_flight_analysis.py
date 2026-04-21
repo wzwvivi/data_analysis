@@ -24,6 +24,9 @@ class AutoFlightAnalysisTask(Base):
     error_message = Column(Text, nullable=True)
     touchdown_count = Column(Integer, default=0)
     steady_count = Column(Integer, default=0)
+    # MR4：本次分析锁定的 TSN 协议版本（bundle）。目前仅做审计/展示用途，
+    # 未来若 AutoFlight 规则开始从 bundle 读取端口/字段可直接复用此列。
+    bundle_version_id = Column(Integer, ForeignKey("protocol_versions.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 

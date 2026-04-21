@@ -88,3 +88,58 @@ A: 在当前 bind mount 模式下还在，数据直接位于宿主机目录。
 - 代码走 Git
 - 迁移数据走离线包（本规范中的 `tsn_migration_bundle.tar.gz`）或对象存储
 
+## 8. 飞行助手分析 (flight_data_webapp) 迁移补充
+
+集成后，`flight-assistant` 服务与 TSN 后端共用同一个 SQLite 文件，迁移时要一起带。
+
+### 8.1 服务拓扑与端口
+
+| 服务 | 默认端口 | 镜像构建路径 | 说明 |
+| --- | --- | --- | --- |
+| backend | 8081 | `./backend` | TSN FastAPI 主服务 |
+| frontend | 3000 | `./frontend` | React 前端 |
+| flight-assistant | 8082 | `./flight_data_webapp` | 独立 Flask，新标签页打开 |
+
+### 8.2 必带数据（在第 2 节基础上追加）
+
+- `backend-runtime/data/tsn_analyzer.db`（TSN 与飞行助手**共用**的同一份 DB）
+- `backend-runtime/uploads/flight_assistant/`（飞行助手上传的 CSV 原始文件和合并结果；缺失会导致历史 dataset 无法重新下载/再分析）
+
+### 8.3 备份命令（含飞行助手）
+
+```bash
+docker compose down
+
+tar -czf tsn_migration_bundle.tar.gz \
+  backend-runtime/data/tsn_analyzer.db \
+  backend-runtime/data/results \
+  backend-runtime/uploads/protocols \
+  backend-runtime/uploads/flight_assistant
+```
+
+### 8.4 启用菜单入口（新机器）
+
+只影响 TSN 前端是否展示"飞行助手分析"入口，对飞行助手本身不影响：
+
+```yaml
+# docker-compose.yml > services.backend.environment 追加
+- FLIGHT_ASSISTANT_URL=http://<新机器内网或反代域名>:8082
+```
+
+然后 `docker compose up --build -d`。
+
+### 8.5 数据一致性与并发
+
+- 飞行助手 `get_db()` 会 `PRAGMA journal_mode=WAL`，两端并发读写同一份 `.db` 安全。
+- compose 里 `flight-assistant` 通过 `depends_on: backend` 等待后端容器启动；
+  另外容器内 `entrypoint.sh` 会再等待 `FLIGHT_DATA_DB_PATH` 对应的 `.db` 文件
+  最多 60 秒，避免首启抢先建库导致字段缺失。超时后仍会正常启动（SQLite 表
+  按名隔离，两端各自 `CREATE TABLE IF NOT EXISTS`）。
+
+### 8.6 安全提示（务必阅读）
+
+- `flight_data_webapp` 没有鉴权，不要把 8082 直接暴露在公网。
+- 生产环境建议把 `flight-assistant.ports` 改为 `"127.0.0.1:8082:5000"`，
+  或通过 nginx/Traefik + basic auth / OAuth2-Proxy 反向代理。
+- TSN 前端菜单的"管理员可见"只是软隐藏，不能阻止直连 8082 的请求。
+

@@ -5,7 +5,6 @@ import {
   Badge,
   Button,
   Card,
-  Descriptions,
   Empty,
   Form,
   Input,
@@ -30,8 +29,13 @@ import {
   UpOutlined,
   UnorderedListOutlined,
   BranchesOutlined,
+  ThunderboltFilled,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
+import 'dayjs/locale/zh-cn'
+
+dayjs.extend(relativeTime)
 import { networkConfigApi } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import {
@@ -40,8 +44,9 @@ import {
   buildFilters,
   matchPortKeyword,
 } from './icdColumns'
+import ActivationPanel from './ActivationPanel'
 
-const { Text, Title, Paragraph } = Typography
+const { Text, Paragraph } = Typography
 
 const STATUS_META = {
   Available:   { color: 'success',    label: '可用',        icon: <SafetyCertificateOutlined /> },
@@ -55,6 +60,15 @@ function formatTime(value) {
     return dayjs(value).format('YYYY-MM-DD HH:mm:ss')
   } catch {
     return String(value)
+  }
+}
+
+function formatRelative(value) {
+  if (!value) return ''
+  try {
+    return dayjs(value).locale('zh-cn').fromNow()
+  } catch {
+    return ''
   }
 }
 
@@ -148,6 +162,7 @@ function VersionViewerPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const canWrite = user && ['admin', 'network_team'].includes((user.role || '').trim())
+  const isAdmin = user && (user.role || '').trim() === 'admin'
 
   const [loading, setLoading] = useState(false)
   const [version, setVersion] = useState(null)
@@ -251,6 +266,39 @@ function VersionViewerPage() {
           }
           if (!v && !r.protocol_family_resolved) return <Tag color="warning">未映射</Tag>
           return <Tag color="blue">{v}</Tag>
+        },
+      },
+      {
+        title: '端口角色',
+        dataIndex: 'port_role',
+        width: 160,
+        filters: [
+          { text: 'TSN 异常检查', value: 'tsn_anomaly' },
+          { text: '飞管事件分析', value: 'fms_event' },
+          { text: '飞控事件分析 · 状态帧', value: 'fcc_status' },
+          { text: '飞控事件分析 · 通道选择', value: 'fcc_channel' },
+          { text: '飞控事件分析 · 故障码', value: 'fcc_fault' },
+          { text: '飞控事件分析（聚合）', value: 'fcc_event' },
+          { text: '自动飞行分析', value: 'auto_flight' },
+          { text: '自动飞行分析 · IRS 输入', value: 'irs_input' },
+          { text: '其它 / 未分类', value: 'other' },
+        ],
+        onFilter: (value, record) => (record.port_role || '') === value,
+        render: (v) => {
+          const labels = {
+            tsn_anomaly: 'TSN 异常检查',
+            fms_event:   '飞管事件分析',
+            fcc_status:  '飞控事件分析 · 状态帧',
+            fcc_channel: '飞控事件分析 · 通道选择',
+            fcc_fault:   '飞控事件分析 · 故障码',
+            fcc_event:   '飞控事件分析（聚合）',
+            auto_flight: '自动飞行分析',
+            irs_input:   '自动飞行分析 · IRS 输入',
+            other:       '其它 / 未分类',
+          }
+          return v
+            ? <Tag color="geekblue">{labels[v] || v}</Tag>
+            : <Tag color="default">未指定</Tag>
         },
       },
       {
@@ -417,36 +465,51 @@ function VersionViewerPage() {
   const unknownPorts = version.ports_summary?.unknown_family_ports || []
   const isDeprecated = version.availability_status === 'Deprecated'
 
+  const portCountTotal = version.ports_summary?.total ?? version.port_count ?? 0
+
   return (
     <div>
-      <Card style={{ marginBottom: 16 }}>
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Space wrap size="middle">
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/network-config')}>
-              返回
-            </Button>
-            <Title level={4} style={{ margin: 0 }}>
-              {version.protocol_name || ''} {version.version}
-            </Title>
-            <Tag color={statusMeta.color} icon={statusMeta.icon}>{statusMeta.label}</Tag>
-            <Text type="secondary">端口总数 {version.ports_summary?.total ?? version.port_count ?? 0}</Text>
-            <Text type="secondary">创建 {formatTime(version.created_at)}</Text>
-          </Space>
-          <Descriptions size="small" column={3}>
-            <Descriptions.Item label="来源文件">{version.source_file || '-'}</Descriptions.Item>
-            <Descriptions.Item label="激活时间">
-              {formatTime(version.activated_at)}
-              {version.activated_by ? ` by ${version.activated_by}` : ''}
-              {version.forced_activation ? '（强制）' : ''}
-            </Descriptions.Item>
-            <Descriptions.Item label="版本 ID">#{version.id}</Descriptions.Item>
-          </Descriptions>
-          {version.description ? (
-            <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-              {version.description}
-            </Paragraph>
-          ) : null}
-          <Space wrap>
+      <div className="page-hero" style={{ marginBottom: 16 }}>
+        <Space style={{ marginBottom: 12 }}>
+          <Button
+            size="small"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate('/network-config')}
+          >
+            返回版本列表
+          </Button>
+        </Space>
+
+        <div style={{
+          display: 'flex',
+          gap: 16,
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: '1 1 360px', minWidth: 0 }}>
+            <Space size={10} wrap>
+              <h1 className="page-hero-title gradient-text">
+                {version.protocol_name || '—'} <span style={{ color: '#c4b5fd' }}>{version.version}</span>
+              </h1>
+              <Tag color={statusMeta.color} icon={statusMeta.icon} style={{ fontSize: 12, padding: '2px 10px' }}>
+                {statusMeta.label}
+              </Tag>
+              {version.availability_status === 'PendingCode' ? (
+                <Tag color="gold" style={{ fontSize: 12, padding: '2px 10px' }}>
+                  <span className="pulse-dot" style={{ marginRight: 6 }} />待激活
+                </Tag>
+              ) : null}
+            </Space>
+            {version.description ? (
+              <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0, maxWidth: 800 }}>
+                {version.description}
+              </Paragraph>
+            ) : (
+              <div className="page-hero-subtitle">#{version.id} · 端口总数 {portCountTotal}</div>
+            )}
+          </div>
+
+          <Space wrap size={8}>
             <Button icon={<ReloadOutlined />} onClick={loadAll} loading={loading}>刷新</Button>
             {canWrite && !isDeprecated ? (
               <Button type="primary" icon={<BranchesOutlined />} onClick={openCloneModal}>
@@ -466,25 +529,93 @@ function VersionViewerPage() {
               </Popconfirm>
             ) : null}
           </Space>
-          <Alert
-            type="info"
-            showIcon
-            message="这是已发布协议版本的只读视图。如需修改请通过「基于此版本迭代」或从 ICD Excel 创建草稿。"
+        </div>
+
+        <div className="kv-grid" style={{ marginTop: 16 }}>
+          <div className="kv-row">
+            <div className="kv-label">版本 ID</div>
+            <div className="kv-value mono">#{version.id}</div>
+          </div>
+          <div className="kv-row">
+            <div className="kv-label">端口总数</div>
+            <div className="kv-value">{portCountTotal}</div>
+          </div>
+          <div className="kv-row">
+            <div className="kv-label">来源文件</div>
+            <div className="kv-value">{version.source_file || '—'}</div>
+          </div>
+          <div className="kv-row">
+            <div className="kv-label">创建时间</div>
+            <div className="kv-value">
+              <Tooltip title={formatTime(version.created_at)}>
+                {formatRelative(version.created_at) || formatTime(version.created_at)}
+              </Tooltip>
+            </div>
+          </div>
+          <div className="kv-row">
+            <div className="kv-label">激活时间</div>
+            <div className="kv-value">
+              {version.activated_at ? (
+                <Tooltip title={formatTime(version.activated_at)}>
+                  <Space size={6} wrap>
+                    <span>{formatRelative(version.activated_at)}</span>
+                    {version.activated_by ? (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        by {version.activated_by}{version.forced_activation ? ' (强制)' : ''}
+                      </Text>
+                    ) : null}
+                  </Space>
+                </Tooltip>
+              ) : <Text type="secondary">—</Text>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {unknownPorts.length > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={`${unknownPorts.length} 个端口没有映射到任何协议族`}
+          description={(
+            <Text code style={{ wordBreak: 'break-all' }}>
+              {unknownPorts.join(', ')}
+            </Text>
+          )}
+        />
+      ) : null}
+
+      {version.availability_status !== 'PendingCode' ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="这是已发布协议版本的只读视图。如需修改请通过「基于此版本迭代」或从 ICD Excel 创建草稿。"
+        />
+      ) : null}
+
+      {version.availability_status === 'PendingCode' ? (
+        <Card
+          title={(
+            <Space>
+              <ThunderboltFilled style={{ color: '#e3b959' }} />
+              <span>激活闸门 · 就绪度体检</span>
+              <Tag color="gold" style={{ marginLeft: 4 }}>
+                <span className="pulse-dot" style={{ marginRight: 6 }} />待激活
+              </Tag>
+            </Space>
+          )}
+          style={{ marginBottom: 16 }}
+        >
+          <ActivationPanel
+            version={version}
+            canWrite={canWrite}
+            isAdmin={isAdmin}
+            onActivated={loadAll}
           />
-          {unknownPorts.length > 0 ? (
-            <Alert
-              type="warning"
-              showIcon
-              message={`${unknownPorts.length} 个端口没有映射到任何协议族`}
-              description={(
-                <Text code style={{ wordBreak: 'break-all' }}>
-                  {unknownPorts.join(', ')}
-                </Text>
-              )}
-            />
-          ) : null}
-        </Space>
-      </Card>
+        </Card>
+      ) : null}
 
       <Card>
         <Tabs

@@ -54,6 +54,7 @@ PORT_MUTABLE_ATTRS = (
     "period_ms",
     "description",
     "protocol_family",
+    "port_role",
     # ── ICD 扩展 ──
     "message_id",
     "source_interface_id",

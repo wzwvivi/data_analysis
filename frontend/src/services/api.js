@@ -55,6 +55,11 @@ export const authApi = {
   changePassword: (oldPassword, newPassword) => api.put('/auth/password', { old_password: oldPassword, new_password: newPassword }),
 }
 
+export const configApi = {
+  /** 公共配置: 不需要登录即可拉取, 目前只含 flight_assistant_url */
+  getPublic: () => api.get('/config'),
+}
+
 export const roleConfigApi = {
   listRoles: () => api.get('/role-config/roles'),
   getRolePorts: (role, protocolVersionId) =>
@@ -177,6 +182,14 @@ export const networkConfigApi = {
   // ── 版本运维 ──
   deprecateVersion: (versionId, body = {}) =>
     api.post(`/network-config/versions/${versionId}/deprecate`, body),
+
+  // ── MR3 激活闸门 ──
+  getActivationReport: (versionId) =>
+    api.get(`/network-config/versions/${versionId}/activation-report`),
+  refreshActivationReport: (versionId) =>
+    api.post(`/network-config/versions/${versionId}/activation-report/refresh`),
+  activateVersion: (versionId, body = {}) =>
+    api.post(`/network-config/versions/${versionId}/activate`, body),
 }
 
 /** 设备协议（ARINC429 / CAN / RS422 …）*/
@@ -195,8 +208,21 @@ export const deviceProtocolApi = {
 
   listSpecs: (family = null) =>
     api.get('/device-protocol/specs', { params: family ? { family } : {} }),
-  getSpec: (specId) => api.get(`/device-protocol/specs/${specId}`),
+  getSpec: (specId, { availabilityStatus } = {}) =>
+    api.get(`/device-protocol/specs/${specId}`, {
+      params: availabilityStatus ? { availability_status: availabilityStatus } : {},
+    }),
+  listSpecVersions: (specId, { availabilityStatus } = {}) =>
+    api.get(`/device-protocol/specs/${specId}/versions`, {
+      params: availabilityStatus ? { availability_status: availabilityStatus } : {},
+    }),
   getVersion: (versionId) => api.get(`/device-protocol/versions/${versionId}`),
+  activateVersion: (versionId, body = {}) =>
+    api.post(`/device-protocol/versions/${versionId}/activate`, body),
+  deprecateVersion: (versionId, body = {}) =>
+    api.post(`/device-protocol/versions/${versionId}/deprecate`, body),
+  getActivationReport: (versionId) =>
+    api.get(`/device-protocol/versions/${versionId}/activation-report`),
   /** 一键「修改协议」：对某设备自动建/复用一条草稿 */
   editSpec: (specId) => api.post(`/device-protocol/specs/${specId}/edit-draft`),
 
@@ -213,8 +239,12 @@ export const deviceProtocolApi = {
   submitDraft: (draftId, body = {}) =>
     api.post(`/device-protocol/drafts/${draftId}/submit`, body),
 
-  listChangeRequests: (params = {}) =>
-    api.get('/device-protocol/change-requests', { params }),
+  listChangeRequests: ({ scope, family, ...rest } = {}) => {
+    const params = { ...rest }
+    if (scope) params.scope = scope
+    if (family) params.family = family
+    return api.get('/device-protocol/change-requests', { params })
+  },
   getChangeRequest: (crId) => api.get(`/device-protocol/change-requests/${crId}`),
   signOffChangeRequest: (crId, body) =>
     api.post(`/device-protocol/change-requests/${crId}/sign-off`, body),
@@ -345,70 +375,79 @@ export const parseApi = {
     }),
 }
 
-// 事件分析相关API
-export const eventAnalysisApi = {
-  // 运行事件分析
-  run: (parseTaskId, ruleTemplate = 'default_v1') =>
-    api.post(`/event-analysis/tasks/${parseTaskId}/run`, null, {
-      params: { rule_template: ruleTemplate }
+// 飞管事件分析相关API（原 eventAnalysisApi，Phase 1 renamed 到 fmsEventAnalysisApi）
+export const fmsEventAnalysisApi = {
+  // 运行飞管事件分析
+  run: (parseTaskId, ruleTemplate = 'default_v1', bundleVersionId = null) =>
+    api.post(`/fms-event-analysis/tasks/${parseTaskId}/run`, null, {
+      params: {
+        rule_template: ruleTemplate,
+        ...(bundleVersionId ? { bundle_version_id: bundleVersionId } : {}),
+      },
     }),
-  
+
   // 获取分析任务状态
-  getTask: (parseTaskId) => api.get(`/event-analysis/tasks/${parseTaskId}`),
-  
+  getTask: (parseTaskId) => api.get(`/fms-event-analysis/tasks/${parseTaskId}`),
+
   // 获取检查单结果列表
   getCheckResults: (parseTaskId) =>
-    api.get(`/event-analysis/tasks/${parseTaskId}/check-results`),
-  
+    api.get(`/fms-event-analysis/tasks/${parseTaskId}/check-results`),
+
   // 获取单个检查项详情
   getCheckDetail: (parseTaskId, checkId) =>
-    api.get(`/event-analysis/tasks/${parseTaskId}/check-results/${checkId}`),
-  
+    api.get(`/fms-event-analysis/tasks/${parseTaskId}/check-results/${checkId}`),
+
   // 获取事件时间线
   getTimeline: (parseTaskId) =>
-    api.get(`/event-analysis/tasks/${parseTaskId}/timeline`),
+    api.get(`/fms-event-analysis/tasks/${parseTaskId}/timeline`),
 
   /** 单个 xlsx：概览、检查结果、时间线 三个 Sheet */
   exportResults: (parseTaskId) =>
-    api.get(`/event-analysis/tasks/${parseTaskId}/export`, {
+    api.get(`/fms-event-analysis/tasks/${parseTaskId}/export`, {
       responseType: 'blob',
       timeout: 120000,
     }),
 }
 
-/** 独立事件分析（直接上传 pcap，不依赖解析任务） */
-export const standaloneEventApi = {
+// Phase 1 向后兼容别名
+export const eventAnalysisApi = fmsEventAnalysisApi
+
+/** 独立飞管事件分析（直接上传 pcap，不依赖解析任务） */
+export const standaloneFmsEventApi = {
   upload: (formData, onUploadProgress) =>
-    api.post('/event-analysis/standalone/upload', formData, {
+    api.post('/fms-event-analysis/standalone/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 300000,
       onUploadProgress,
     }),
 
   fromShared: (formData) =>
-    api.post('/event-analysis/standalone/from-shared', formData, {
+    api.post('/fms-event-analysis/standalone/from-shared', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 300000,
     }),
   listTasks: (page = 1, pageSize = 20) =>
-    api.get('/event-analysis/standalone/tasks', {
+    api.get('/fms-event-analysis/standalone/tasks', {
       params: { page, page_size: pageSize },
     }),
   getTask: (analysisTaskId) =>
-    api.get(`/event-analysis/standalone/tasks/${analysisTaskId}`),
+    api.get(`/fms-event-analysis/standalone/tasks/${analysisTaskId}`),
   getCheckResults: (analysisTaskId) =>
-    api.get(`/event-analysis/standalone/tasks/${analysisTaskId}/check-results`),
+    api.get(`/fms-event-analysis/standalone/tasks/${analysisTaskId}/check-results`),
   getCheckDetail: (analysisTaskId, checkId) =>
-    api.get(`/event-analysis/standalone/tasks/${analysisTaskId}/check-results/${checkId}`),
+    api.get(`/fms-event-analysis/standalone/tasks/${analysisTaskId}/check-results/${checkId}`),
   getTimeline: (analysisTaskId) =>
-    api.get(`/event-analysis/standalone/tasks/${analysisTaskId}/timeline`),
+    api.get(`/fms-event-analysis/standalone/tasks/${analysisTaskId}/timeline`),
 
   exportResults: (analysisTaskId) =>
-    api.get(`/event-analysis/standalone/tasks/${analysisTaskId}/export`, {
+    api.get(`/fms-event-analysis/standalone/tasks/${analysisTaskId}/export`, {
       responseType: 'blob',
       timeout: 120000,
     }),
 }
+
+// Phase 1 向后兼容别名
+export const standaloneEventApi = standaloneFmsEventApi
 
 /** 飞控事件分析（FCC Event Analysis） */
 export const fccEventAnalysisApi = {

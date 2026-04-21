@@ -1,0 +1,16 @@
+services:
+  flight-data-analyzer:
+    build: .
+    container_name: flight-data-analyzer
+    ports:
+      - "9001:5000"
+    volumes:
+      - flight_data_db:/app/data
+      - flight_data_uploads:/app/uploads
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+
+volumes:
+  flight_data_db:
+  flight_data_uploads:

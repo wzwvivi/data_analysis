@@ -17,7 +17,19 @@ from .arinc429 import (
     Arinc429VersionHistory,
 )
 from .parse_task import ParseTask, ParseResult
-from .event_analysis import EventAnalysisTask, EventCheckResult, EventTimelineEvent
+from .fms_event_analysis import (
+    FmsEventAnalysisTask,
+    FmsEventCheckResult,
+    FmsEventTimelineEvent,
+    EventAnalysisTask,
+    EventCheckResult,
+    EventTimelineEvent,
+)
+from .fcc_event_analysis import (
+    FccEventAnalysisTask,
+    FccEventCheckResult,
+    FccEventTimelineEvent,
+)
 from .auto_flight_analysis import (
     AutoFlightAnalysisTask,
     TouchdownAnalysisResult,
@@ -87,6 +99,12 @@ __all__ = [
     "ParserProfile",
     "ParseTask",
     "ParseResult",
+    "FmsEventAnalysisTask",
+    "FmsEventCheckResult",
+    "FmsEventTimelineEvent",
+    "FccEventAnalysisTask",
+    "FccEventCheckResult",
+    "FccEventTimelineEvent",
     "EventAnalysisTask",
     "EventCheckResult",
     "EventTimelineEvent",

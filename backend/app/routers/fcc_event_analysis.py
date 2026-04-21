@@ -45,6 +45,9 @@ class FccTaskResponse(BaseModel):
     failed_checks: int
     created_at: datetime
     completed_at: Optional[datetime] = None
+    # MR4：本次分析所用的 TSN 协议版本（bundle），用于审计展示
+    bundle_version_id: Optional[int] = None
+    bundle_version_label: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -113,7 +116,7 @@ class FccTimelineListResponse(BaseModel):
 
 # ========== helpers ==========
 
-def _task_to_response(task) -> FccTaskResponse:
+def _task_to_response(task, bundle_version_label: Optional[str] = None) -> FccTaskResponse:
     return FccTaskResponse(
         id=task.id,
         parse_task_id=task.parse_task_id,
@@ -128,7 +131,34 @@ def _task_to_response(task) -> FccTaskResponse:
         failed_checks=task.failed_checks or 0,
         created_at=task.created_at,
         completed_at=task.completed_at,
+        bundle_version_id=getattr(task, "bundle_version_id", None),
+        bundle_version_label=bundle_version_label,
     )
+
+
+async def _resolve_bundle_version_label(db: AsyncSession, version_id: Optional[int]) -> Optional[str]:
+    """按 ProtocolVersion.id 查 version 字符串，用于前端展示 'v3.2.1'。"""
+    if not version_id:
+        return None
+    from sqlalchemy import select as _select
+    from ..models import ProtocolVersion
+    res = await db.execute(_select(ProtocolVersion.version).where(ProtocolVersion.id == int(version_id)))
+    row = res.first()
+    return row[0] if row else None
+
+
+async def _build_label_map(db: AsyncSession, tasks) -> dict:
+    """批量解析 ProtocolVersion.version，避免 N+1。"""
+    vids = {int(t.bundle_version_id) for t in tasks if getattr(t, "bundle_version_id", None)}
+    if not vids:
+        return {}
+    from sqlalchemy import select as _select
+    from ..models import ProtocolVersion
+    res = await db.execute(
+        _select(ProtocolVersion.id, ProtocolVersion.version)
+        .where(ProtocolVersion.id.in_(vids))
+    )
+    return {int(r[0]): r[1] for r in res.all()}
 
 
 def _check_to_response(r) -> FccCheckResultResponse:
@@ -270,9 +300,14 @@ async def upload_standalone_pcap(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     divergence_tolerance_ms: int = Form(100),
+    bundle_version_id: Optional[int] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """上传 pcap/pcapng，创建飞控事件分析任务并在后台执行。"""
+    """上传 pcap/pcapng，创建飞控事件分析任务并在后台执行。
+
+    - `bundle_version_id`（可选，MR4）：本次分析绑定的 TSN 协议版本，仅用于
+      审计展示（FCC 规则使用固定端口，不消费 bundle 内容）。
+    """
     raw_name = file.filename or "capture.pcapng"
     suffix = Path(raw_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
@@ -297,6 +332,7 @@ async def upload_standalone_pcap(
     task = await service.create_standalone_task(
         filename=raw_name,
         file_path=str(dest.resolve()),
+        bundle_version_id=bundle_version_id,
     )
     background_tasks.add_task(
         submit_process_job, run_fcc_event_analysis_task_job, task.id, tolerance
@@ -306,6 +342,7 @@ async def upload_standalone_pcap(
         "success": True,
         "task_id": task.id,
         "status": "processing",
+        "bundle_version_id": task.bundle_version_id,
         "message": f"已上传并开始飞控事件分析（分歧容忍 {tolerance}ms）",
     }
 
@@ -315,6 +352,7 @@ async def standalone_from_shared_pcap(
     background_tasks: BackgroundTasks,
     shared_tsn_id: int = Form(...),
     divergence_tolerance_ms: int = Form(100),
+    bundle_version_id: Optional[int] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     """使用平台共享 TSN 文件创建飞控事件分析（直接读取共享源文件，不复制）。"""
@@ -335,6 +373,7 @@ async def standalone_from_shared_pcap(
     task = await service.create_standalone_task(
         filename=row.original_filename,
         file_path=str(src.resolve()),
+        bundle_version_id=bundle_version_id,
     )
     background_tasks.add_task(
         submit_process_job, run_fcc_event_analysis_task_job, task.id, tolerance
@@ -343,6 +382,7 @@ async def standalone_from_shared_pcap(
         "success": True,
         "task_id": task.id,
         "status": "processing",
+        "bundle_version_id": task.bundle_version_id,
         "message": f"已使用平台共享数据开始飞控事件分析（分歧容忍 {tolerance}ms）",
     }
 
@@ -355,11 +395,18 @@ async def list_standalone_tasks(
 ):
     service = FccEventAnalysisService(db)
     items, total = await service.list_standalone_tasks(page=page, page_size=page_size)
+    label_map = await _build_label_map(db, items)
     return FccTaskListResponse(
         total=total,
         page=page,
         page_size=page_size,
-        items=[_task_to_response(t) for t in items],
+        items=[
+            _task_to_response(
+                t,
+                bundle_version_label=label_map.get(int(t.bundle_version_id)) if t.bundle_version_id else None,
+            )
+            for t in items
+        ],
     )
 
 
@@ -369,7 +416,8 @@ async def get_standalone_task(task_id: int, db: AsyncSession = Depends(get_db)):
     task = await service.get_standalone_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="飞控事件分析任务不存在")
-    return _task_to_response(task)
+    label = await _resolve_bundle_version_label(db, task.bundle_version_id)
+    return _task_to_response(task, bundle_version_label=label)
 
 
 @router.get("/standalone/tasks/{task_id}/check-results", response_model=FccCheckResultListResponse)

@@ -58,6 +58,9 @@ function DraftJsonEditorPage() {
   const [diffResult, setDiffResult] = useState(null)
 
   const [metaForm] = Form.useForm()
+  const [submitForm] = Form.useForm()
+  const [submitOpen, setSubmitOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
   const loadDraft = useCallback(async () => {
     setLoading(true)
@@ -185,24 +188,34 @@ function DraftJsonEditorPage() {
     }
   }
 
-  const onSubmit = async () => {
+  const onSubmit = () => {
     if (dirty) {
       message.warning('请先保存当前修改')
       return
     }
-    Modal.confirm({
-      title: '确认提交审批？',
-      content: '提交后草稿锁定为 pending，等设备团队 / 网络团队 / TSN 开发团队 / 管理员逐级会签',
-      onOk: async () => {
-        try {
-          await deviceProtocolApi.submitDraft(id)
-          message.success('已提交审批')
-          loadDraft()
-        } catch (e) {
-          message.error(e?.response?.data?.detail || '提交失败')
-        }
-      },
-    })
+    submitForm.resetFields()
+    setSubmitOpen(true)
+  }
+
+  const handleSubmitConfirm = async () => {
+    let values
+    try {
+      values = await submitForm.validateFields()
+    } catch {
+      return
+    }
+    setSubmitting(true)
+    try {
+      const submitNote = (values.submit_note || '').trim()
+      await deviceProtocolApi.submitDraft(id, submitNote ? { submit_note: submitNote } : {})
+      message.success('已提交审批')
+      setSubmitOpen(false)
+      loadDraft()
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '提交失败')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const onDelete = () => {
@@ -478,6 +491,39 @@ function DraftJsonEditorPage() {
           },
         ]}
       />
+
+      <Modal
+        title="提交审批"
+        open={submitOpen}
+        onOk={handleSubmitConfirm}
+        onCancel={() => (submitting ? null : setSubmitOpen(false))}
+        okText="提交"
+        cancelText="取消"
+        confirmLoading={submitting}
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="提交后草稿锁定为 pending"
+          description="需要设备团队 / TSN·网络团队 / 管理员逐级会签，可在「审批中」页跟踪进度。"
+        />
+        <Form form={submitForm} layout="vertical" preserve={false}>
+          <Form.Item
+            label="提交说明（可选）"
+            name="submit_note"
+            tooltip="会展示在审批页，建议描述本次改动的目的 / 影响范围 / 关联需求"
+          >
+            <Input.TextArea
+              rows={4}
+              maxLength={2000}
+              showCount
+              placeholder="例如：对齐最新 ICD 文档，调整 Label 217 的 BNR 分辨率"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Space>
   )
 }

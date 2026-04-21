@@ -129,8 +129,40 @@ class Checksheet:
 
     RULE_TEMPLATE_ID = "default_v1"
 
-    def __init__(self):
+    def __init__(self, bundle: Any = None):
+        """
+        :param bundle: 可选的 `Bundle` 对象（MR4）。注入后 payload_filter /
+            content_checks 里的 `field` 引用会通过 bundle.resolve_offset(port, name)
+            解析成具体 offset。未注入（老行为）时，规则必须显式提供 `offset`。
+        """
+        self._bundle = bundle
         self.check_items = self._define_check_items()
+
+    def set_bundle(self, bundle: Any) -> None:
+        """运行时替换 bundle，用于同一实例跨版本复用（比如 re-run against）。"""
+        self._bundle = bundle
+
+    def _resolve_offset(self, port: int, entry: Dict[str, Any]) -> Optional[int]:
+        """统一解析规则条目里的 offset（MR4）。
+
+        优先级：
+        1. 显式 `offset` → 直接返回（back-compat，保证老规则不受影响）
+        2. `field` 且已注入 bundle → bundle.resolve_offset(port, field)
+        3. 都没有 → None（调用方应跳过此条目）
+        """
+        off = entry.get("offset")
+        if off is not None:
+            try:
+                return int(off)
+            except (TypeError, ValueError):
+                return None
+        fname = entry.get("field")
+        if fname and self._bundle is not None:
+            try:
+                return self._bundle.resolve_offset(int(port), str(fname))
+            except Exception:
+                return None
+        return None
 
     def _define_check_items(self) -> List[CheckItem]:
         """
@@ -788,11 +820,12 @@ class Checksheet:
         self,
         data_bytes: bytes,
         filters: List[Dict[str, Any]],
+        port: Optional[int] = None,
     ) -> bool:
         if not filters:
             return True
         for pf in filters:
-            off = pf.get("offset")
+            off = self._resolve_offset(port if port is not None else 0, pf)
             val = pf.get("value")
             if off is None or val is None:
                 continue
@@ -826,7 +859,7 @@ class Checksheet:
             return self._analyze_state_change(item, port_df, parsed_data, result, events)
 
         # ── 标准模式：先按 payload 过滤再分析 ──
-        filtered_df = self._apply_payload_filter(port_df, item.payload_filter)
+        filtered_df = self._apply_payload_filter(port_df, item.payload_filter, port=item.port)
 
         if filtered_df.empty:
             result.period_result = "na"
@@ -914,12 +947,12 @@ class Checksheet:
                 continue
 
             if item.state_prerequisite_filter:
-                if self._all_offsets_match(cur_bytes, item.state_prerequisite_filter):
+                if self._all_offsets_match(cur_bytes, item.state_prerequisite_filter, port=item.port):
                     seen_prereq = True
 
             if prev_bytes is not None:
-                prev_match = self._all_offsets_match(prev_bytes, item.payload_filter)
-                curr_match = self._all_offsets_match(cur_bytes, item.payload_filter)
+                prev_match = self._all_offsets_match(prev_bytes, item.payload_filter, port=item.port)
+                curr_match = self._all_offsets_match(cur_bytes, item.payload_filter, port=item.port)
                 if item.detect_mode == "state_change":
                     if not prev_match and curr_match:
                         transition_idx = idx
@@ -964,7 +997,8 @@ class Checksheet:
         if item.expected_period_ms:
             post_transition_df = self._apply_payload_filter(
                 port_df[port_df["timestamp"] >= transition_timestamp],
-                item.payload_filter
+                item.payload_filter,
+                port=item.port,
             )
             if len(post_transition_df) > 1:
                 result = self._check_period(post_transition_df, item, result)
@@ -993,11 +1027,13 @@ class Checksheet:
     def _apply_payload_filter(
         self,
         df: pd.DataFrame,
-        payload_filter: List[Dict[str, Any]]
+        payload_filter: List[Dict[str, Any]],
+        port: Optional[int] = None,
     ) -> pd.DataFrame:
         """
         使用 payload_filter 从 DataFrame 中筛选匹配行。
         payload_filter 中每个条件为 {"offset": int, "value": int}
+        或 {"field": str, "value": int}（MR4：通过 bundle 解析）
         """
         if not payload_filter or 'raw_data' not in df.columns:
             return df
@@ -1005,7 +1041,7 @@ class Checksheet:
         mask = pd.Series([True] * len(df), index=df.index)
 
         for pf in payload_filter:
-            offset = pf.get('offset')
+            offset = self._resolve_offset(port if port is not None else 0, pf)
             expected_byte = pf.get('value')
             if offset is None or expected_byte is None:
                 continue
@@ -1094,7 +1130,8 @@ class Checksheet:
         actual_parts = []
 
         for check in item.content_checks:
-            offset = check.get('offset', 0)
+            resolved = self._resolve_offset(item.port, check)
+            offset = resolved if resolved is not None else int(check.get('offset', 0) or 0)
 
             if 'expected_hex' in check:
                 expected_byte = int(check['expected_hex'], 16)
@@ -1157,7 +1194,7 @@ class Checksheet:
                 return result
             response_df = response_df.sort_values("timestamp").reset_index(drop=True)
             if item.response_filter:
-                response_df = self._apply_payload_filter(response_df, item.response_filter)
+                response_df = self._apply_payload_filter(response_df, item.response_filter, port=item.response_port)
             if response_df.empty:
                 result.response_result = "na"
                 result.response_analysis = f"响应端口 {item.response_port} 无匹配数据"
@@ -1182,7 +1219,7 @@ class Checksheet:
         response_df = response_df.sort_values("timestamp").reset_index(drop=True)
 
         if item.response_filter:
-            response_df = self._apply_payload_filter(response_df, item.response_filter)
+            response_df = self._apply_payload_filter(response_df, item.response_filter, port=item.response_port)
 
         if response_df.empty:
             result.response_result = "na"

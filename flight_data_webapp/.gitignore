@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+data/*.db
+uploads/
+*.db-wal
+*.db-shm
+.env
+deploy.py

@@ -13,6 +13,7 @@ git_export_status 取值 pending / exported / skipped / failed。
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -178,6 +179,20 @@ class DeviceProtocolVersion(Base):
     )
     activated_at = Column(DateTime, nullable=True)
     activated_by = Column(String(64), nullable=True)
+    forced_activation = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="激活时是否使用了 force（绕过 validate 错误）",
+    )
+    activation_report_json = Column(
+        JSON,
+        nullable=True,
+        comment="激活体检报告：{ok, errors[], warnings[], forced, reason, checked_at}",
+    )
+    deprecated_at = Column(DateTime, nullable=True)
+    deprecated_by = Column(String(64), nullable=True)
+    deprecation_reason = Column(Text, nullable=True)
 
     # ── 方案2：Git 审计副本元信息 ──
     git_commit_hash = Column(

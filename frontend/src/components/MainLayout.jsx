@@ -21,6 +21,7 @@ import {
 import dayjs from 'dayjs'
 import { useAuth } from '../context/AuthContext'
 import { notificationApi } from '../services/api'
+import { PAGE_FLIGHT_ASSISTANT } from '../constants/roles'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
@@ -28,7 +29,7 @@ const { Title } = Typography
 function MainLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout, isAdmin, hasPageAccess } = useAuth()
+  const { user, logout, isAdmin, hasPageAccess, publicConfig } = useAuth()
   const [collapsed, setCollapsed] = useState(true)
   const [pwdVisible, setPwdVisible] = useState(false)
   const [pwdLoading, setPwdLoading] = useState(false)
@@ -89,61 +90,94 @@ function MainLayout() {
 
   const menuItems = useMemo(() => {
     const items = []
-    if (hasPageAccess('dashboard') || hasPageAccess('workbench')) {
-      const overviewChildren = []
-      if (hasPageAccess('dashboard')) {
-        overviewChildren.push({ key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' })
-      }
-      if (hasPageAccess('workbench')) {
-        overviewChildren.push({ key: '/workbench', icon: <AimOutlined />, label: '试验工作台' })
-      }
-      if (overviewChildren.length > 0) {
-        items.push({
-          type: 'group',
-          label: '总览',
-          children: overviewChildren,
-        })
-      }
+
+    // 总览
+    const overviewChildren = []
+    if (hasPageAccess('dashboard')) {
+      overviewChildren.push({ key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' })
     }
+    if (hasPageAccess('workbench')) {
+      overviewChildren.push({ key: '/workbench', icon: <AimOutlined />, label: '试验工作台' })
+    }
+    if (overviewChildren.length > 0) {
+      items.push({ type: 'group', label: '总览', children: overviewChildren })
+    }
+
+    // 网络数据分析（含 事件分析 子菜单）
     const networkChildren = []
     if (hasPageAccess('upload')) networkChildren.push({ key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' })
     if (hasPageAccess('tasks')) networkChildren.push({ key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' })
     if (hasPageAccess('network-config')) networkChildren.push({ key: '/network-config', icon: <SafetyCertificateOutlined />, label: 'TSN 网络配置' })
     if (hasPageAccess('device-protocol')) networkChildren.push({ key: '/device-protocol', icon: <ApartmentOutlined />, label: '设备协议管理' })
+    if (isAdmin) {
+      networkChildren.push({ key: '/admin/protocol-manager', icon: <FileTextOutlined />, label: '协议管理' })
+    }
+
+    const eventChildren = []
+    if (hasPageAccess('fms-event-analysis') || hasPageAccess('event-analysis')) eventChildren.push({ key: '/fms-event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' })
+    if (hasPageAccess('fcc-event-analysis')) eventChildren.push({ key: '/fcc-event-analysis', icon: <FileSearchOutlined />, label: '飞控事件分析' })
+    if (hasPageAccess('auto-flight-analysis')) eventChildren.push({ key: '/auto-flight-analysis', icon: <FileSearchOutlined />, label: '自动飞行性能分析' })
+    if (hasPageAccess('compare')) eventChildren.push({ key: '/compare', icon: <SwapOutlined />, label: 'TSN 异常检查' })
+    if (eventChildren.length > 0) {
+      networkChildren.push({
+        key: 'submenu/event-analysis',
+        icon: <DatabaseOutlined />,
+        label: '事件分析',
+        children: eventChildren,
+      })
+    }
+
     if (networkChildren.length > 0) {
       items.push({ type: 'group', label: '网络数据分析', children: networkChildren })
     }
 
-    const analysisChildren = []
-    if (hasPageAccess('event-analysis')) analysisChildren.push({ key: '/event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' })
-    if (hasPageAccess('fcc-event-analysis')) analysisChildren.push({ key: '/fcc-event-analysis', icon: <FileSearchOutlined />, label: '飞控事件分析' })
-    if (hasPageAccess('auto-flight-analysis')) analysisChildren.push({ key: '/auto-flight-analysis', icon: <FileSearchOutlined />, label: '自动飞行性能分析' })
-    if (analysisChildren.length > 0) {
-      items.push({ type: 'group', label: '飞机行为事件分析', children: analysisChildren })
+    // 飞行助手分析: 独立 Flask 服务 (flight_data_webapp), 新标签页打开
+    // - 启用条件: 后端 FLIGHT_ASSISTANT_URL 非空 + 当前用户对 flight-assistant 页面有权限
+    // - 默认只有 admin 角色能看到此入口; 实际访问控制依赖网络层 (见 README 安全说明)
+    const flightAssistantChildren = []
+    const flightUrl = (publicConfig?.flight_assistant_url || '').trim()
+    if (flightUrl && hasPageAccess(PAGE_FLIGHT_ASSISTANT)) {
+      flightAssistantChildren.push({
+        key: 'flight-assistant-external',
+        icon: <FileSearchOutlined />,
+        label: 'CSV 架次分析',
+        onClick: () => window.open(flightUrl, '_blank', 'noopener,noreferrer'),
+      })
+    }
+    if (flightAssistantChildren.length > 0) {
+      items.push({ type: 'group', label: '飞行助手分析', children: flightAssistantChildren })
     }
 
-    const compareChildren = []
-    if (hasPageAccess('compare')) compareChildren.push({ key: '/compare', icon: <SwapOutlined />, label: '异常检查' })
-    if (compareChildren.length > 0) {
-      items.push({ type: 'group', label: 'TSN数据异常检查', children: compareChildren })
-    }
-
+    // 系统配置（仅管理员，不含协议管理 —— 已挪至"网络数据分析"）
     if (isAdmin) {
       items.push({ type: 'divider' })
       items.push({
         type: 'group',
         label: '系统配置',
         children: [
-          { key: '/admin/protocol-manager', icon: <FileTextOutlined />, label: '协议管理' },
           { key: '/admin/platform-data', icon: <CloudUploadOutlined />, label: '平台共享数据' },
           { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
         ],
       })
     }
     return items
-  }, [isAdmin, hasPageAccess])
+  }, [isAdmin, hasPageAccess, publicConfig?.flight_assistant_url])
+
+  // 事件分析子菜单：根据当前路由自动展开
+  const eventSubmenuKey = 'submenu/event-analysis'
+  const eventPaths = ['/fms-event-analysis', '/event-analysis', '/fcc-event-analysis', '/auto-flight-analysis', '/compare']
+  const isInsideEventSubmenu = eventPaths.some((p) => location.pathname.startsWith(p))
+  const [openKeys, setOpenKeys] = useState(isInsideEventSubmenu ? [eventSubmenuKey] : [])
+  useEffect(() => {
+    if (isInsideEventSubmenu && !openKeys.includes(eventSubmenuKey)) {
+      setOpenKeys((prev) => [...prev, eventSubmenuKey])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInsideEventSubmenu])
 
   const handleMenuClick = ({ key }) => {
+    // 外链/自定义 onClick 项的 key 不以 `/` 开头, 让项目自己的 onClick 处理, 不走路由。
+    if (typeof key !== 'string' || !key.startsWith('/')) return
     navigate(key)
   }
 
@@ -157,7 +191,8 @@ function MainLayout() {
     if (path.startsWith('/compare')) return '/compare'
     if (path.startsWith('/auto-flight-analysis')) return '/auto-flight-analysis'
     if (path.startsWith('/fcc-event-analysis')) return '/fcc-event-analysis'
-    if (path.startsWith('/event-analysis')) return '/event-analysis'
+    if (path.startsWith('/fms-event-analysis')) return '/fms-event-analysis'
+    if (path.startsWith('/event-analysis')) return '/fms-event-analysis'
     if (path.startsWith('/admin/protocol-manager')) return '/admin/protocol-manager'
     if (path.startsWith('/admin/platform-data')) return '/admin/platform-data'
     if (path.startsWith('/admin/users')) return '/admin/users'
@@ -203,21 +238,21 @@ function MainLayout() {
     } else if (path.startsWith('/device-protocol')) {
       push('网络数据分析', null); push('设备协议管理', null)
     } else if (path.startsWith('/compare')) {
-      push('TSN数据异常检查', null)
+      push('网络数据分析', null); push('事件分析', null); push('TSN 异常检查', null)
     } else if (path.startsWith('/fcc-event-analysis/task/')) {
-      push('飞机行为事件分析', null); push('飞控事件分析', '/fcc-event-analysis'); push('任务详情', null)
+      push('网络数据分析', null); push('事件分析', null); push('飞控事件分析', '/fcc-event-analysis'); push('任务详情', null)
     } else if (path.startsWith('/fcc-event-analysis')) {
-      push('飞机行为事件分析', null); push('飞控事件分析', null)
+      push('网络数据分析', null); push('事件分析', null); push('飞控事件分析', null)
     } else if (path.startsWith('/auto-flight-analysis/task/')) {
-      push('飞机行为事件分析', null); push('自动飞行性能分析', '/auto-flight-analysis'); push('任务详情', null)
+      push('网络数据分析', null); push('事件分析', null); push('自动飞行性能分析', '/auto-flight-analysis'); push('任务详情', null)
     } else if (path.startsWith('/auto-flight-analysis')) {
-      push('飞机行为事件分析', null); push('自动飞行性能分析', null)
-    } else if (path.startsWith('/event-analysis/task/')) {
-      push('飞机行为事件分析', null); push('飞管事件分析', '/event-analysis'); push('任务详情', null)
-    } else if (path.startsWith('/event-analysis')) {
-      push('飞机行为事件分析', null); push('飞管事件分析', null)
+      push('网络数据分析', null); push('事件分析', null); push('自动飞行性能分析', null)
+    } else if (path.startsWith('/fms-event-analysis/task/') || path.startsWith('/event-analysis/task/')) {
+      push('网络数据分析', null); push('事件分析', null); push('飞管事件分析', '/fms-event-analysis'); push('任务详情', null)
+    } else if (path.startsWith('/fms-event-analysis') || path.startsWith('/event-analysis')) {
+      push('网络数据分析', null); push('事件分析', null); push('飞管事件分析', null)
     } else if (path.startsWith('/admin/protocol-manager')) {
-      push('系统配置', null); push('协议管理', null)
+      push('网络数据分析', null); push('协议管理', null)
     } else if (path.startsWith('/admin/platform-data')) {
       push('系统配置', null); push('平台共享数据', null)
     } else if (path.startsWith('/admin/users')) {
@@ -334,6 +369,8 @@ function MainLayout() {
         <Menu
           mode="inline"
           selectedKeys={[getSelectedKey()]}
+          openKeys={collapsed ? [] : openKeys}
+          onOpenChange={(keys) => setOpenKeys(keys)}
           items={menuItems}
           onClick={handleMenuClick}
           inlineCollapsed={collapsed}

@@ -19,55 +19,96 @@ from ..models import (
     SteadyStateAnalysisResult,
     ParseResult,
 )
+from .bundle import BundleNotFoundError, load_bundle
+from .bundle import generator as bundle_generator
 from .event_rules import AutoFlightAnalyzer
+from .payload_layouts import (
+    TSN_HEADER_LEN,
+    AUTO_FLIGHT_FRAME_SIZE,
+    AUTO_FLIGHT_LAYOUT,
+)
 from .pcap_reader import pcap_to_port_dataframes, iter_udp_packets
 from .parsers.irs_parser import IRSParser
 
 
-AUTO_FLIGHT_PORTS = {9031: "FCC1", 9032: "FCC2", 9033: "FCC3"}
+# ── 硬编码兜底（仅当 bundle 里没有 port_role=auto_flight 的声明时使用） ──
+# 端口→设备名映射：来自《飞控发出数据-TSN版-V13.4》设备协议，而非 ICD
+# —— ICD 里只写"这个端口属于飞控"，但具体哪台 FCC 是设备协议知识。
+DEFAULT_AUTO_FLIGHT_PORTS = {9031: "FCC1", 9032: "FCC2", 9033: "FCC3"}
 IRS_PORT_HINTS = {7004: "IRS1", 7005: "IRS2", 7006: "IRS3"}
-TSN_HEADER_LEN = 8
 
 
-def _u8(data: bytes, idx1: int) -> int:
-    return int(data[idx1 - 1])
+def _decode_auto_flight_raw(raw_hex: str, port: int, fcc_label: Optional[str] = None) -> Optional[dict]:
+    """从 raw_hex 解出自动飞行性能分析需要的字段。
 
-
-def _f32(data: bytes, idx1: int) -> float:
-    import struct
-    start = idx1 - 1
-    return float(struct.unpack("<f", data[start:start + 4])[0])
-
-
-def _decode_auto_flight_raw(raw_hex: str, port: int) -> Optional[dict]:
+    仅抽取"触底 / 稳态"分析链路上用到的 14 个字段，其余保持懒解析。
+    """
     try:
         b = bytes.fromhex(raw_hex or "")
     except Exception:
         return None
-    if len(b) < TSN_HEADER_LEN + 124:
+    if len(b) < TSN_HEADER_LEN + AUTO_FLIGHT_FRAME_SIZE:
         return None
-    d = b[TSN_HEADER_LEN:TSN_HEADER_LEN + 124]
+    d = b[TSN_HEADER_LEN:TSN_HEADER_LEN + AUTO_FLIGHT_FRAME_SIZE]
+    # 懒解码：只取分析器真正用到的字段
+    wanted = (
+        "ap_engaged", "at_engaged", "air_ground", "flight_phase",
+        "auto_mode", "lat_mode_active", "lon_mode_active",
+        "thr_mode_active", "af_warning",
+        "lat_track_error_m", "vert_track_error_m", "speed_cmd_mps",
+        "current_altitude_m", "current_airspeed_mps", "current_groundspeed_mps",
+    )
+    import struct
+    out: Dict[str, object] = {
+        "source_port": port,
+        "source_fcc": fcc_label or DEFAULT_AUTO_FLIGHT_PORTS.get(port),
+    }
     try:
-        return {
-            "source_port": port,
-            "source_fcc": AUTO_FLIGHT_PORTS.get(port),
-            "ap_engaged": _u8(d, 1),
-            "at_engaged": _u8(d, 2),
-            "air_ground": _u8(d, 3),
-            "flight_phase": _u8(d, 4),
-            "auto_mode": _u8(d, 5),
-            "lat_mode_active": _u8(d, 8),
-            "lon_mode_active": _u8(d, 10),
-            "thr_mode_active": _u8(d, 12),
-            "af_warning": _u8(d, 13),
-            "lat_track_error_m": _f32(d, 14),
-            "vert_track_error_m": _f32(d, 18),
-            "speed_cmd_mps": _f32(d, 22),
-            "current_altitude_m": _f32(d, 56),
-            "current_airspeed_mps": _f32(d, 60),
-            "current_groundspeed_mps": _f32(d, 68),
-        }
+        for name in wanted:
+            spec = AUTO_FLIGHT_LAYOUT.get(name)
+            if not spec:
+                continue
+            off, typ = spec
+            if typ == "u8":
+                if off < len(d):
+                    out[name] = int(d[off])
+            elif typ == "f32":
+                if off + 4 <= len(d):
+                    out[name] = float(struct.unpack_from("<f", d, off)[0])
     except Exception:
+        return None
+    return out
+
+
+class BundleResolutionError(RuntimeError):
+    """用户显式选了 bundle 版本但加载/生成失败；strict 模式下需要硬失败。"""
+
+
+async def _safe_load_bundle(
+    db: AsyncSession,
+    version_id: int,
+    *,
+    strict: bool = False,
+):
+    """加载 bundle，缺失时尝试生成一次；仍拿不到返回 None。
+
+    :param strict: True 时任何失败都抛 :class:`BundleResolutionError`，
+        用于"用户显式选了版本"的场景，避免结果与所选版本不匹配。
+        False 时失败返回 None，保留尽力而为兜底。
+    """
+    try:
+        return load_bundle(version_id)
+    except BundleNotFoundError:
+        try:
+            await bundle_generator.generate_bundle(db, version_id)
+            return load_bundle(version_id)
+        except Exception as exc:
+            if strict:
+                raise BundleResolutionError(f"Bundle v{version_id} 无法生成: {exc}") from exc
+            return None
+    except Exception as exc:
+        if strict:
+            raise BundleResolutionError(f"Bundle v{version_id} 加载失败: {exc}") from exc
         return None
 
 
@@ -75,11 +116,75 @@ class AutoFlightAnalysisService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _resolve_port_mapping(
+        self,
+        bundle_version_id: Optional[int],
+    ) -> Tuple[Dict[int, str], Dict[int, str]]:
+        """返回 (auto_flight_port_map, irs_port_map)。
+
+        - auto_flight_port_map: {port_number: fcc_label}，按 port_role='auto_flight'；
+        - irs_port_map: {port_number: irs_label}，按 port_role='irs_input'。
+
+        严格语义：
+          * 用户已选 `bundle_version_id` → strict=True，bundle 加载失败直接抛
+            `BundleResolutionError`（上游转任务失败，避免用户选了 vN 却没跑 vN）；
+          * 未选版本 / bundle 软失败 → 回落硬编码默认。
+        """
+        if bundle_version_id is None:
+            return dict(DEFAULT_AUTO_FLIGHT_PORTS), dict(IRS_PORT_HINTS)
+
+        bundle = await _safe_load_bundle(
+            self.db, int(bundle_version_id), strict=True
+        )
+        if bundle is None:
+            # strict=True 下拿不到 bundle 会抛错，不会走到这里；作为防御性分支
+            return dict(DEFAULT_AUTO_FLIGHT_PORTS), dict(IRS_PORT_HINTS)
+
+        def _fcc_label(p: int) -> str:
+            bp = bundle.ports.get(p)
+            if bp:
+                label = (bp.target_device or "").strip()
+                if label:
+                    return label
+                mn = (bp.message_name or "").upper()
+                for cand in ("FCC1", "FCC2", "FCC3", "BCM"):
+                    if cand in mn:
+                        return cand
+            return DEFAULT_AUTO_FLIGHT_PORTS.get(p) or f"PORT_{p}"
+
+        def _irs_label(p: int, fallback_idx: int) -> str:
+            bp = bundle.ports.get(p)
+            if bp:
+                label = (bp.source_device or "").strip()
+                if label:
+                    return label
+                mn = (bp.message_name or "").upper()
+                for cand in ("IRS1", "IRS2", "IRS3"):
+                    if cand in mn:
+                        return cand
+            return IRS_PORT_HINTS.get(p) or f"IRS{fallback_idx + 1}"
+
+        auto_ports = bundle.ports_for_role("auto_flight")
+        if auto_ports:
+            auto_map = {p: _fcc_label(p) for p in auto_ports}
+        else:
+            # bundle 里未声明 auto_flight 角色 → 回落默认（不是硬错，允许老版本 bundle）
+            auto_map = dict(DEFAULT_AUTO_FLIGHT_PORTS)
+
+        irs_ports = bundle.ports_for_role("irs_input")
+        if irs_ports:
+            irs_map = {p: _irs_label(p, i) for i, p in enumerate(sorted(irs_ports))}
+        else:
+            irs_map = dict(IRS_PORT_HINTS)
+
+        return auto_map, irs_map
+
     async def create_task_from_pcap(
         self,
         filename: str,
         file_path: str,
         source_type: str = "standalone",
+        bundle_version_id: Optional[int] = None,
     ) -> AutoFlightAnalysisTask:
         task = AutoFlightAnalysisTask(
             parse_task_id=None,
@@ -89,13 +194,36 @@ class AutoFlightAnalysisService:
             source_type=source_type,
             status="pending",
             progress=0,
+            bundle_version_id=(int(bundle_version_id) if bundle_version_id is not None else None),
         )
         self.db.add(task)
         await self.db.commit()
         await self.db.refresh(task)
         return task
 
-    async def create_task_from_parse(self, parse_task_id: int) -> AutoFlightAnalysisTask:
+    async def create_task_from_parse(
+        self,
+        parse_task_id: int,
+        bundle_version_id: Optional[int] = None,
+    ) -> AutoFlightAnalysisTask:
+        """基于已有解析任务创建分析任务。
+
+        若未显式传入 `bundle_version_id`，默认继承自 `ParseTask.protocol_version_id`
+        ——保证"基于 v5 解析结果跑的分析"显示的也是 v5。
+        """
+        resolved_bvid: Optional[int] = (
+            int(bundle_version_id) if bundle_version_id is not None else None
+        )
+        if resolved_bvid is None:
+            from ..models import ParseTask  # 延迟导入避免循环
+            parse_row = (
+                await self.db.execute(
+                    select(ParseTask).where(ParseTask.id == parse_task_id)
+                )
+            ).scalar_one_or_none()
+            if parse_row is not None:
+                resolved_bvid = getattr(parse_row, "protocol_version_id", None)
+
         task = AutoFlightAnalysisTask(
             parse_task_id=parse_task_id,
             pcap_filename=None,
@@ -104,6 +232,7 @@ class AutoFlightAnalysisService:
             source_type="parse_task",
             status="pending",
             progress=0,
+            bundle_version_id=resolved_bvid,
         )
         self.db.add(task)
         await self.db.commit()
@@ -160,12 +289,32 @@ class AutoFlightAnalysisService:
         task.progress = 5
         await self.db.commit()
 
+        # Phase 4 + fix1：按 bundle 同时解析 auto_flight / irs_input 两组端口
+        try:
+            auto_flight_ports, irs_port_map = await self._resolve_port_mapping(
+                getattr(task, "bundle_version_id", None)
+            )
+        except BundleResolutionError as exc:
+            task.status = "failed"
+            task.error_message = f"网络配置版本加载失败：{exc}"
+            await self.db.commit()
+            print(f"[AutoFlightAnalysis] {task.error_message}")
+            return False
+
+        print(
+            f"[AutoFlightAnalysis] bundle_version_id={task.bundle_version_id} "
+            f"auto_flight_ports={sorted(auto_flight_ports)} "
+            f"irs_ports={sorted(irs_port_map)}"
+        )
+
         temp_pcap_path = Path(task.pcap_file_path) if task.pcap_file_path else None
         try:
             if task.parse_task_id:
                 task.progress = 15
                 await self.db.commit()
-                auto_df, irs_by_name = await self._load_from_parse_task(task.parse_task_id)
+                auto_df, irs_by_name = await self._load_from_parse_task(
+                    task.parse_task_id, auto_flight_ports, irs_port_map
+                )
                 task.progress = 65
                 await self.db.commit()
             else:
@@ -173,11 +322,11 @@ class AutoFlightAnalysisService:
                     raise RuntimeError("任务未配置 pcap 文件路径")
                 task.progress = 15
                 await self.db.commit()
-                auto_df = self._load_auto_from_pcap(task.pcap_file_path)
+                auto_df = self._load_auto_from_pcap(task.pcap_file_path, auto_flight_ports)
 
                 task.progress = 40
                 await self.db.commit()
-                irs_by_name = self._collect_irs_from_pcap(task.pcap_file_path)
+                irs_by_name = self._collect_irs_from_pcap(task.pcap_file_path, irs_port_map)
 
                 task.progress = 65
                 await self.db.commit()
@@ -211,26 +360,37 @@ class AutoFlightAnalysisService:
                 except Exception as cleanup_err:
                     print(f"[AutoFlightAnalysis] 清理临时文件失败: {cleanup_err}")
 
-    def _load_auto_from_pcap(self, pcap_path: str) -> pd.DataFrame:
-        # 自动飞行端口直接按固定端口提取。
-        required = set(AUTO_FLIGHT_PORTS.keys())
+    def _load_auto_from_pcap(
+        self,
+        pcap_path: str,
+        port_label_map: Dict[int, str],
+    ) -> pd.DataFrame:
+        """从 pcap 抽取 port_label_map 指定端口的数据并解码。"""
+        required = set(port_label_map.keys())
+        if not required:
+            return pd.DataFrame(columns=["timestamp"])
         port_map = pcap_to_port_dataframes(pcap_path, required)
 
-        # 自动飞行数据
         auto_rows: List[dict] = []
-        for p in AUTO_FLIGHT_PORTS.keys():
+        for p, label in port_label_map.items():
             df = port_map.get(p)
             if df is None or df.empty:
                 continue
             for row in df.itertuples(index=False):
-                d = _decode_auto_flight_raw(getattr(row, "raw_data", ""), p)
+                d = _decode_auto_flight_raw(getattr(row, "raw_data", ""), p, label)
                 if d is None:
                     continue
                 d["timestamp"] = float(getattr(row, "timestamp"))
                 auto_rows.append(d)
-        return pd.DataFrame(auto_rows).sort_values("timestamp").reset_index(drop=True) if auto_rows else pd.DataFrame(columns=["timestamp"])
+        if not auto_rows:
+            return pd.DataFrame(columns=["timestamp"])
+        return pd.DataFrame(auto_rows).sort_values("timestamp").reset_index(drop=True)
 
-    def _collect_irs_from_pcap(self, pcap_path: str) -> Dict[str, pd.DataFrame]:
+    def _collect_irs_from_pcap(
+        self,
+        pcap_path: str,
+        irs_port_map: Optional[Dict[int, str]] = None,
+    ) -> Dict[str, pd.DataFrame]:
         parser = IRSParser()
         seen_ports: set[int] = set()
         dev_rows: Dict[str, List[dict]] = {"IRS1": [], "IRS2": [], "IRS3": []}
@@ -238,6 +398,7 @@ class AutoFlightAnalysisService:
         # IRSParser.device_id 约定:
         # 0 -> 惯导3, 1 -> 惯导1, 2 -> 惯导2
         device_to_name = {0: "IRS3", 1: "IRS1", 2: "IRS2"}
+        allowed_ports = set(irs_port_map.keys()) if irs_port_map else None
 
         def _append_records(records: List[dict], port: int) -> None:
             for rec in records:
@@ -254,6 +415,8 @@ class AutoFlightAnalysisService:
                 })
 
         for ts, dport, payload in iter_udp_packets(pcap_path):
+            if allowed_ports is not None and dport not in allowed_ports:
+                continue
             seen_ports.add(dport)
             try:
                 records = parser.feed_packet(payload, dport, ts)
@@ -282,7 +445,12 @@ class AutoFlightAnalysisService:
             out[name] = df
         return out
 
-    async def _load_from_parse_task(self, parse_task_id: int) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
+    async def _load_from_parse_task(
+        self,
+        parse_task_id: int,
+        port_label_map: Dict[int, str],
+        irs_port_map: Optional[Dict[int, str]] = None,
+    ) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
         # 读取 parse_results，找到自动飞行与 IRS 相关端口 parquet
         parse_results = (
             await self.db.execute(
@@ -309,7 +477,7 @@ class AutoFlightAnalysisService:
             except Exception:
                 continue
 
-            if r.port_number in AUTO_FLIGHT_PORTS:
+            if r.port_number in port_label_map:
                 need = [c for c in [
                     "timestamp", "ap_engaged", "at_engaged", "air_ground",
                     "lon_mode_active", "af_warning",
@@ -320,10 +488,14 @@ class AutoFlightAnalysisService:
                     tdf = df[need].copy()
                     tdf["source_port"] = r.port_number
                     auto_frames.append(tdf)
-            if r.port_number in IRS_PORT_HINTS:
+            # IRS 端口：优先 bundle 解析出的 irs_port_map，缺省回落硬编码 IRS_PORT_HINTS
+            effective_irs = irs_port_map if irs_port_map else IRS_PORT_HINTS
+            if r.port_number in effective_irs:
                 need = [c for c in ["timestamp", "vertical_velocity", "accel_z"] if c in df.columns]
                 if need:
-                    irs_by_name[IRS_PORT_HINTS[r.port_number]] = df[need].copy()
+                    label = effective_irs[r.port_number]
+                    if label in irs_by_name:
+                        irs_by_name[label] = df[need].copy()
 
         auto_df = pd.concat(auto_frames, ignore_index=True) if auto_frames else pd.DataFrame(columns=["timestamp"])
         if not auto_df.empty and "timestamp" in auto_df.columns:

@@ -21,6 +21,10 @@ class CompareTask(Base):
     file_path_1 = Column(String(500), nullable=False, comment="交换机1文件路径")
     file_path_2 = Column(String(500), nullable=False, comment="交换机2文件路径")
     protocol_version_id = Column(Integer, ForeignKey("protocol_versions.id"), nullable=False, comment="网络配置版本ID")
+    bundle_version_id = Column(
+        Integer, ForeignKey("protocol_versions.id"), nullable=True,
+        comment="本次比对使用的 Bundle 版本（默认与 protocol_version_id 相同，MR4 版本锁定）",
+    )
     status = Column(String(20), default="pending", comment="状态: pending/processing/completed/failed")
     progress = Column(Integer, default=0, comment="进度 0-100")
     error_message = Column(Text, comment="错误信息")

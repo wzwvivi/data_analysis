@@ -16,6 +16,7 @@ import {
   Space,
   Statistic,
   Table,
+  Tooltip,
   Tabs,
   Tag,
   Typography,
@@ -38,6 +39,10 @@ import {
   RocketOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
+import 'dayjs/locale/zh-cn'
+
+dayjs.extend(relativeTime)
 import { networkConfigApi, protocolApi } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 
@@ -72,6 +77,15 @@ function formatTime(value) {
     return dayjs(value).format('YYYY-MM-DD HH:mm:ss')
   } catch {
     return String(value)
+  }
+}
+
+function formatRelative(value) {
+  if (!value) return ''
+  try {
+    return dayjs(value).locale('zh-cn').fromNow()
+  } catch {
+    return ''
   }
 }
 
@@ -273,8 +287,17 @@ function NetworkConfigPage() {
         title: '版本',
         dataIndex: 'version',
         key: 'version',
-        width: 160,
-        render: (v) => <Text strong>{v}</Text>,
+        width: 200,
+        render: (v, record) => (
+          <Space size={4} wrap>
+            <Text strong>{v}</Text>
+            {record.availability_status === 'PendingCode' ? (
+              <Tag color="gold">
+                <span className="pulse-dot" style={{ marginRight: 6 }} />待激活
+              </Tag>
+            ) : null}
+          </Space>
+        ),
       },
       {
         title: '端口数',
@@ -294,8 +317,12 @@ function NetworkConfigPage() {
         title: '创建时间',
         dataIndex: 'created_at',
         key: 'created_at',
-        width: 180,
-        render: formatTime,
+        width: 160,
+        render: (v) => (
+          <Tooltip title={formatTime(v)}>
+            <span>{formatRelative(v) || formatTime(v)}</span>
+          </Tooltip>
+        ),
       },
       {
         title: '激活',
@@ -306,7 +333,9 @@ function NetworkConfigPage() {
           if (!value) return <Text type="secondary">—</Text>
           return (
             <Space direction="vertical" size={2}>
-              <Text>{formatTime(value)}</Text>
+              <Tooltip title={formatTime(value)}>
+                <Text>{formatRelative(value)}</Text>
+              </Tooltip>
               {record.activated_by ? (
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   by {record.activated_by}{record.forced_activation ? '（强制）' : ''}
@@ -400,8 +429,12 @@ function NetworkConfigPage() {
       title: '更新时间',
       dataIndex: 'updated_at',
       key: 'updated_at',
-      width: 180,
-      render: formatTime,
+      width: 160,
+      render: (v) => (
+        <Tooltip title={formatTime(v)}>
+          <span>{formatRelative(v) || formatTime(v)}</span>
+        </Tooltip>
+      ),
     },
     {
       title: '操作',
@@ -501,13 +534,23 @@ function NetworkConfigPage() {
     STATUS_TABS.map((status) => {
       const meta = STATUS_META[status]
       const list = grouped?.[status] || []
+      const showPulse = status === 'PendingCode' && list.length > 0
       return {
         key: status,
         label: (
           <Space size={6}>
             {meta.icon}
             <span>{meta.label}</span>
-            <Badge count={list.length} showZero overflowCount={999} style={{ backgroundColor: '#52525b' }} />
+            <Badge
+              count={list.length}
+              showZero
+              overflowCount={999}
+              style={{
+                backgroundColor: showPulse ? '#d4a843' : '#52525b',
+                boxShadow: showPulse ? '0 0 8px rgba(212, 168, 67, 0.5)' : 'none',
+              }}
+            />
+            {showPulse ? <span className="pulse-dot" /> : null}
           </Space>
         ),
         children: (

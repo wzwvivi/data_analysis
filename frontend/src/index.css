@@ -449,3 +449,282 @@ body {
 .ant-table-row.parse-table-row-highlight:hover > td {
   background: rgba(234, 179, 8, 0.28) !important;
 }
+
+/* ===== Pulse Dot (used for "待激活" / PendingCode live indicators) ===== */
+@keyframes pulseDot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.5); opacity: 0.55; }
+}
+
+.pulse-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d4a843;
+  box-shadow: 0 0 8px rgba(212, 168, 67, 0.7);
+  animation: pulseDot 1.6s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+.pulse-dot.dot-red    { background: #f05050; box-shadow: 0 0 8px rgba(240, 80, 80, 0.75); }
+.pulse-dot.dot-green  { background: #5fd068; box-shadow: 0 0 8px rgba(95, 208, 104, 0.65); }
+.pulse-dot.dot-purple { background: #a78bfa; box-shadow: 0 0 8px rgba(139, 92, 246, 0.6); }
+
+/* ===== Activation Hero Banner ===== */
+.activation-hero {
+  position: relative;
+  padding: 18px 22px;
+  border-radius: 12px;
+  border: 1px solid;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.activation-hero .hero-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex-shrink: 0;
+}
+.activation-hero .hero-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 2px;
+  color: #e4e4e7;
+  letter-spacing: -0.01em;
+}
+.activation-hero .hero-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.activation-hero.hero-red {
+  border-color: rgba(240, 80, 80, 0.42);
+  background: linear-gradient(135deg, rgba(240, 80, 80, 0.14) 0%, rgba(240, 80, 80, 0.03) 65%);
+}
+.activation-hero.hero-red .hero-icon    { background: rgba(240, 80, 80, 0.18); color: #ff6868; }
+.activation-hero.hero-yellow {
+  border-color: rgba(212, 168, 67, 0.4);
+  background: linear-gradient(135deg, rgba(212, 168, 67, 0.13) 0%, rgba(212, 168, 67, 0.03) 65%);
+}
+.activation-hero.hero-yellow .hero-icon { background: rgba(212, 168, 67, 0.18); color: #e3b959; }
+.activation-hero.hero-green {
+  border-color: rgba(95, 208, 104, 0.4);
+  background: linear-gradient(135deg, rgba(95, 208, 104, 0.13) 0%, rgba(95, 208, 104, 0.03) 65%);
+}
+.activation-hero.hero-green .hero-icon  { background: rgba(95, 208, 104, 0.18); color: #7fdb85; }
+
+/* ===== Severity Stat Cards (green/yellow/red counts) ===== */
+.severity-stat {
+  flex: 1;
+  min-width: 130px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(24, 24, 27, 0.42);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.severity-stat:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.severity-stat.sev-green  { border-left: 3px solid #5fd068; }
+.severity-stat.sev-yellow { border-left: 3px solid #d4a843; }
+.severity-stat.sev-red    { border-left: 3px solid #f05050; }
+.severity-stat.sev-green:hover  { border-color: rgba(95, 208, 104, 0.45); }
+.severity-stat.sev-yellow:hover { border-color: rgba(212, 168, 67, 0.45); }
+.severity-stat.sev-red:hover    { border-color: rgba(240, 80, 80, 0.45); }
+
+.severity-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.severity-stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.severity-stat-value.sev-green  { color: #7fdb85; }
+.severity-stat-value.sev-yellow { color: #e3b959; }
+.severity-stat-value.sev-red    { color: #ff6868; }
+
+/* ===== Artifact Row ===== */
+.artifact-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(24, 24, 27, 0.55);
+  border: 1px solid rgba(63, 63, 70, 0.35);
+  flex-wrap: wrap;
+  transition: border-color 0.2s ease;
+}
+.artifact-row:hover {
+  border-color: rgba(139, 92, 246, 0.3);
+}
+.artifact-row + .artifact-row {
+  margin-top: 8px;
+}
+
+/* ===== Report Item (single diff entry in collapse) ===== */
+.report-item {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(63, 63, 70, 0.3);
+  background: rgba(24, 24, 27, 0.4);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.report-item + .report-item {
+  margin-top: 8px;
+}
+.report-item:hover {
+  border-color: rgba(139, 92, 246, 0.28);
+  background: rgba(29, 29, 36, 0.6);
+}
+.report-item.sev-red    { border-left: 3px solid #f05050; }
+.report-item.sev-yellow { border-left: 3px solid #d4a843; }
+.report-item.sev-green  { border-left: 3px solid #5fd068; }
+
+.report-item-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.report-item-message {
+  color: #d4d4d8;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+.report-item-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* ===== Metric Card (dashboard header) ===== */
+.metric-card {
+  padding: 14px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: linear-gradient(135deg, rgba(29, 29, 36, 0.7), rgba(24, 24, 27, 0.5));
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 160px;
+  transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+}
+.metric-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(139, 92, 246, 0.35);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+.metric-card-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.metric-card-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-secondary);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.metric-card-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: #e4e4e7;
+}
+.metric-icon-purple { background: rgba(139, 92, 246, 0.15); color: #c4b5fd; }
+.metric-icon-green  { background: rgba(95, 208, 104, 0.15); color: #7fdb85; }
+.metric-icon-gold   { background: rgba(212, 168, 67, 0.15); color: #e3b959; }
+.metric-icon-gray   { background: rgba(161, 161, 170, 0.12); color: #a1a1aa; }
+.metric-icon-blue   { background: rgba(96, 165, 250, 0.15); color: #93bbfc; }
+
+/* ===== Page Hero (top section of TSN pages) ===== */
+.page-hero {
+  position: relative;
+  padding: 20px 24px;
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.06) 0%, rgba(24, 24, 27, 0.55) 55%);
+  overflow: hidden;
+}
+.page-hero::after {
+  content: '';
+  position: absolute;
+  top: -50px;
+  right: -50px;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.16), transparent 70%);
+  pointer-events: none;
+}
+.page-hero-title {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: #e4e4e7;
+  margin: 0;
+}
+.page-hero-subtitle {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+/* ===== Label/Value rows in version header ===== */
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px 20px;
+}
+.kv-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px dashed rgba(63, 63, 70, 0.35);
+}
+.kv-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.kv-value {
+  font-size: 13px;
+  color: #d4d4d8;
+  word-break: break-all;
+}
