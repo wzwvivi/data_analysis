@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Card,
@@ -60,6 +60,20 @@ function ComparePage() {
   const [polling, setPolling] = useState(false)
   const [exporting, setExporting] = useState(false)
 
+  // Part 2 → Part 3 跳转、Collapse 受控、Part 3 过滤
+  const [collapseKeys, setCollapseKeys] = useState(['1', '2', '3', '4'])
+  const [gapFilter, setGapFilter] = useState(null) // { port_number, switch_index } | null
+  const check3Ref = useRef(null)
+
+  // 顶部历史记录面板
+  const [historyActiveKey, setHistoryActiveKey] = useState([])
+  const [historyItems, setHistoryItems] = useState([])
+  const [historyTotal, setHistoryTotal] = useState(0)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historyPage, setHistoryPage] = useState(1)
+  const historyPageSize = 20
+
   // 加载网络配置版本列表
   useEffect(() => {
     loadVersions()
@@ -78,8 +92,49 @@ function ComparePage() {
   useEffect(() => {
     if (taskId) {
       loadTask()
+      // 切到新任务时，清除 Part 2→3 跳转过滤
+      setGapFilter(null)
+      setCollapseKeys(['1', '2', '3', '4'])
     }
   }, [taskId])
+
+  const loadHistory = useCallback(async (page = 1) => {
+    try {
+      setHistoryLoading(true)
+      const res = await compareApi.listTasks(page, historyPageSize)
+      setHistoryItems(res.data.items || [])
+      setHistoryTotal(res.data.total || 0)
+      setHistoryPage(page)
+      setHistoryLoaded(true)
+    } catch (error) {
+      message.error('加载历史记录失败')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [])
+
+  const handleHistoryCollapseChange = (keys) => {
+    const arr = Array.isArray(keys) ? keys : [keys].filter(Boolean)
+    setHistoryActiveKey(arr)
+    if (arr.includes('history') && !historyLoaded && !historyLoading) {
+      loadHistory(1)
+    }
+  }
+
+  const jumpToGapForPort = useCallback((portNumber, switchIndex) => {
+    setGapFilter({ port_number: portNumber, switch_index: switchIndex })
+    setCollapseKeys((prev) => {
+      const set = new Set(prev)
+      set.add('3')
+      return Array.from(set)
+    })
+    // 等 Collapse 动画再滚动
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        check3Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 50)
+    })
+  }, [])
 
   useEffect(() => {
     if (!polling) return
@@ -220,79 +275,139 @@ function ComparePage() {
     })
   }
 
-  // 端口结果表格列
+  // 派生 (交换机,端口) 维度的行
+  const perSwitchPortRows = useMemo(() => {
+    const rows = []
+    for (const r of portResults) {
+      // 是否为"ICD 配置的期望端口"：compare_service 对非配置端口会生成 warning "非网络配置端口"
+      const unexpected = r.result === 'warning' && typeof r.detail === 'string' && r.detail.startsWith('非网络配置端口')
+      for (const side of [1, 2]) {
+        const present = side === 1 ? r.in_switch1 : r.in_switch2
+        const count = side === 1 ? r.switch1_count : r.switch2_count
+        const gapCount = (side === 1 ? r.gap_count_switch1 : r.gap_count_switch2) || 0
+        let status
+        if (unexpected) status = 'unexpected'
+        else if (!present) status = 'missing'
+        else if (gapCount > 0) status = 'gaps'
+        else status = 'ok'
+        rows.push({
+          key: `${r.id}-${side}`,
+          port_id: r.id,
+          port_number: r.port_number,
+          switch_index: side,
+          source_device: r.source_device,
+          message_name: r.message_name,
+          period_ms: r.period_ms,
+          packet_count: count || 0,
+          gap_count: gapCount,
+          status,
+        })
+      }
+    }
+    rows.sort((a, b) => {
+      if (a.switch_index !== b.switch_index) return a.switch_index - b.switch_index
+      return a.port_number - b.port_number
+    })
+    return rows
+  }, [portResults])
+
+  const perSwitchSummary = useMemo(() => {
+    const s = { total: perSwitchPortRows.length, s1: 0, s2: 0, ok: 0, gaps: 0, missing: 0, unexpected: 0 }
+    for (const r of perSwitchPortRows) {
+      if (r.switch_index === 1) s.s1 += 1
+      else if (r.switch_index === 2) s.s2 += 1
+      s[r.status] = (s[r.status] || 0) + 1
+    }
+    return s
+  }, [perSwitchPortRows])
+
+  const renderStatusTag = (status, gapCount) => {
+    if (status === 'ok') return <Tag color="success">正常</Tag>
+    if (status === 'gaps') return <Tag color="warning">不连续（{gapCount} 段）</Tag>
+    if (status === 'missing') return <Tag color="error">缺失</Tag>
+    if (status === 'unexpected') return <Tag color="purple">非配置端口</Tag>
+    return <Tag>未知</Tag>
+  }
+
+  // 端口结果表格列（(交换机,端口) 级全量）
   const portColumns = [
+    {
+      title: '交换机',
+      dataIndex: 'switch_index',
+      key: 'switch_index',
+      width: 90,
+      filters: [
+        { text: '交换机1', value: 1 },
+        { text: '交换机2', value: 2 },
+      ],
+      onFilter: (value, record) => record.switch_index === value,
+      sorter: (a, b) => a.switch_index - b.switch_index,
+      render: (val) => `交换机${val}`,
+    },
     {
       title: '端口号',
       dataIndex: 'port_number',
       key: 'port_number',
       width: 100,
       sorter: (a, b) => a.port_number - b.port_number,
+      defaultSortOrder: 'ascend',
     },
     {
       title: '源设备',
       dataIndex: 'source_device',
       key: 'source_device',
       width: 150,
+      render: (val) => val || '-',
     },
     {
       title: '消息名称',
       dataIndex: 'message_name',
       key: 'message_name',
       width: 200,
+      render: (val) => val || '-',
     },
     {
       title: '周期(ms)',
       dataIndex: 'period_ms',
       key: 'period_ms',
       width: 100,
-      render: (val) => val ? val.toFixed(1) : '-',
+      render: (val) => (val ? val.toFixed(1) : '-'),
     },
     {
-      title: '交换机1',
-      key: 'switch1',
-      width: 120,
-      render: (_, record) => (
-        <Space direction="vertical" size="small">
-          <div>{record.in_switch1 ? `${record.switch1_count} 包` : '该端口未出现'}</div>
-          {record.gap_count_switch1 > 0 && (
-            <Tag color="warning">{record.gap_count_switch1} 段丢包</Tag>
-          )}
-        </Space>
-      ),
-    },
-    {
-      title: '交换机2',
-      key: 'switch2',
-      width: 120,
-      render: (_, record) => (
-        <Space direction="vertical" size="small">
-          <div>{record.in_switch2 ? `${record.switch2_count} 包` : '该端口未出现'}</div>
-          {record.gap_count_switch2 > 0 && (
-            <Tag color="warning">{record.gap_count_switch2} 段丢包</Tag>
-          )}
-        </Space>
-      ),
-    },
-    {
-      title: '包数差',
-      dataIndex: 'count_diff',
-      key: 'count_diff',
+      title: '包数',
+      dataIndex: 'packet_count',
+      key: 'packet_count',
       width: 100,
-      render: (val) => val > 0 ? <Tag color="orange">{val}</Tag> : '-',
+      sorter: (a, b) => a.packet_count - b.packet_count,
     },
     {
-      title: '结果',
-      dataIndex: 'result',
-      key: 'result',
-      width: 100,
-      render: (val) => getResultTag(val),
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 150,
+      filters: [
+        { text: '正常', value: 'ok' },
+        { text: '不连续', value: 'gaps' },
+        { text: '缺失', value: 'missing' },
+        { text: '非配置端口', value: 'unexpected' },
+      ],
+      onFilter: (value, record) => record.status === value,
+      render: (val, record) => renderStatusTag(val, record.gap_count),
     },
     {
-      title: '说明',
-      dataIndex: 'detail',
-      key: 'detail',
-      width: 250,
+      title: '操作',
+      key: 'action',
+      width: 140,
+      render: (_, record) =>
+        record.status === 'gaps' ? (
+          <Button
+            type="link"
+            size="small"
+            onClick={() => jumpToGapForPort(record.port_number, record.switch_index)}
+          >
+            查看丢包详情
+          </Button>
+        ) : null,
     },
   ]
 
@@ -383,6 +498,93 @@ function ComparePage() {
     },
   ]
 
+  // 历史记录表格列
+  const historyColumns = [
+    {
+      title: '任务ID',
+      dataIndex: 'id',
+      key: 'id',
+      width: 90,
+      render: (val) => `#${val}`,
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 170,
+      render: (val) => (val ? new Date(val).toLocaleString('zh-CN') : '-'),
+    },
+    {
+      title: '交换机1 文件',
+      dataIndex: 'filename_1',
+      key: 'filename_1',
+      ellipsis: true,
+    },
+    {
+      title: '交换机2 文件',
+      dataIndex: 'filename_2',
+      key: 'filename_2',
+      ellipsis: true,
+    },
+    {
+      title: 'TSN 版本',
+      dataIndex: 'bundle_version_label',
+      key: 'bundle_version_label',
+      width: 130,
+      render: (val, record) =>
+        record.bundle_version_id ? (
+          <Tag color="purple">{val || `v${record.bundle_version_id}`}</Tag>
+        ) : (
+          '-'
+        ),
+    },
+    {
+      title: '整体结果',
+      dataIndex: 'overall_result',
+      key: 'overall_result',
+      width: 100,
+      render: (val) => getResultTag(val),
+    },
+    {
+      title: '丢包端口',
+      dataIndex: 'ports_with_gaps',
+      key: 'ports_with_gaps',
+      width: 90,
+      render: (val) => (val > 0 ? <Tag color="warning">{val}</Tag> : val ?? 0),
+    },
+    {
+      title: '缺失',
+      dataIndex: 'missing_count',
+      key: 'missing_count',
+      width: 80,
+      render: (val) => (val > 0 ? <Tag color="error">{val}</Tag> : val ?? 0),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      render: (_, record) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => navigate(`/compare/${record.id}`)}
+        >
+          查看
+        </Button>
+      ),
+    },
+  ]
+
+  // Part 3 的过滤结果
+  const filteredGapRecords = useMemo(() => {
+    if (!gapFilter) return gapRecords
+    return gapRecords.filter(
+      (g) =>
+        g.port_number === gapFilter.port_number &&
+        g.switch_index === gapFilter.switch_index,
+    )
+  }, [gapRecords, gapFilter])
+
   // 丢包记录表格列
   const gapColumns = [
     {
@@ -437,10 +639,51 @@ function ComparePage() {
     },
   ]
 
+  // 历史记录折叠面板（上传页 & 详情页共用）
+  const renderHistoryPanel = () => (
+    <Collapse
+      activeKey={historyActiveKey}
+      onChange={handleHistoryCollapseChange}
+      style={{ marginBottom: 16 }}
+    >
+      <Panel
+        header={
+          <Space>
+            <span>历史记录</span>
+            {historyLoaded ? (
+              <Tag>{historyTotal} 条</Tag>
+            ) : (
+              <Tag color="default">点击展开查看</Tag>
+            )}
+          </Space>
+        }
+        key="history"
+      >
+        <Table
+          columns={historyColumns}
+          dataSource={historyItems}
+          rowKey="id"
+          size="small"
+          loading={historyLoading}
+          scroll={{ x: 1100 }}
+          pagination={{
+            current: historyPage,
+            pageSize: historyPageSize,
+            total: historyTotal,
+            showSizeChanger: false,
+            onChange: (p) => loadHistory(p),
+          }}
+        />
+      </Panel>
+    </Collapse>
+  )
+
   // 上传区
   if (!taskId) {
     return (
-      <Card title="TSN数据异常检查" style={{ maxWidth: 800, margin: '0 auto' }}>
+      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+        {renderHistoryPanel()}
+        <Card title="TSN数据异常检查" style={{ maxWidth: 800, margin: '0 auto' }}>
         <Alert
           message="功能说明"
           description="上传两个交换机的抓包文件，系统将执行四项检查：1) 记录时间同步性 2) 端口覆盖完整性 3) 周期端口数据连续性（丢包检测） 4) 端口周期正确性与抖动分析"
@@ -602,6 +845,7 @@ function ComparePage() {
           </Form.Item>
         </Form>
       </Card>
+      </div>
     )
   }
 
@@ -620,6 +864,7 @@ function ComparePage() {
 
   return (
     <div>
+      {renderHistoryPanel()}
       <Card
         title={
           <Space>
@@ -682,7 +927,10 @@ function ComparePage() {
 
       {task.status === 'completed' && (
         <div style={{ marginTop: 16 }}>
-          <Collapse defaultActiveKey={['1', '2', '3', '4']}>
+          <Collapse
+            activeKey={collapseKeys}
+            onChange={(keys) => setCollapseKeys(Array.isArray(keys) ? keys : [keys].filter(Boolean))}
+          >
             {/* 检查1: 记录时间同步性 */}
             <Panel
               header={
@@ -760,34 +1008,45 @@ function ComparePage() {
                   />
                 </Col>
               </Row>
-              {(() => {
-                const problemPorts = portResults.filter(r => r.result !== 'pass')
-                return problemPorts.length > 0 ? (
-                  <>
-                    <Alert
-                      message={`共 ${portResults.length} 个端口，其中 ${problemPorts.length} 个有问题（以下仅显示有问题的端口）`}
-                      type="info"
-                      showIcon
-                      style={{ marginBottom: 12 }}
-                    />
-                    <Table
-                      columns={portColumns}
-                      dataSource={problemPorts}
-                      rowKey="id"
-                      size="small"
-                      scroll={{ x: 1200 }}
-                      pagination={{ pageSize: 20 }}
-                      rowClassName={(record) => {
-                        if (record.result === 'fail') return 'table-row-fail'
-                        if (record.result === 'warning') return 'table-row-warning'
-                        return ''
-                      }}
-                    />
-                  </>
-                ) : (
-                  <Alert message="所有端口数据完整，无异常" type="success" showIcon />
-                )
-              })()}
+              {perSwitchPortRows.length > 0 ? (
+                <>
+                  <Alert
+                    message={
+                      <span>
+                        共 {perSwitchSummary.total} 行（交换机1: {perSwitchSummary.s1}，
+                        交换机2: {perSwitchSummary.s2}）　·　
+                        <Tag color="success">正常 {perSwitchSummary.ok || 0}</Tag>
+                        <Tag color="warning">不连续 {perSwitchSummary.gaps || 0}</Tag>
+                        <Tag color="error">缺失 {perSwitchSummary.missing || 0}</Tag>
+                        <Tag color="purple">非配置端口 {perSwitchSummary.unexpected || 0}</Tag>
+                      </span>
+                    }
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                  />
+                  <Table
+                    columns={portColumns}
+                    dataSource={perSwitchPortRows}
+                    rowKey="key"
+                    size="small"
+                    scroll={{ x: 1100 }}
+                    pagination={{
+                      pageSize: 20,
+                      showSizeChanger: true,
+                      pageSizeOptions: ['10', '20', '50', '100'],
+                    }}
+                    rowClassName={(record) => {
+                      if (record.status === 'missing') return 'table-row-fail'
+                      if (record.status === 'gaps' || record.status === 'unexpected')
+                        return 'table-row-warning'
+                      return ''
+                    }}
+                  />
+                </>
+              ) : (
+                <Alert message="无端口数据" type="info" showIcon />
+              )}
             </Panel>
 
             {/* 检查3: 周期端口数据连续性 */}
@@ -800,36 +1059,66 @@ function ComparePage() {
               }
               key="3"
             >
-              <Row gutter={16} style={{ marginBottom: 16 }}>
-                <Col span={6}>
-                  <Statistic title="周期类端口总数" value={task.periodic_port_count} />
-                </Col>
-                <Col span={6}>
-                  <Statistic
-                    title="存在丢包的端口"
-                    value={task.ports_with_gaps}
-                    valueStyle={{ color: task.ports_with_gaps > 0 ? '#d4a843' : '#5fd068' }}
+              <div ref={check3Ref} id="check3-anchor">
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col span={6}>
+                    <Statistic title="周期类端口总数" value={task.periodic_port_count} />
+                  </Col>
+                  <Col span={6}>
+                    <Statistic
+                      title="存在丢包的端口"
+                      value={task.ports_with_gaps}
+                      valueStyle={{ color: task.ports_with_gaps > 0 ? '#d4a843' : '#5fd068' }}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Statistic
+                      title="总丢包段数"
+                      value={task.total_gap_count}
+                      valueStyle={{ color: task.total_gap_count > 0 ? '#d4a843' : '#5fd068' }}
+                    />
+                  </Col>
+                </Row>
+                {gapFilter && (
+                  <Alert
+                    style={{ marginBottom: 12 }}
+                    type="info"
+                    showIcon
+                    message={
+                      <Space>
+                        <span>
+                          当前仅查看端口 <strong>{gapFilter.port_number}</strong> · 交换机
+                          {gapFilter.switch_index}，筛出 {filteredGapRecords.length} 条丢包段
+                        </span>
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() => setGapFilter(null)}
+                        >
+                          查看全部
+                        </Button>
+                      </Space>
+                    }
                   />
-                </Col>
-                <Col span={6}>
-                  <Statistic
-                    title="总丢包段数"
-                    value={task.total_gap_count}
-                    valueStyle={{ color: task.total_gap_count > 0 ? '#d4a843' : '#5fd068' }}
+                )}
+                {filteredGapRecords.length > 0 ? (
+                  <Table
+                    columns={gapColumns}
+                    dataSource={filteredGapRecords}
+                    rowKey="id"
+                    size="small"
+                    pagination={{ pageSize: 20 }}
                   />
-                </Col>
-              </Row>
-              {gapRecords.length > 0 ? (
-                <Table
-                  columns={gapColumns}
-                  dataSource={gapRecords}
-                  rowKey="id"
-                  size="small"
-                  pagination={{ pageSize: 20 }}
-                />
-              ) : (
-                <Alert message="未检测到丢包" type="success" showIcon />
-              )}
+                ) : gapFilter ? (
+                  <Alert
+                    message="该端口/该交换机暂无丢包明细"
+                    type="success"
+                    showIcon
+                  />
+                ) : (
+                  <Alert message="未检测到丢包" type="success" showIcon />
+                )}
+              </div>
             </Panel>
 
             {/* 检查4: 端口周期正确性与抖动分析 */}
