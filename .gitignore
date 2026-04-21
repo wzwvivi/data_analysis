@@ -20,8 +20,7 @@ backend-uploads/
 backend-runtime/data/exports/
 # results/*.parquet tracked for reproducibility; uploads remain local
 backend-runtime/uploads/
-# 本地/容器运行时 SQLite（TSN + 飞行助手共用），勿提交
-backend-runtime/data/*.db
+# 主库文件可选择纳入版本库；WAL/SHM 仍为临时文件勿提交
 backend-runtime/data/*.db-journal
 backend-runtime/data/*.db-wal
 backend-runtime/data/*.db-shm
