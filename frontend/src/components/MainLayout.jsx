@@ -10,7 +10,6 @@ import {
   TeamOutlined,
   UserOutlined,
   LogoutOutlined,
-  FileTextOutlined,
   SafetyCertificateOutlined,
   BellOutlined,
   CheckOutlined,
@@ -110,9 +109,6 @@ function MainLayout() {
     if (hasPageAccess('tasks')) networkChildren.push({ key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' })
     if (hasPageAccess('network-config')) networkChildren.push({ key: '/network-config', icon: <SafetyCertificateOutlined />, label: 'TSN 网络配置' })
     if (hasPageAccess('device-protocol')) networkChildren.push({ key: '/device-protocol', icon: <ApartmentOutlined />, label: '设备协议管理' })
-    if (isAdmin) {
-      networkChildren.push({ key: '/admin/protocol-manager', icon: <FileTextOutlined />, label: '协议管理' })
-    }
 
     const eventChildren = []
     if (hasPageAccess('fms-event-analysis') || hasPageAccess('event-analysis')) eventChildren.push({ key: '/fms-event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' })
@@ -195,7 +191,6 @@ function MainLayout() {
     if (path.startsWith('/fcc-event-analysis')) return '/fcc-event-analysis'
     if (path.startsWith('/fms-event-analysis')) return '/fms-event-analysis'
     if (path.startsWith('/event-analysis')) return '/fms-event-analysis'
-    if (path.startsWith('/admin/protocol-manager')) return '/admin/protocol-manager'
     if (path.startsWith('/admin/platform-data')) return '/admin/platform-data'
     if (path.startsWith('/admin/configurations')) return '/admin/configurations'
     if (path.startsWith('/admin/users')) return '/admin/users'
@@ -254,8 +249,6 @@ function MainLayout() {
       push('网络数据分析', null); push('事件分析', null); push('飞管事件分析', '/fms-event-analysis'); push('任务详情', null)
     } else if (path.startsWith('/fms-event-analysis') || path.startsWith('/event-analysis')) {
       push('网络数据分析', null); push('事件分析', null); push('飞管事件分析', null)
-    } else if (path.startsWith('/admin/protocol-manager')) {
-      push('网络数据分析', null); push('协议管理', null)
     } else if (path.startsWith('/admin/platform-data')) {
       push('系统配置', null); push('平台共享数据', null)
     } else if (path.startsWith('/admin/configurations')) {

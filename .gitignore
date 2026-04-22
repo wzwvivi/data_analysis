@@ -35,3 +35,7 @@ backend/tsn_analyzer.db
 Thumbs.db
 .idea/
 .vscode/
+
+# Migration/script ad-hoc logs
+reorg_output.log
+*.run.log

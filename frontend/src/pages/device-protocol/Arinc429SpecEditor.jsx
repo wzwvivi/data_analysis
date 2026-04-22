@@ -63,6 +63,14 @@ const SSM_TYPES = [
   { value: 'bnr', label: 'BNR' },
   { value: 'discrete', label: 'Discrete' },
   { value: 'bcd', label: 'BCD' },
+  { value: 'special', label: 'Special（多段）' },
+  { value: 'unimplemented', label: 'Unimplemented（未实现）' },
+]
+
+const SIGN_STYLES = [
+  { value: 'bit29_sign_magnitude', label: 'Bit29 符号/幅值 (标准)' },
+  { value: 'twos_complement', label: '段内二补码 (twos_complement)' },
+  { value: 'in_field_sign', label: '段内高位符号 (in_field_sign)' },
 ]
 
 
@@ -77,24 +85,67 @@ function octToDec(oct) {
   return parseInt(s, 8)
 }
 
+/**
+ * discrete_bits 的 value 可能是：
+ *   - 字符串 "name: desc"（旧格式）
+ *   - 对象 {name, cn, values:{...}}（新结构化格式）
+ * 读取时返回统一视图 { name, desc }，不修改原数据
+ */
+function readDiscreteBit(value) {
+  if (value == null) return { name: '', desc: '' }
+  if (typeof value === 'string') {
+    const [n, ...rest] = value.split(':')
+    return { name: (n || '').trim(), desc: rest.join(':').trim() }
+  }
+  if (typeof value === 'object') {
+    const name = value.name || ''
+    const cn = value.cn || ''
+    const valuesPreview = value.values
+      ? Object.entries(value.values).map(([k, v]) => `${k}=${v}`).join(', ')
+      : ''
+    const desc = [cn, valuesPreview].filter(Boolean).join(' | ')
+    return { name, desc, raw: value }
+  }
+  return { name: String(value), desc: '' }
+}
+
+/**
+ * 标准化 label：
+ *   - 已知字段做规范化（类型/默认值）
+ *   - 未知字段（bcd_pattern / port_overrides / ssm_semantics / discrete_bit_groups
+ *     以及任何将来后端加的字段）整体透传，不丢任何数据
+ */
 function normalizeLabel(l) {
+  const src = l || {}
   return {
-    label_oct: String(l?.label_oct || '').trim(),
-    label_dec: l?.label_dec ?? octToDec(l?.label_oct),
-    name: l?.name || '',
-    direction: l?.direction || '',
-    sources: Array.isArray(l?.sources) ? l.sources : [],
-    sdi: l?.sdi ?? null,
-    ssm_type: l?.ssm_type || 'bnr',
-    data_type: l?.data_type || '',
-    unit: l?.unit || '',
-    range_desc: l?.range_desc || '',
-    resolution: l?.resolution ?? null,
-    reserved_bits: l?.reserved_bits || '',
-    notes: l?.notes || '',
-    discrete_bits: { ...(l?.discrete_bits || {}) },
-    special_fields: Array.isArray(l?.special_fields) ? l.special_fields.map((s) => ({ ...s })) : [],
-    bnr_fields: Array.isArray(l?.bnr_fields) ? l.bnr_fields.map((b) => ({ ...b })) : [],
+    ...src,
+    label_oct: String(src.label_oct || '').trim(),
+    label_dec: src.label_dec ?? octToDec(src.label_oct),
+    name: src.name || '',
+    direction: src.direction || '',
+    sources: Array.isArray(src.sources) ? src.sources : [],
+    sdi: src.sdi ?? null,
+    ssm_type: src.ssm_type || 'bnr',
+    data_type: src.data_type || '',
+    unit: src.unit || '',
+    range_desc: src.range_desc || '',
+    resolution: src.resolution ?? null,
+    reserved_bits: src.reserved_bits || '',
+    notes: src.notes || '',
+    discrete_bits: { ...(src.discrete_bits || {}) },
+    special_fields: Array.isArray(src.special_fields) ? src.special_fields.map((s) => ({ ...s })) : [],
+    bnr_fields: Array.isArray(src.bnr_fields) ? src.bnr_fields.map((b) => ({ ...b })) : [],
+    // 显式透传新结构化字段（防止 spread 下游覆写）
+    discrete_bit_groups: Array.isArray(src.discrete_bit_groups)
+      ? src.discrete_bit_groups.map((g) => ({ ...g }))
+      : [],
+    bcd_pattern: src.bcd_pattern ? cloneDeep(src.bcd_pattern) : null,
+    port_overrides: src.port_overrides && typeof src.port_overrides === 'object'
+      ? cloneDeep(src.port_overrides)
+      : {},
+    ssm_semantics: src.ssm_semantics && typeof src.ssm_semantics === 'object'
+      ? { ...src.ssm_semantics }
+      : {},
   }
 }
 
@@ -111,21 +162,23 @@ function buildBitModel(label) {
   if (!label) return model
 
   // single bit
-  for (const [k, desc] of Object.entries(label.discrete_bits || {})) {
+  for (const [k, rawValue] of Object.entries(label.discrete_bits || {})) {
     const bitNum = parseInt(k, 10)
     if (!isNaN(bitNum) && bitNum >= 9 && bitNum <= 29) {
+      const { name, desc } = readDiscreteBit(rawValue)
       model[bitNum] = {
         type: 'single',
-        name: String(desc || '').split(':')[0].trim() || '单bit',
-        fullDesc: String(desc || ''),
+        name: name || '单bit',
+        fullDesc: desc ? `${name}${desc ? `: ${desc}` : ''}` : name,
       }
     }
   }
 
-  // multi-bit enum (special_fields)
+  // multi-bit enum (special_fields)——兼容 bits / data_bits 两种 key
   ;(label.special_fields || []).forEach((sf, idx) => {
-    if (!sf?.bits || sf.bits.length !== 2) return
-    const [a, b] = sf.bits
+    const sfBits = sf?.data_bits || sf?.bits
+    if (!sfBits || sfBits.length !== 2) return
+    const [a, b] = sfBits
     const lo = Math.min(a, b)
     const hi = Math.max(a, b)
     const nBits = hi - lo + 1
@@ -399,13 +452,14 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
   const currentStatus = useMemo(() => {
     if (!label || !bitNum) return { status: '预留', initialType: 'reserved' }
     const dbits = label.discrete_bits || {}
-    if (dbits[bitNum]) {
-      const [nm] = String(dbits[bitNum]).split(':')
-      return { status: `单bit: ${nm.trim() || '已定义'}`, initialType: 'single' }
+    if (dbits[bitNum] != null) {
+      const { name } = readDiscreteBit(dbits[bitNum])
+      return { status: `单bit: ${name || '已定义'}`, initialType: 'single' }
     }
     for (const sf of label.special_fields || []) {
-      if (sf?.bits && bitNum >= sf.bits[0] && bitNum <= sf.bits[1]) {
-        return { status: `枚举: ${sf.name} (Bit ${sf.bits[0]}-${sf.bits[1]})`, initialType: 'multi' }
+      const sfBits = sf?.data_bits || sf?.bits
+      if (sfBits && bitNum >= sfBits[0] && bitNum <= sfBits[1]) {
+        return { status: `枚举: ${sf.name} (Bit ${sfBits[0]}-${sfBits[1]})`, initialType: 'multi' }
       }
     }
     for (const bf of label.bnr_fields || []) {
@@ -426,18 +480,16 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
     // 初始化对应表单的值
     form.resetFields()
     if (initialType === 'single') {
-      const desc = (label?.discrete_bits || {})[bitNum] || ''
-      const parts = String(desc).split(':')
-      form.setFieldsValue({
-        single_name: parts[0]?.trim() || '',
-        single_desc: parts.slice(1).join(':').trim(),
-      })
+      const rawValue = (label?.discrete_bits || {})[bitNum]
+      const { name, desc } = readDiscreteBit(rawValue)
+      form.setFieldsValue({ single_name: name, single_desc: desc })
     } else if (initialType === 'multi') {
-      const sf = (label?.special_fields || []).find(
-        (x) => x?.bits && bitNum >= x.bits[0] && bitNum <= x.bits[1],
-      )
+      const sf = (label?.special_fields || []).find((x) => {
+        const b = x?.data_bits || x?.bits
+        return b && bitNum >= b[0] && bitNum <= b[1]
+      })
       if (sf) {
-        const [lo, hi] = sf.bits
+        const [lo, hi] = sf.data_bits || sf.bits
         const nBits = hi - lo + 1
         const vstr = Object.entries(sf.values || {})
           .map(([k, v]) => {
@@ -468,6 +520,7 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
           bnr_bit_hi: bf.data_bits?.[1] ?? bitNum,
           bnr_encoding: bf.encoding || 'bnr',
           bnr_sign_bit: bf.sign_bit ?? undefined,
+          bnr_sign_style: bf.sign_style || 'bit29_sign_magnitude',
           bnr_resolution: bf.resolution ?? undefined,
           bnr_unit: bf.unit || '',
         })
@@ -476,6 +529,7 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
           bnr_bit_lo: bitNum,
           bnr_bit_hi: bitNum,
           bnr_encoding: 'bnr',
+          bnr_sign_style: 'bit29_sign_magnitude',
         })
       }
     }
@@ -552,7 +606,7 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
             type="info"
             showIcon
             style={{ padding: '4px 10px', fontSize: 12 }}
-            message={`保存后写入 discrete_bits[${bitNum}] = "字段名: 含义说明"`}
+            message={`保存后写入 discrete_bits[${bitNum}]。已有的结构化 dict（name/cn/values）在显示时会被兼容读取，编辑后统一存为 "字段名: 含义说明"。`}
           />
         </Form>
       )}
@@ -612,6 +666,14 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
           <Form.Item name="bnr_sign_bit" label="符号位（可选，有符号数填写 9-29）">
             <InputNumber min={9} max={29} style={{ width: '100%' }} />
           </Form.Item>
+          <Form.Item
+            name="bnr_sign_style"
+            label="符号风格（sign_style）"
+            tooltip="标准 ARINC-429 用 Bit29 sign/magnitude；XPDR 等少量设备用段内补码"
+            initialValue="bit29_sign_magnitude"
+          >
+            <Select options={SIGN_STYLES} />
+          </Form.Item>
           <Form.Item name="bnr_resolution" label="分辨率（可选）">
             <InputNumber step={0.000001} style={{ width: '100%' }} />
           </Form.Item>
@@ -632,17 +694,18 @@ function FieldsSummary({ label, onClickField, onDelete, readOnly }) {
   const rows = []
   Object.entries(label?.discrete_bits || {}).forEach(([k, v]) => {
     const bit = parseInt(k, 10)
+    const { name } = readDiscreteBit(v)
     rows.push({
       key: `single-${bit}`,
       range: `Bit ${bit}`,
       firstBit: bit,
       kind: 'single',
       kindLabel: '单bit',
-      name: String(v || '').split(':')[0].trim() || '(未命名)',
+      name: name || '(未命名)',
     })
   })
   ;(label?.special_fields || []).forEach((sf, idx) => {
-    const [lo, hi] = sf.bits || [0, 0]
+    const [lo, hi] = sf.data_bits || sf.bits || [0, 0]
     rows.push({
       key: `multi-${idx}`,
       range: `Bit ${lo}-${hi}`,
@@ -736,7 +799,8 @@ function deleteFieldAtBit(label, bitNum) {
   const sfs = next.special_fields || []
   for (let i = sfs.length - 1; i >= 0; i -= 1) {
     const sf = sfs[i]
-    if (sf?.bits && bitNum >= sf.bits[0] && bitNum <= sf.bits[1]) {
+    const sfBits = sf?.data_bits || sf?.bits
+    if (sfBits && bitNum >= sfBits[0] && bitNum <= sfBits[1]) {
       sfs.splice(i, 1)
       next.special_fields = sfs
       return next
@@ -785,6 +849,239 @@ function parseMultiValues(str, nBits) {
       }
     })
   return out
+}
+
+
+// ════════════════════════ 高级字段只读预览 ════════════════════════
+
+
+/**
+ * Label 级高级字段（bcd_pattern / port_overrides / ssm_semantics / discrete_bit_groups）
+ * 目前不提供可视化编辑表单，仅做只读 JSON 预览 + 说明；数据由后端导入脚本或
+ * 直接编辑 spec_json 维护。normalizeLabel 里已确保编辑过程不会丢这些字段。
+ */
+function AdvancedFieldsReadOnly({ label }) {
+  const entries = useMemo(() => {
+    if (!label) return []
+    const rows = []
+    if (label.bcd_pattern && Object.keys(label.bcd_pattern).length > 0) {
+      rows.push({
+        key: 'bcd_pattern',
+        title: 'BCD 数位模板（bcd_pattern）',
+        hint: '非均匀 BCD 数位切分，如 RA-165 的气压高度 BCD',
+        data: label.bcd_pattern,
+      })
+    }
+    if (label.port_overrides && Object.keys(label.port_overrides).length > 0) {
+      rows.push({
+        key: 'port_overrides',
+        title: '端口级覆盖（port_overrides）',
+        hint: '同 Label 在不同端口的语义复用，如 brake L005/006/007 的上行/下行',
+        data: label.port_overrides,
+      })
+    }
+    if (label.ssm_semantics && Object.keys(label.ssm_semantics).length > 0) {
+      rows.push({
+        key: 'ssm_semantics',
+        title: 'SSM 语义映射（ssm_semantics）',
+        hint: 'SSM 值到业务含义的字符串映射',
+        data: label.ssm_semantics,
+      })
+    }
+    if (Array.isArray(label.discrete_bit_groups) && label.discrete_bit_groups.length > 0) {
+      rows.push({
+        key: 'discrete_bit_groups',
+        title: '离散位段（discrete_bit_groups）',
+        hint: '一段 bit 合成的枚举，如 ADC L137 襟翼状态 (Bit 11-13)',
+        data: label.discrete_bit_groups,
+      })
+    }
+    return rows
+  }, [label])
+
+  if (entries.length === 0) return null
+
+  return (
+    <Card
+      size="small"
+      title="高级字段（只读预览）"
+      extra={
+        <Tooltip title="这些字段目前由导入脚本或高级用户直接维护 spec_json；可视化编辑将在后续版本提供。编辑其它字段并保存不会影响这部分数据。">
+          <Tag color="blue">v2 之后可视化编辑</Tag>
+        </Tooltip>
+      }
+    >
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        {entries.map((r) => (
+          <div key={r.key}>
+            <Text strong style={{ fontSize: 13 }}>{r.title}</Text>
+            <div style={{ color: '#71717a', fontSize: 12, marginBottom: 4 }}>{r.hint}</div>
+            <pre
+              style={{
+                background: 'rgba(24,24,27,0.6)',
+                padding: 8,
+                borderRadius: 4,
+                fontSize: 11,
+                maxHeight: 200,
+                overflow: 'auto',
+                margin: 0,
+                color: '#e4e4e7',
+              }}
+            >
+              {JSON.stringify(r.data, null, 2)}
+            </pre>
+          </div>
+        ))}
+      </Space>
+    </Card>
+  )
+}
+
+
+/**
+ * 顶层 port_routing 编辑器（协议级）
+ * 表格：端口 | Labels（逗号分隔的八进制列表）| 删除
+ * 同时支持添加新端口
+ */
+function PortRoutingEditor({ routing, onChange, readOnly }) {
+  const [addingPort, setAddingPort] = useState('')
+  const [addingLabels, setAddingLabels] = useState('')
+
+  const safeRouting = routing && typeof routing === 'object' ? routing : {}
+  const rows = Object.entries(safeRouting).map(([port, labs]) => ({
+    key: port,
+    port,
+    labels: Array.isArray(labs) ? labs.join(', ') : '',
+    count: Array.isArray(labs) ? labs.length : 0,
+  }))
+
+  const setPortLabels = (port, labelsStr) => {
+    const labs = String(labelsStr || '')
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    onChange({ ...safeRouting, [port]: labs })
+  }
+
+  const deletePort = (port) => {
+    const next = { ...safeRouting }
+    delete next[port]
+    onChange(next)
+  }
+
+  const addPort = () => {
+    const p = String(addingPort || '').trim()
+    if (!p) {
+      message.warning('请输入端口号')
+      return
+    }
+    if (safeRouting[p]) {
+      message.warning(`端口 ${p} 已存在`)
+      return
+    }
+    const labs = String(addingLabels || '')
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    onChange({ ...safeRouting, [p]: labs })
+    setAddingPort('')
+    setAddingLabels('')
+  }
+
+  return (
+    <Card
+      size="small"
+      title={
+        <Space>
+          <span>端口路由（port_routing）</span>
+          <Tag>{rows.length} 个端口</Tag>
+        </Space>
+      }
+      extra={
+        <Tooltip title="承载 parser 的 _PORT_LABELS：声明每个 UDP 端口应该监听哪些 label。与其在 parser 代码里硬编码，不如在 bundle 里声明。">
+          <Tag color="blue">bundle-first 依赖</Tag>
+        </Tooltip>
+      }
+      style={{ marginBottom: 12 }}
+    >
+      {rows.length === 0 && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 8, padding: '4px 10px' }}
+          message={
+            <Text style={{ fontSize: 12 }}>
+              暂未声明端口路由。未配置时将 fallback 到 parser 硬编码的 _PORT_LABELS。
+            </Text>
+          }
+        />
+      )}
+      {rows.length > 0 && (
+        <Table
+          size="small"
+          pagination={false}
+          rowKey="key"
+          dataSource={rows}
+          columns={[
+            { title: '端口', dataIndex: 'port', width: 90 },
+            {
+              title: 'Labels（八进制，逗号分隔）',
+              dataIndex: 'labels',
+              render: (v, r) =>
+                readOnly ? (
+                  <Text code style={{ fontSize: 12 }}>{v || '(空)'}</Text>
+                ) : (
+                  <Input
+                    size="small"
+                    value={v}
+                    onChange={(e) => setPortLabels(r.port, e.target.value)}
+                    placeholder="001, 003, 005"
+                  />
+                ),
+            },
+            { title: '数量', dataIndex: 'count', width: 64 },
+            !readOnly && {
+              title: '',
+              key: 'op',
+              width: 60,
+              render: (_, r) => (
+                <Popconfirm
+                  title={`删除端口 ${r.port} 的路由？`}
+                  okText="删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  onConfirm={() => deletePort(r.port)}
+                >
+                  <Button size="small" danger icon={<DeleteOutlined />} />
+                </Popconfirm>
+              ),
+            },
+          ].filter(Boolean)}
+        />
+      )}
+      {!readOnly && (
+        <Space style={{ marginTop: 8 }} wrap>
+          <Input
+            size="small"
+            placeholder="端口号 如 7001"
+            value={addingPort}
+            onChange={(e) => setAddingPort(e.target.value)}
+            style={{ width: 140 }}
+          />
+          <Input
+            size="small"
+            placeholder="labels 如 001, 003, 005"
+            value={addingLabels}
+            onChange={(e) => setAddingLabels(e.target.value)}
+            style={{ width: 260 }}
+          />
+          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={addPort}>
+            添加端口
+          </Button>
+        </Space>
+      )}
+    </Card>
+  )
 }
 
 
@@ -905,14 +1202,18 @@ export default function Arinc429SpecEditor({
 
   const bitModel = useMemo(() => buildBitModel(selected), [selected])
 
-  const emit = (nextLabels, nextMeta = meta) => {
-    onChange?.({ ...value, protocol_meta: nextMeta, labels: nextLabels })
+  const emit = (nextLabels, nextMeta = meta, patch = {}) => {
+    onChange?.({ ...value, ...patch, protocol_meta: nextMeta, labels: nextLabels })
   }
 
   const updateMeta = (patch) => {
     const next = { ...meta, ...patch }
     setMeta(next)
     emit(labels, next)
+  }
+
+  const updatePortRouting = (nextRouting) => {
+    emit(labels, meta, { port_routing: nextRouting })
   }
 
   const updateSelected = (patch) => {
@@ -999,7 +1300,23 @@ export default function Arinc429SpecEditor({
       const name = (values.single_name || '').trim()
       const desc = (values.single_desc || '').trim()
       next.discrete_bits = next.discrete_bits || {}
-      next.discrete_bits[bitNum] = desc ? `${name}: ${desc}` : name
+      // 如果原值是结构化 dict（带 values 枚举映射），保留 values，仅更新 name/cn；
+      // 否则存成 "name: desc" 字符串（向后兼容）
+      const original = (selected?.discrete_bits || {})[bitNum]
+      if (
+        original &&
+        typeof original === 'object' &&
+        original.values &&
+        Object.keys(original.values).length > 0
+      ) {
+        next.discrete_bits[bitNum] = {
+          ...original,
+          name,
+          cn: desc,
+        }
+      } else {
+        next.discrete_bits[bitNum] = desc ? `${name}: ${desc}` : name
+      }
     } else if (type === 'multi') {
       const name = (values.multi_name || '').trim()
       const lo = Number(values.multi_bit_lo)
@@ -1008,11 +1325,11 @@ export default function Arinc429SpecEditor({
         message.error('位范围必须在 9..29 且起始≤结束')
         return
       }
-      // 清掉新范围内所有字段，避免重叠
       next = clearRangeInLabel(next, lo, hi)
       const vmap = parseMultiValues(values.multi_values, hi - lo + 1)
       next.special_fields = next.special_fields || []
-      next.special_fields.push({ name, bits: [lo, hi], type: 'enum', values: vmap })
+      // data_bits 与 bnr_fields 对齐；encoding 代替老的 type
+      next.special_fields.push({ name, data_bits: [lo, hi], encoding: 'enum', values: vmap })
     } else if (type === 'bnr') {
       const name = (values.bnr_name || '').trim()
       const lo = Number(values.bnr_bit_lo)
@@ -1030,6 +1347,7 @@ export default function Arinc429SpecEditor({
         data_bits: [lo, hi],
         encoding: values.bnr_encoding || 'bnr',
         sign_bit: signBit || null,
+        sign_style: values.bnr_sign_style || 'bit29_sign_magnitude',
         resolution: values.bnr_resolution ?? null,
         unit: values.bnr_unit || '',
       })
@@ -1117,6 +1435,14 @@ export default function Arinc429SpecEditor({
             </Col>
           </Row>
         </Card>
+      )}
+
+      {mode === 'list' && (
+        <PortRoutingEditor
+          routing={value?.port_routing}
+          onChange={updatePortRouting}
+          readOnly={readOnly}
+        />
       )}
 
       {mode === 'list' ? (
@@ -1320,6 +1646,8 @@ export default function Arinc429SpecEditor({
                   }}
                 />
               </Card>
+
+              <AdvancedFieldsReadOnly label={selected} />
             </>
           )}
         </Space>

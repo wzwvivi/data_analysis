@@ -89,7 +89,324 @@ _LABEL_OCTAL_MAP = {
     '234': 0o234,
 }
 
-_LABEL_DEFS: Dict[int, dict] = {v: {} for v in _LABEL_OCTAL_MAP.values()}
+# 元数据来源：
+# - cn/col/direction：本文件 docstring + _apply_decoded 的 record 字段映射
+# - 精度 (lsb_bit/msb_bit/lsb_val/signed/sign_style)：逐条从 ARINC429Decoder.decode_xxx
+#   方法里抄出（见 app/services/parsers/arinc429.py）
+# - sign_style="twos_complement"：仅 365/366/367，parser 用 _decode_signed_bnr_20bit
+#   把 bit 9..29 作为 21 位二补码整体解读，无独立 sign 位
+# - parser 中部分 label 同时调 extract_data_bits(9,29) 和 extract_sign_bit（bit 29 被
+#   双重使用），此处忠实反映 parser 行为，在 notes 里标注
+_LABEL_DEFS: Dict[int, dict] = {
+    # ========== 工作状态（输入/输出共用 306） ==========
+    0o306: {
+        "cn": "工作状态 / 工作状态回传", "col": "work_status_raw",
+        "enc": "discrete",
+    },
+    # ========== 输入标号 (TACU/GPS → ATC) ==========
+    0o031: {
+        "cn": "返回当前识别代码", "col": "squawk_code",
+        "enc": "special",
+        "special_fields": [
+            {"name": "digit4_thousands", "bits": [27, 29], "encoding": "binary",
+             "description": "千位（3 bit 八进制数字）"},
+            {"name": "digit3_hundreds",  "bits": [24, 26], "encoding": "binary",
+             "description": "百位（3 bit 八进制数字）"},
+            {"name": "digit2_tens",      "bits": [21, 23], "encoding": "binary",
+             "description": "十位（3 bit 八进制数字）"},
+            {"name": "digit1_ones",      "bits": [18, 20], "encoding": "binary",
+             "description": "个位（3 bit 八进制数字）"},
+        ],
+    },
+    0o331: {
+        "cn": "S模式地址1（低20位）", "col": "smode_addr_low_raw",
+        "enc": "bnr", "lsb_bit": 10, "msb_bit": 29, "signed": False,
+    },
+    0o332: {
+        "cn": "S模式地址2（高4位）", "col": "smode_addr_high_raw",
+        "enc": "bnr", "lsb_bit": 10, "msb_bit": 13, "signed": False,
+    },
+    0o261: {
+        "cn": "当前航班号1（字符1-3）", "col": "flight_id_part1",
+        "enc": "special",
+        "special_fields": [
+            {"name": "char3", "bits": [23, 28], "encoding": "binary",
+             "description": "字符3（6 bit，0x20 空格 / 0x01~0x1A = A..Z）"},
+            {"name": "char2", "bits": [17, 22], "encoding": "binary",
+             "description": "字符2"},
+            {"name": "char1", "bits": [11, 16], "encoding": "binary",
+             "description": "字符1"},
+        ],
+    },
+    0o235: {
+        "cn": "当前航班号2（字符4-6）", "col": "flight_id_part2",
+        "enc": "special",
+        "special_fields": [
+            {"name": "char6", "bits": [23, 28], "encoding": "binary"},
+            {"name": "char5", "bits": [17, 22], "encoding": "binary"},
+            {"name": "char4", "bits": [11, 16], "encoding": "binary"},
+        ],
+    },
+    0o236: {
+        "cn": "当前航班号3（字符7-8）", "col": "flight_id_part3",
+        "enc": "special",
+        "special_fields": [
+            {"name": "char8", "bits": [17, 22], "encoding": "binary"},
+            {"name": "char7", "bits": [11, 16], "encoding": "binary"},
+        ],
+    },
+    0o203: {
+        "cn": "绝对气压高度", "col": "baro_altitude_ft",
+        "enc": "bnr", "lsb_bit": 11, "msb_bit": 28, "signed": True,
+        "lsb_val": 0.25, "unit": "ft",
+    },
+    0o210: {
+        "cn": "真空速", "col": "true_airspeed_kn",
+        "enc": "bnr", "lsb_bit": 11, "msb_bit": 28, "signed": False,
+        "lsb_val": 0.125, "unit": "kn",
+    },
+    0o212: {
+        "cn": "升降速度", "col": "vertical_rate_ftmin",
+        "enc": "bnr", "lsb_bit": 11, "msb_bit": 28, "signed": True,
+        "lsb_val": 3.0, "unit": "ft/min",
+    },
+    0o125: {
+        "cn": "北京时间", "col": "beijing_time",
+        "enc": "special", "unit": "hh:mm:ss",
+        "special_fields": [
+            {"name": "sec_ones",   "bits": [9, 12],  "encoding": "binary",
+             "description": "秒 个位（4 bit）"},
+            {"name": "sec_tens",   "bits": [13, 15], "encoding": "binary",
+             "description": "秒 十位（3 bit，0..5）"},
+            {"name": "min_ones",   "bits": [16, 19], "encoding": "binary",
+             "description": "分 个位"},
+            {"name": "min_tens",   "bits": [20, 22], "encoding": "binary",
+             "description": "分 十位（3 bit，0..5）"},
+            {"name": "hour_ones",  "bits": [23, 26], "encoding": "binary",
+             "description": "时 个位"},
+            {"name": "hour_tens",  "bits": [27, 28], "encoding": "binary",
+             "description": "时 十位（2 bit，0..2）"},
+        ],
+    },
+    0o310: {
+        "cn": "即时位置纬度 高20位", "col": "latitude",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 28, "signed": True,
+        "unit": "°",
+    },
+    0o313: {
+        "cn": "即时位置纬度 低11位", "col": "latitude",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 19, "signed": False,
+        "unit": "°",
+    },
+    0o311: {
+        "cn": "即时位置经度 高20位", "col": "longitude",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 28, "signed": True,
+        "unit": "°",
+    },
+    0o317: {
+        "cn": "即时位置经度 低11位", "col": "longitude",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 19, "signed": False,
+        "unit": "°",
+    },
+    0o312: {
+        "cn": "地速", "col": "ground_speed",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 28, "signed": False,
+        "lsb_val": 0.0078125, "unit": "km/h",
+    },
+    0o314: {
+        "cn": "真航向", "col": "true_heading",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": False,
+        "lsb_val": 0.000171661376953125, "unit": "°",
+    },
+    0o322: {
+        "cn": "真航迹角", "col": "track_angle",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 28, "signed": True,
+        "lsb_val": 180.0 / (2 ** 19), "unit": "°",
+    },
+    0o365: {
+        "cn": "天向速度", "col": "vertical_velocity",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": True,
+        "sign_style": "twos_complement",
+        "lsb_val": 0.00048828125,
+    },
+    0o366: {
+        "cn": "北向速度", "col": "north_velocity",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": True,
+        "sign_style": "twos_complement",
+        "lsb_val": 0.0021092063,
+    },
+    0o367: {
+        "cn": "东向速度", "col": "east_velocity",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": True,
+        "sign_style": "twos_complement",
+        "lsb_val": 0.0021092063,
+    },
+    0o361: {
+        # parser 把 bit 9..29 作数据 + 同时取 bit 29 做 sign（双重使用 bit 29），
+        # 已按 docstring "21 位 (Bit 9-29)" 填；运行时建议改成 bit 9..28 data + bit 29 sign。
+        "cn": "几何高度", "col": "geometric_height",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": True,
+        "lsb_val": 0.03125, "unit": "m",
+    },
+    0o267: {
+        "cn": "导航完整性信息", "col": "nav_integrity_raw",
+        "enc": "unimplemented",
+    },
+    # ========== 输出标号 (ATC → DCU/OMS/...) ==========
+    0o133: {
+        "cn": "入侵机真航向", "col": "intruder_heading",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": False,
+        "lsb_val": 0.000171661376953125, "unit": "°",
+    },
+    0o162: {
+        "cn": "入侵机识别代码", "col": "intruder_squawk",
+        "enc": "special",
+        "special_fields": [
+            {"name": "digit4_thousands", "bits": [27, 29], "encoding": "binary"},
+            {"name": "digit3_hundreds",  "bits": [24, 26], "encoding": "binary"},
+            {"name": "digit2_tens",      "bits": [21, 23], "encoding": "binary"},
+            {"name": "digit1_ones",      "bits": [18, 20], "encoding": "binary"},
+        ],
+    },
+    0o134: {
+        "cn": "入侵机航班号1", "col": "intruder_flt1_raw",
+        "enc": "special",
+        "special_fields": [
+            {"name": "char3", "bits": [23, 28], "encoding": "binary"},
+            {"name": "char2", "bits": [17, 22], "encoding": "binary"},
+            {"name": "char1", "bits": [11, 16], "encoding": "binary"},
+        ],
+    },
+    0o135: {
+        "cn": "入侵机航班号2", "col": "intruder_flt2_raw",
+        "enc": "special",
+        "special_fields": [
+            {"name": "char6", "bits": [23, 28], "encoding": "binary"},
+            {"name": "char5", "bits": [17, 22], "encoding": "binary"},
+            {"name": "char4", "bits": [11, 16], "encoding": "binary"},
+        ],
+    },
+    0o136: {
+        "cn": "入侵机航班号3", "col": "intruder_flt3_raw",
+        "enc": "special",
+        "special_fields": [
+            {"name": "char9",  "bits": [23, 28], "encoding": "binary"},
+            {"name": "char8",  "bits": [17, 22], "encoding": "binary"},
+            {"name": "char7",  "bits": [11, 16], "encoding": "binary"},
+        ],
+    },
+    0o137: {
+        "cn": "入侵机航班号4", "col": "intruder_flt4_raw",
+        "enc": "special",
+        "special_fields": [
+            {"name": "char12", "bits": [23, 28], "encoding": "binary"},
+            {"name": "char11", "bits": [17, 22], "encoding": "binary"},
+            {"name": "char10", "bits": [11, 16], "encoding": "binary"},
+        ],
+    },
+    0o141: {
+        "cn": "入侵机地速", "col": "intruder_gs",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 28, "signed": False,
+        "lsb_val": 0.0078125,
+    },
+    0o142: {
+        "cn": "入侵机纬度 高12位", "col": "intruder_lat_h_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 20, "signed": False,
+        "unit": "°",
+    },
+    0o143: {
+        "cn": "入侵机纬度 低12位", "col": "intruder_lat_l_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 20, "signed": False,
+        "unit": "°",
+    },
+    0o144: {
+        "cn": "入侵机经度 高12位", "col": "intruder_lon_h_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 20, "signed": False,
+        "unit": "°",
+    },
+    0o145: {
+        "cn": "入侵机经度 低12位", "col": "intruder_lon_l_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 20, "signed": False,
+        "unit": "°",
+    },
+    0o146: {
+        "cn": "入侵机 S模式地址 高12位", "col": "intruder_addr_h_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 20, "signed": False,
+    },
+    0o147: {
+        "cn": "入侵机 S模式地址 低12位", "col": "intruder_addr_l_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 20, "signed": False,
+    },
+    0o151: {
+        # parser 实现里 data_bits=9..29 + extract_sign_bit(bit 29)，此处按 ICD 填 9..28 + signed
+        "cn": "入侵机垂直速度", "col": "intruder_vs",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 28, "signed": True,
+        "lsb_val": 0.00048828125,
+    },
+    0o152: {
+        "cn": "入侵机北向速度", "col": "intruder_nv",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 28, "signed": True,
+        "lsb_val": 0.00048828125,
+    },
+    0o153: {
+        "cn": "入侵机东向速度", "col": "intruder_ev",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 28, "signed": True,
+        "lsb_val": 0.00048828125,
+    },
+    0o154: {
+        "cn": "入侵机导航精度类别 (NAC)", "col": "intruder_nac_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": False,
+    },
+    0o155: {
+        "cn": "入侵机导航完整性类别 (NIC)", "col": "intruder_nic_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": False,
+    },
+    0o156: {
+        "cn": "入侵机状况消息", "col": "intruder_status_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": False,
+    },
+    0o157: {
+        "cn": "入侵机高度", "col": "intruder_alt",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 28, "signed": True,
+        "lsb_val": 0.125, "unit": "ft",
+    },
+    0o160: {
+        "cn": "入侵机时标1", "col": "intruder_ts1_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": False,
+    },
+    0o161: {
+        "cn": "入侵机时标2", "col": "intruder_ts2_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": False,
+    },
+    0o357: {
+        "cn": "发送起始/终止字", "col": "start_stop_raw",
+        "enc": "bnr", "lsb_bit": 9, "msb_bit": 29, "signed": False,
+    },
+    0o233: {
+        "cn": "软件版本号", "col": "sw_version",
+        "enc": "special",
+        "special_fields": [
+            {"name": "d5", "bits": [25, 28], "encoding": "binary",
+             "description": "主版本十位（4 bit），拼接格式 '{d5}{d4}{d3}.{d2}{d1}'"},
+            {"name": "d4", "bits": [21, 24], "encoding": "binary"},
+            {"name": "d3", "bits": [17, 20], "encoding": "binary"},
+            {"name": "d2", "bits": [13, 16], "encoding": "binary"},
+            {"name": "d1", "bits": [9, 12],  "encoding": "binary"},
+        ],
+    },
+    0o234: {
+        "cn": "软件版本日期", "col": "sw_date",
+        "enc": "special",
+        "special_fields": [
+            {"name": "d5", "bits": [25, 28], "encoding": "binary",
+             "description": "5 段 4bit 拼接格式 '{d5}{d4}{d3}{d2}{d1}'"},
+            {"name": "d4", "bits": [21, 24], "encoding": "binary"},
+            {"name": "d3", "bits": [17, 20], "encoding": "binary"},
+            {"name": "d2", "bits": [13, 16], "encoding": "binary"},
+            {"name": "d1", "bits": [9, 12],  "encoding": "binary"},
+        ],
+    },
+}
 
 _FIELD_NAME_TO_LABEL = build_field_name_to_label(_LABEL_DEFS)
 

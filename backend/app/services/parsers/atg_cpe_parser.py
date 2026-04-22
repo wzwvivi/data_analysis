@@ -45,7 +45,100 @@ _LABEL_STRINGS = ["132", "175", "254", "255", "261", "324", "325", "150", "260"]
 _LABEL_MAP = {s: _to_octal_label(s) for s in _LABEL_STRINGS}
 KNOWN_LABELS = {v for v in _LABEL_MAP.values() if v is not None}
 
-_LABEL_DEFS: Dict[int, dict] = {v: {} for v in KNOWN_LABELS}
+# 元数据来源：本文件 _decode_word 中的 lsb_val / bit 范围
+# col 与 OUTPUT_COLUMNS 对齐；enc = bnr / bcd_time / bcd_date
+_LABEL_DEFS: Dict[int, dict] = {
+    _LABEL_MAP["132"]: {
+        "cn": "混合真航迹角",
+        "col": "true_track_angle_deg",
+        "enc": "bnr",
+        "lsb_bit": 14, "msb_bit": 28,
+        "lsb_val": 0.0054931640625,
+        "signed": True,
+        "unit": "°",
+    },
+    _LABEL_MAP["175"]: {
+        "cn": "混合地速",
+        "col": "ground_speed_kn",
+        "enc": "bnr",
+        "lsb_bit": 14, "msb_bit": 28,
+        "lsb_val": 0.125,
+        "signed": False,
+        "unit": "kn",
+    },
+    _LABEL_MAP["254"]: {
+        "cn": "混合纬度",
+        "col": "latitude_deg",
+        "enc": "bnr",
+        "lsb_bit": 9, "msb_bit": 28,
+        "lsb_val": 0.000171661376953125,
+        "signed": True,
+        "unit": "°",
+    },
+    _LABEL_MAP["255"]: {
+        "cn": "混合经度",
+        "col": "longitude_deg",
+        "enc": "bnr",
+        "lsb_bit": 9, "msb_bit": 28,
+        "lsb_val": 0.000171661376953125,
+        "signed": True,
+        "unit": "°",
+    },
+    _LABEL_MAP["261"]: {
+        "cn": "混合气压/混合高度",
+        "col": "altitude_ft",
+        "enc": "bnr",
+        "lsb_bit": 9, "msb_bit": 28,
+        "lsb_val": 0.125,
+        "signed": True,
+        "unit": "ft",
+    },
+    _LABEL_MAP["324"]: {
+        "cn": "俯仰角",
+        "col": "pitch_angle_deg",
+        "enc": "bnr",
+        "lsb_bit": 14, "msb_bit": 28,
+        "lsb_val": 0.0054931640625,
+        "signed": True,
+        "unit": "°",
+    },
+    _LABEL_MAP["325"]: {
+        "cn": "横滚角",
+        "col": "roll_angle_deg",
+        "enc": "bnr",
+        "lsb_bit": 14, "msb_bit": 28,
+        "lsb_val": 0.0054931640625,
+        "signed": True,
+        "unit": "°",
+    },
+    _LABEL_MAP["150"]: {
+        # 注意：parser _decode_utc 用的是三段 "纯二进制"（不是 BCD），
+        # sec=bits 12..17 (6bit), min=bits 18..23 (6bit), hour=bits 24..28 (5bit)
+        # 另外 parser 同时写 utc_raw（十六进制）和 utc_time（HH:MM:SS 字符串）两列
+        "cn": "UTC 时间",
+        "col": "utc_time",
+        "enc": "special",
+        "unit": "hh:mm:ss",
+        "special_fields": [
+            {"name": "sec",    "bits": [12, 17], "encoding": "binary",
+             "description": "秒（6 bit 二进制，0..59）"},
+            {"name": "minute", "bits": [18, 23], "encoding": "binary",
+             "description": "分（6 bit 二进制，0..59）"},
+            {"name": "hour",   "bits": [24, 28], "encoding": "binary",
+             "description": "时（5 bit 二进制，0..23）"},
+            {"name": "utc_raw", "encoding": "hex",
+             "description": "整 word 的十六进制，用于调试/原始值回放"},
+        ],
+    },
+    _LABEL_MAP["260"]: {
+        # parser 目前未解码 date，只写占位符 "from_label_260"
+        # 解码规则待 ICD 文档补全后再转成 bcd_date / special
+        "cn": "日期",
+        "col": "date_text",
+        "enc": "unimplemented",
+        "unit": "yyyy-mm-dd",
+    },
+}
 
 _FIELD_NAME_TO_LABEL = build_field_name_to_label(_LABEL_DEFS)
 

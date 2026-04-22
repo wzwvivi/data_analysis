@@ -89,41 +89,6 @@ export const sharedTsnApi = {
   remove: (id) => api.delete(`/shared-tsn/${id}`),
 }
 
-/** 协议管理（设备树、Label、版本）— 写操作需管理员 */
-export const protocolManagerApi = {
-  getDeviceTree: () => api.get('/protocol-manager/device-tree'),
-  createSystem: (body) => api.post('/protocol-manager/systems', body),
-  createDevice: (body) => api.post('/protocol-manager/devices', body),
-  deleteDevice: (deviceId) => api.delete(`/protocol-manager/devices/${encodeURIComponent(deviceId)}`),
-  setActiveVersion: (deviceId, currentVersionName) =>
-    api.put(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/active-version`, {
-      current_version_name: currentVersionName,
-    }),
-  getLabels: (deviceId, protocolVersionId) =>
-    api.get(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/labels`, {
-      params: protocolVersionId != null ? { protocol_version_id: protocolVersionId } : {},
-    }),
-  saveLabels: (deviceId, body) =>
-    api.post(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/labels`, body),
-  deleteLabel: (deviceId, labelId) =>
-    api.delete(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/labels/${labelId}`),
-  listProtocolVersions: (deviceId) =>
-    api.get(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/versions`),
-  listHistory: (deviceId, limit = 50) =>
-    api.get(`/protocol-manager/devices/${encodeURIComponent(deviceId)}/history`, { params: { limit } }),
-  getSnapshotLabels: (deviceId, version) =>
-    api.get(
-      `/protocol-manager/devices/${encodeURIComponent(deviceId)}/versions/${encodeURIComponent(version)}/labels`
-    ),
-  restoreVersion: (deviceId, version) =>
-    api.post(
-      `/protocol-manager/devices/${encodeURIComponent(deviceId)}/versions/${encodeURIComponent(version)}/restore`
-    ),
-}
-
-// 向后兼容旧命名，避免其他页面暂时引用失败
-export const arinc429Api = protocolManagerApi
-
 /** 网络团队配置管理（MR1 只读 + MR2 Draft/审批；MR3 激活闸门） */
 export const networkConfigApi = {
   // ── 只读（MR1） ──

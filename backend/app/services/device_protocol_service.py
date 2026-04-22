@@ -742,12 +742,31 @@ def _spec_to_dict(
 
 _DEVICE_ANCHOR_SEP = "__"
 
+# device_id 的 "__<slug>" 后缀含义分两种：
+# - 后缀是已知 bus 名（arinc429/can/rs422/...）→ "同设备多总线"，在设备树里聚合
+#   （ata27_27_4 + ata27_27_4__rs485 + ... 会聚合成一个 27-4 节点）
+# - 后缀是自定义 slug（如 __ins_init / __stat）→ "同设备多份独立协议"，在树里
+#   作为独立节点显示（ata90_90_2 和 ata90_90_2__ins_init 是两个协议节点）
+_BUS_ANCHOR_SUFFIXES = frozenset({
+    "arinc429", "can", "rs422", "rs485", "mavlink", "discrete", "wireless", "none",
+})
+
 
 def _anchor_of_device_id(device_id: str) -> str:
-    """还原多总线 spec 的 anchor device_id：ata27_27_4__rs485 → ata27_27_4"""
+    """还原多总线 spec 的 anchor device_id。
+
+    - ata27_27_4__rs485  → ata27_27_4     （bus 后缀：聚合）
+    - ata90_90_2__ins_init → ata90_90_2__ins_init （非 bus 后缀：保留为独立 anchor）
+    """
     if not device_id:
         return ""
-    return device_id.split(_DEVICE_ANCHOR_SEP, 1)[0]
+    parts = device_id.split(_DEVICE_ANCHOR_SEP, 1)
+    if len(parts) == 1:
+        return device_id
+    base, suffix = parts
+    if suffix in _BUS_ANCHOR_SUFFIXES:
+        return base
+    return device_id
 
 
 async def _load_parser_profile_map(
@@ -805,7 +824,9 @@ async def list_bus_specs_for_device(
     anchor = _anchor_of_device_id(device_id)
     if not anchor:
         return []
-    # like 'anchor' or 'anchor__%'
+    # 查 anchor 本体 + 所有 anchor__<bus> 后缀；自定义 slug（如 __ins_init）
+    # 会先被粗查命中，后面再用 _anchor_of_device_id 过滤回去，只保留同一个
+    # 逻辑 anchor 下的 per-bus spec。
     stmt = (
         select(DeviceProtocolSpec)
         .where(
@@ -815,7 +836,10 @@ async def list_bus_specs_for_device(
         .options(selectinload(DeviceProtocolSpec.versions))
     )
     res = await db.execute(stmt)
-    specs = list(res.scalars().all())
+    specs = [
+        s for s in res.scalars().all()
+        if _anchor_of_device_id(s.device_id) == anchor
+    ]
     _BUS_ORDER = {
         "arinc429": 0,
         "can": 1,

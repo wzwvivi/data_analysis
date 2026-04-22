@@ -12,7 +12,7 @@ import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import {
   HISTORY_TASK_LIST_PAGE,
   HISTORY_TASK_LIST_PAGE_SIZE,
-  chronologicalTaskNo,
+  newestFirstTaskNo,
 } from '../utils/historyTaskList'
 import dayjs from 'dayjs'
 
@@ -27,6 +27,7 @@ const TOLERANCE_OPTIONS = [
 function FccEventAnalysisPage() {
   const navigate = useNavigate()
   const [taskList, setTaskList] = useState([])
+  const [listTotal, setListTotal] = useState(0)
   const [listLoading, setListLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -71,7 +72,9 @@ function FccEventAnalysisPage() {
         HISTORY_TASK_LIST_PAGE,
         HISTORY_TASK_LIST_PAGE_SIZE,
       )
-      setTaskList(res.data.items || [])
+      const items = res.data.items || []
+      setTaskList(items)
+      setListTotal(res.data?.total ?? items.length)
     } catch {
       message.error('加载任务列表失败')
     } finally {
@@ -152,11 +155,15 @@ function FccEventAnalysisPage() {
       title: '任务编号',
       key: 'task_no',
       width: 90,
-      render: (_, __, index) => (
-        <span style={{ fontFamily: 'monospace' }}>
-          {chronologicalTaskNo(HISTORY_TASK_LIST_PAGE, HISTORY_TASK_LIST_PAGE_SIZE, index)}
-        </span>
-      ),
+      render: (_, __, index) => {
+        const n = newestFirstTaskNo(
+          listTotal,
+          HISTORY_TASK_LIST_PAGE,
+          HISTORY_TASK_LIST_PAGE_SIZE,
+          index,
+        )
+        return <span style={{ fontFamily: 'monospace' }}>{n != null ? n : '—'}</span>
+      },
     },
     { title: '文件', dataIndex: 'pcap_filename', key: 'pcap_filename', ellipsis: true },
     {

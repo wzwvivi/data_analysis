@@ -37,6 +37,10 @@ PARSER_MAP: Dict[str, Tuple[str, str]] = {
 }
 
 
+# ARINC 429 标准：Bit 29 = sign（由 ARINC429Decoder.extract_sign_bit 统一提取）
+ARINC429_SIGN_BIT = 29
+
+
 # ── 编码类型映射：parser 的 enc → spec_json 的 ssm_type ──
 def _enc_to_ssm(enc: str) -> str:
     enc = (enc or "").lower()
@@ -46,6 +50,12 @@ def _enc_to_ssm(enc: str) -> str:
         return "discrete"
     if enc.startswith("bcd"):
         return "bcd"
+    if enc == "special":
+        # 多段 binary / 多字段组合：label 编辑器里以 special_fields 呈现
+        return "special"
+    if enc in ("unimplemented", "tbd"):
+        # parser 里还没实现真正解码，保留占位 + 备注
+        return "unimplemented"
     return "bnr"
 
 
@@ -59,7 +69,7 @@ def _build_label_entry(label_oct_int: int, defn: Dict[str, Any]) -> Dict[str, An
         "label_oct": oct_str,
         "label_dec": label_oct_int,
         "name": defn.get("cn") or defn.get("col") or f"Label {oct_str}",
-        "direction": "",
+        "direction": defn.get("direction") or "",
         "sources": [],
         "sdi": None,
         "ssm_type": ssm,
@@ -78,21 +88,27 @@ def _build_label_entry(label_oct_int: int, defn: Dict[str, Any]) -> Dict[str, An
     if ssm == "bnr":
         lsb_bit = defn.get("lsb_bit")
         msb_bit = defn.get("msb_bit")
-        signed = defn.get("signed")
+        signed = bool(defn.get("signed"))
+        # sign_style: "sign_magnitude"（默认，ARINC 429 标准，Bit 29 独立符号位）
+        #             "twos_complement"（bit 9..29 作为 21 位二补码整体解读，无独立符号位）
+        sign_style = (defn.get("sign_style") or "sign_magnitude").lower()
         if lsb_bit is not None and msb_bit is not None:
-            entry["bnr_fields"] = [
-                {
-                    "name": defn.get("col") or "value",
-                    "data_bits": [int(lsb_bit), int(msb_bit)],
-                    "encoding": "bnr",
-                    "sign_bit": int(msb_bit) if signed else None,
-                    "resolution": defn.get("lsb_val"),
-                    "unit": defn.get("unit") or "",
-                }
-            ]
+            bnr_field: Dict[str, Any] = {
+                "name": defn.get("col") or "value",
+                "data_bits": [int(lsb_bit), int(msb_bit)],
+                "encoding": "twos_complement" if sign_style == "twos_complement" else "bnr",
+                "resolution": defn.get("lsb_val"),
+                "unit": defn.get("unit") or "",
+            }
+            if signed and sign_style != "twos_complement":
+                # sign-magnitude：ARINC 429 标准 Bit 29 作为独立符号位
+                bnr_field["sign_bit"] = ARINC429_SIGN_BIT
+            else:
+                bnr_field["sign_bit"] = None
+            entry["bnr_fields"] = [bnr_field]
         entry["notes"] = (
-            f"col={defn.get('col')}; lsb_bit={lsb_bit}; msb_bit={msb_bit}; "
-            f"signed={signed}; lsb_val={defn.get('lsb_val')}"
+            f"col={defn.get('col')}; data_bits={lsb_bit}..{msb_bit}; "
+            f"signed={signed}; sign_style={sign_style}; lsb_val={defn.get('lsb_val')}"
         )
     elif ssm == "discrete":
         bits = defn.get("bits")
@@ -105,6 +121,34 @@ def _build_label_entry(label_oct_int: int, defn: Dict[str, Any]) -> Dict[str, An
             entry["notes"] = f"col={defn.get('col')}; discrete"
     elif ssm == "bcd":
         entry["notes"] = f"col={defn.get('col')}; enc={enc}"
+    elif ssm == "special":
+        # 直接透传 _LABEL_DEFS 里的 special_fields（多段 binary / 组合字段）
+        raw_sub = defn.get("special_fields") or defn.get("sub_fields") or []
+        normalized: List[Dict[str, Any]] = []
+        for sub in raw_sub:
+            if not isinstance(sub, dict):
+                continue
+            bits = sub.get("bits")
+            item: Dict[str, Any] = {
+                "name": sub.get("name") or "",
+                "encoding": sub.get("encoding") or "binary",
+                "unit": sub.get("unit") or "",
+            }
+            if isinstance(bits, (list, tuple)) and len(bits) == 2:
+                item["data_bits"] = [int(bits[0]), int(bits[1])]
+            if sub.get("description"):
+                item["description"] = sub["description"]
+            normalized.append(item)
+        entry["special_fields"] = normalized
+        entry["notes"] = (
+            f"col={defn.get('col')}; enc=special; "
+            f"parser 用多段 binary 组合解码；{len(normalized)} 子字段"
+        )
+    elif ssm == "unimplemented":
+        entry["notes"] = (
+            f"col={defn.get('col')}; parser 尚未实现真正解码，"
+            f"仅输出占位（原始 word 可从 _raw 列读取）。请根据 ICD 文档补全。"
+        )
     return entry
 
 

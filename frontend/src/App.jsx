@@ -17,7 +17,6 @@ import ComparePage from './pages/ComparePage'
 import AdminPlatformDataPage from './pages/AdminPlatformDataPage'
 import AdminUserPage from './pages/AdminUserPage'
 import ConfigurationManagerPage from './pages/ConfigurationManagerPage'
-import ProtocolManagerPage from './pages/ProtocolManagerPage'
 import NetworkConfigPage from './pages/NetworkConfigPage'
 import DraftEditorPage from './pages/network-config/DraftEditorPage'
 import ChangeRequestPage from './pages/network-config/ChangeRequestPage'
@@ -132,14 +131,6 @@ function AppRoutes() {
         <Route path="fcc-event-analysis" element={<PermissionRoute requiredPage="fcc-event-analysis"><FccEventAnalysisPage /></PermissionRoute>} />
         <Route path="auto-flight-analysis/task/:taskId" element={<PermissionRoute requiredPage="auto-flight-analysis/task/:taskId"><AutoFlightAnalysisTaskPage /></PermissionRoute>} />
         <Route path="auto-flight-analysis" element={<PermissionRoute requiredPage="auto-flight-analysis"><AutoFlightAnalysisPage /></PermissionRoute>} />
-        <Route
-          path="admin/protocol-manager"
-          element={(
-            <AdminRoute>
-              <ProtocolManagerPage />
-            </AdminRoute>
-          )}
-        />
         <Route
           path="admin/platform-data"
           element={(

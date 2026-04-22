@@ -52,7 +52,6 @@ PAGE_COMPARE = "compare"
 PAGE_COMPARE_TASK = "compare/:taskId"
 PAGE_NETWORK_CONFIG = "network-config"
 PAGE_DEVICE_PROTOCOL = "device-protocol"
-PAGE_ADMIN_PROTOCOL_MANAGER = "admin/protocol-manager"
 PAGE_ADMIN_PLATFORM_DATA = "admin/platform-data"
 PAGE_ADMIN_CONFIGURATIONS = "admin/configurations"
 PAGE_ADMIN_USERS = "admin/users"
@@ -146,7 +145,6 @@ ROLE_PAGE_ACCESS = {
         PAGE_WORKBENCH_DETAIL,
         PAGE_EVENT_ANALYSIS,
         PAGE_EVENT_ANALYSIS_TASK,
-        PAGE_ADMIN_PROTOCOL_MANAGER,
         PAGE_DEVICE_PROTOCOL,
     ],
     ROLE_NETWORK_TEAM: [
