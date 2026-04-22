@@ -24,6 +24,7 @@ from ..models import (
     AVAILABILITY_AVAILABLE,
     AVAILABILITY_DEPRECATED,
     AVAILABILITY_PENDING_CODE,
+    AtaSystem,
     ChangeRequestApproval,
     CR_STATUS_APPROVED,
     CR_STATUS_PENDING,
@@ -44,6 +45,7 @@ from ..models import (
     GIT_EXPORT_FAILED,
     GIT_EXPORT_SKIPPED,
     GIT_EXPORT_PENDING,
+    ParserProfile,
     ProtocolChangeRequest,
     draft_kind_for_family,
 )
@@ -114,27 +116,67 @@ async def compute_next_version_name(
 
 
 async def list_ata_systems(db: AsyncSession) -> List[Dict[str, Any]]:
-    """列出现有 ATA 系统（以 DeviceProtocolSpec.ata_code 去重聚合）。"""
-    res = await db.execute(
+    """列出 ATA 系统：并集 ``ata_systems`` 元表 + 实际 spec 里出现的 ``ata_code``。
+
+    - 元表里写死了长显示名（如 ``ATA32-起落架系统``）和排序权重（数字大小）。
+    - 即使某个 ``ata_code`` 没在元表里登记，设备挂在上面也会占一行（fallback）。
+    """
+    # 1) 先拿元表
+    meta_res = await db.execute(
+        select(AtaSystem).order_by(AtaSystem.sort_order, AtaSystem.code)
+    )
+    meta_rows = list(meta_res.scalars().all())
+    meta_by_code: Dict[str, AtaSystem] = {row.code: row for row in meta_rows}
+
+    # 2) 再拿 spec 聚合数据
+    spec_res = await db.execute(
         select(
             DeviceProtocolSpec.ata_code,
             func.count(DeviceProtocolSpec.id).label("device_count"),
         )
         .group_by(DeviceProtocolSpec.ata_code)
-        .order_by(DeviceProtocolSpec.ata_code)
     )
+    counts: Dict[str, int] = {}
+    for ata_code, device_count in spec_res.all():
+        key = (ata_code or "").strip()
+        counts[key] = int(device_count or 0)
+
+    def _display_fallback(code: str) -> str:
+        if not code:
+            return "其他"
+        return code.upper()
+
     items: List[Dict[str, Any]] = []
-    for ata_code, device_count in res.all():
-        code = ata_code or ""
-        # 尝试从 code 里提取"ata32"并推出显示名
-        label = code.upper() if code else "其他"
+    emitted: set = set()
+
+    for row in meta_rows:
+        code = row.code
+        items.append(
+            {
+                "ata_code": code,
+                "display_name": row.display_name,
+                "sort_order": row.sort_order,
+                "device_count": counts.get(code, 0),
+            }
+        )
+        emitted.add(code)
+
+    # 没登记到元表里的 ata_code（历史遗留 / 用户自建），挂到末尾
+    leftover = [
+        (code, cnt)
+        for code, cnt in counts.items()
+        if code not in emitted
+    ]
+    for code, cnt in sorted(leftover, key=lambda t: t[0] or ""):
         items.append(
             {
                 "ata_code": code or None,
-                "display_name": label,
-                "device_count": int(device_count or 0),
+                "display_name": _display_fallback(code),
+                "sort_order": 99999,
+                "device_count": cnt,
             }
         )
+
     return items
 
 
@@ -228,6 +270,7 @@ async def list_specs(
     *,
     family: Optional[str] = None,
     include_counts: bool = True,
+    include_parsers: bool = False,
 ) -> List[Dict[str, Any]]:
     stmt = select(DeviceProtocolSpec).order_by(
         DeviceProtocolSpec.protocol_family, DeviceProtocolSpec.device_id
@@ -237,9 +280,19 @@ async def list_specs(
     stmt = stmt.options(selectinload(DeviceProtocolSpec.versions))
     res = await db.execute(stmt)
     specs = list(res.scalars().all())
+
+    parser_family_map: Dict[str, List[Dict[str, Any]]] = {}
+    if include_parsers:
+        parser_family_map = await _load_parser_profile_map(db)
+
     items: List[Dict[str, Any]] = []
     for s in specs:
-        items.append(_spec_to_dict(s, include_counts=include_counts))
+        d = _spec_to_dict(s, include_counts=include_counts)
+        if include_parsers:
+            d["parser_profiles"] = _resolve_parser_hints(
+                d.get("parser_family_hints") or [], parser_family_map
+            )
+        items.append(d)
     return items
 
 
@@ -318,6 +371,152 @@ async def get_version(
     return res.scalar_one_or_none()
 
 
+# ═════════════════════════ 版本对比 / 更改记录 ═════════════════════════
+
+
+async def compare_versions(
+    db: AsyncSession, spec_id: int, version_a_id: int, version_b_id: int
+) -> Dict[str, Any]:
+    """对比同一 spec 下的任意两个已发布版本。
+
+    返回家族 handler ``diff_spec(a.spec_json, b.spec_json)`` 的结构化结果，
+    附上双方版本的完整元信息（版本号、时间、提交人、可用性等）。
+    """
+    if version_a_id == version_b_id:
+        raise DeviceProtocolError("请选择两个不同的版本进行对比")
+    spec = await get_spec_by_id(db, spec_id, with_versions=False)
+    if not spec:
+        raise DeviceProtocolError("设备 spec 不存在")
+    a = await get_version(db, version_a_id)
+    b = await get_version(db, version_b_id)
+    if not a or a.spec_id != spec_id:
+        raise DeviceProtocolError(f"版本 {version_a_id} 不存在或不属于该设备")
+    if not b or b.spec_id != spec_id:
+        raise DeviceProtocolError(f"版本 {version_b_id} 不存在或不属于该设备")
+    handler = get_family_handler(spec.protocol_family)
+    diff = handler.diff_spec(a.spec_json or {}, b.spec_json or {}).to_dict()
+    return {
+        "spec_id": spec_id,
+        "protocol_family": spec.protocol_family,
+        "version_a": serialize_version(a),
+        "version_b": serialize_version(b),
+        "diff": diff,
+    }
+
+
+async def build_changelog(db: AsyncSession, spec_id: int) -> List[Dict[str, Any]]:
+    """构造设备协议的变更记录。
+
+    按 version_seq 倒序返回；每条包含当前版本 + 关联 CR 关键字段 + 与
+    上一版本相比的 ``change_stats``（首版相对于空 spec）+ 完整 diff
+    (``diff_summary``) 供前端按需展开。
+    """
+    spec = await get_spec_by_id(db, spec_id, with_versions=False)
+    if not spec:
+        raise DeviceProtocolError("设备 spec 不存在")
+    # 按 seq asc 加载（便于计算相邻 diff），返回时再反转
+    stmt = (
+        select(DeviceProtocolVersion)
+        .where(DeviceProtocolVersion.spec_id == spec_id)
+        .order_by(DeviceProtocolVersion.version_seq.asc())
+    )
+    res = await db.execute(stmt)
+    versions = list(res.scalars().all())
+    if not versions:
+        return []
+
+    handler = get_family_handler(spec.protocol_family)
+
+    # 批量加载发布来源的 draft，以便获取 submit_note
+    draft_ids = [v.published_from_draft_id for v in versions if v.published_from_draft_id]
+    draft_map: Dict[int, DeviceProtocolDraft] = {}
+    if draft_ids:
+        d_res = await db.execute(
+            select(DeviceProtocolDraft).where(DeviceProtocolDraft.id.in_(draft_ids))
+        )
+        for d in d_res.scalars().all():
+            draft_map[d.id] = d
+
+    # 批量加载关联 CR
+    cr_map: Dict[int, ProtocolChangeRequest] = {}
+    if draft_ids:
+        cr_res = await db.execute(
+            select(ProtocolChangeRequest).where(
+                ProtocolChangeRequest.device_draft_id.in_(draft_ids)
+            )
+        )
+        for cr in cr_res.scalars().all():
+            cr_map[cr.device_draft_id] = cr
+
+    entries: List[Dict[str, Any]] = []
+    prev: Optional[DeviceProtocolVersion] = None
+    for v in versions:
+        diff = handler.diff_spec(
+            prev.spec_json or {} if prev else None, v.spec_json or {}
+        ).to_dict()
+        stats = diff.get("summary", {})
+        draft = draft_map.get(v.published_from_draft_id) if v.published_from_draft_id else None
+        cr = cr_map.get(v.published_from_draft_id) if v.published_from_draft_id else None
+        entries.append(
+            {
+                "version_id": v.id,
+                "version_name": v.version_name,
+                "version_seq": v.version_seq,
+                "description": v.description,
+                "availability_status": v.availability_status,
+                "created_at": v.created_at,
+                "created_by": v.created_by,
+                "activated_at": v.activated_at,
+                "activated_by": v.activated_by,
+                "deprecated_at": getattr(v, "deprecated_at", None),
+                "deprecated_by": getattr(v, "deprecated_by", None),
+                "deprecation_reason": getattr(v, "deprecation_reason", None),
+                "prev_version_id": prev.id if prev else None,
+                "prev_version_name": prev.version_name if prev else None,
+                "submit_note": draft.submit_note if draft else None,
+                "cr_id": cr.id if cr else None,
+                "cr_submitted_by": cr.submitted_by if cr else None,
+                "cr_submitted_at": cr.submitted_at if cr else None,
+                "change_stats": stats,
+                "diff_summary": diff,
+            }
+        )
+        prev = v
+
+    entries.reverse()
+    return entries
+
+
+_DEVICE_NAME_NUM_RE = re.compile(r"^(\d+)(?:-(\d+))?")
+_ATA_NUM_RE = re.compile(r"ata(\d+)", re.IGNORECASE)
+
+
+def _device_name_sort_key(name: str) -> tuple:
+    """按设备名前缀数字（32-1 → (32,1)）排序；拿不到就降级到 (inf, name)。"""
+    s = (name or "").lstrip()
+    m = _DEVICE_NAME_NUM_RE.match(s)
+    if m:
+        major = int(m.group(1))
+        minor = int(m.group(2)) if m.group(2) else 0
+        return (0, major, minor, s)
+    return (1, 9_999_999, 0, s)
+
+
+def _ata_sort_key(code: str, display_name: str, meta_order: Optional[int] = None) -> tuple:
+    """ATA 节点排序：元表 sort_order 优先 → 从 code/display 里挖出数字 → 末尾放 '其他'。"""
+    if meta_order is not None:
+        return (0, int(meta_order), code or "")
+    if code:
+        m = _ATA_NUM_RE.search(code)
+        if m:
+            return (1, int(m.group(1)), code)
+    if display_name:
+        m = _ATA_NUM_RE.search(display_name)
+        if m:
+            return (1, int(m.group(1)), display_name)
+    return (2, 9_999_999, code or display_name or "")
+
+
 async def build_device_tree(
     db: AsyncSession,
     *,
@@ -326,35 +525,118 @@ async def build_device_tree(
 ) -> List[Dict[str, Any]]:
     """构造设备树。
 
-    - ``group_by='ata'``（默认，对齐桌面平台）：ATA 系统 → 设备；每个设备节点
-      挂协议族 tag，同一系统下 429/422/CAN 可以混合。
-    - ``group_by='family'``：协议族 → ATA → 设备（之前的行为，便于按协议族对比）。
+    - ``group_by='ata'``（默认，对齐桌面平台）：ATA 系统 → 设备；同一台设备的多条
+      per-bus spec 会在这里被**聚合成一个节点**，并把所有总线列在 ``families`` 字段里。
+    - ``group_by='family'``：协议族 → ATA → spec；**不做聚合**，每条 spec 单独一个叶子，
+      方便"按协议族筛选"视图看到每个 bus 的具体条目。
 
-    说明：按用户要求，**设备树节点不再显示任何审批/状态信息**，只返回设备身份信息
-    让前端决定展示（协议族 tag + 设备名 + ATA）。
+    说明：
+    - ATA 分组的 title 优先使用 ``ata_systems.display_name``（如 ``ATA32-起落架系统``）；
+      元表缺失时退化为 code 大写。
+    - ATA 排序按元表 ``sort_order``（对齐桌面平台 ATA 编号）；设备名按 ``32-1`` /
+      ``32-2`` 的前缀数字排序。
     """
     items = await list_specs(db, family=family, include_counts=True)
 
-    def _device_leaf(dev: Dict[str, Any], ata: str) -> Dict[str, Any]:
+    # 一次性取出 ATA 元表，组成 code → (display_name, sort_order)
+    ata_meta_rows = (
+        await db.execute(select(AtaSystem))
+    ).scalars().all()
+    ata_meta: Dict[str, AtaSystem] = {row.code: row for row in ata_meta_rows}
+
+    # parser family → profiles（用于设备节点上展示关联解析器）
+    parser_family_map = await _load_parser_profile_map(db)
+
+    # family 总线展示顺序（其它家族放后面）
+    _BUS_ORDER = {
+        "arinc429": 0,
+        "can": 1,
+        "rs422": 2,
+        "rs485": 3,
+        "mavlink": 4,
+        "discrete": 5,
+        "wireless": 6,
+        "none": 9,
+    }
+
+    def _bus_sort_key(fam: str) -> tuple:
+        return (_BUS_ORDER.get(fam, 99), fam)
+
+    def _ata_display(code: str) -> str:
+        if code in ata_meta:
+            return ata_meta[code].display_name
+        if not code:
+            return "其他"
+        return code.upper()
+
+    def _ata_order(code: str) -> Optional[int]:
+        return ata_meta[code].sort_order if code in ata_meta else None
+
+    def _single_device_leaf(dev: Dict[str, Any], ata: str) -> Dict[str, Any]:
+        """按总线呈现单个 spec 的叶子（仅 group_by='family' 用）"""
+        hints = list(dev.get("parser_family_hints") or [])
         return {
             "key": f"spec:{dev['id']}",
             "type": "device",
             "spec_id": dev["id"],
             "device_id": dev["device_id"],
             "family": dev["protocol_family"],
+            "families": [dev["protocol_family"]],
             "ata_code": ata,
             "title": dev["device_name"],
+            "parser_family_hints": hints,
+            "parser_profiles": _resolve_parser_hints(hints, parser_family_map),
+        }
+
+    def _aggregated_device_leaf(
+        anchor: str, rows: List[Dict[str, Any]], ata: str
+    ) -> Dict[str, Any]:
+        """把同 anchor 的多条 per-bus spec 聚合成一个设备节点。
+
+        - 默认选中 spec：优先用 anchor 本身（device_id == anchor）那条；
+          若不存在，按 bus 顺序选第一个。
+        - families：所有参与 spec 的 protocol_family 去重并按常见顺序排序。
+        - bus_specs：每个 bus 对应的 spec_id/device_id，便于前端在详情页切 bus。
+        """
+        primary = next((r for r in rows if r["device_id"] == anchor), rows[0])
+        # 展示用总线顺序
+        rows_sorted = sorted(rows, key=lambda r: _bus_sort_key(r["protocol_family"]))
+        families = [r["protocol_family"] for r in rows_sorted]
+        # 设备级 hints 统一取 primary（realign 会保证所有 per-bus 行 hints 一致）
+        hints = list(primary.get("parser_family_hints") or [])
+        bus_specs = [
+            {
+                "family": r["protocol_family"],
+                "spec_id": r["id"],
+                "device_id": r["device_id"],
+                "version_count": r.get("version_count", 0),
+                "latest_version": r.get("latest_version"),
+            }
+            for r in rows_sorted
+        ]
+        return {
+            "key": f"device:{anchor}",
+            "type": "device",
+            "spec_id": primary["id"],           # 点击后默认打开这个 spec
+            "device_id": anchor,
+            "family": primary["protocol_family"],  # 兼容老前端
+            "families": families,
+            "ata_code": ata,
+            "title": primary["device_name"],
+            "parser_family_hints": hints,
+            "parser_profiles": _resolve_parser_hints(hints, parser_family_map),
+            "bus_specs": bus_specs,
         }
 
     if group_by == "family":
         grouped: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
         for it in items:
             fam = it["protocol_family"]
-            ata = it.get("ata_code") or "其他"
+            ata = it.get("ata_code") or ""
             grouped.setdefault(fam, {}).setdefault(ata, []).append(it)
 
         tree: List[Dict[str, Any]] = []
-        for fam in sorted(grouped.keys()):
+        for fam in sorted(grouped.keys(), key=_bus_sort_key):
             fam_node = {
                 "key": f"family:{fam}",
                 "type": "family",
@@ -362,42 +644,62 @@ async def build_device_tree(
                 "title": fam.upper(),
                 "children": [],
             }
-            for ata in sorted(grouped[fam].keys()):
+            ata_codes = sorted(
+                grouped[fam].keys(),
+                key=lambda c: _ata_sort_key(c, _ata_display(c), _ata_order(c)),
+            )
+            for ata in ata_codes:
                 ata_node = {
                     "key": f"family:{fam}:ata:{ata}",
                     "type": "ata",
                     "family": fam,
-                    "ata_code": ata,
-                    "title": ata,
+                    "ata_code": ata or None,
+                    "title": _ata_display(ata),
                     "children": [],
                 }
                 for dev in sorted(
-                    grouped[fam][ata], key=lambda x: (x["device_name"], x["device_id"])
+                    grouped[fam][ata],
+                    key=lambda x: (_device_name_sort_key(x["device_name"]), x["device_id"]),
                 ):
-                    ata_node["children"].append(_device_leaf(dev, ata))
+                    ata_node["children"].append(_single_device_leaf(dev, ata))
                 fam_node["children"].append(ata_node)
             tree.append(fam_node)
         return tree
 
-    # 默认：group_by == 'ata'
+    # 默认：group_by == 'ata' → 多 bus 聚合
     ata_grouped: Dict[str, List[Dict[str, Any]]] = {}
+    # 元表里已登记但还没挂设备的 ATA 也显示（空系统节点）
+    for code in ata_meta.keys():
+        ata_grouped.setdefault(code, [])
     for it in items:
-        ata = it.get("ata_code") or "其他"
+        ata = it.get("ata_code") or ""
         ata_grouped.setdefault(ata, []).append(it)
 
     tree: List[Dict[str, Any]] = []
-    for ata in sorted(ata_grouped.keys()):
+    ata_codes = sorted(
+        ata_grouped.keys(),
+        key=lambda c: _ata_sort_key(c, _ata_display(c), _ata_order(c)),
+    )
+    for ata in ata_codes:
         ata_node = {
-            "key": f"ata:{ata}",
+            "key": f"ata:{ata}" if ata else "ata:__other__",
             "type": "ata",
-            "ata_code": ata,
-            "title": ata.upper() if ata and ata != "其他" else ata,
+            "ata_code": ata or None,
+            "title": _ata_display(ata),
             "children": [],
         }
-        for dev in sorted(
-            ata_grouped[ata], key=lambda x: (x["device_name"], x["device_id"])
-        ):
-            ata_node["children"].append(_device_leaf(dev, ata))
+        # 把 spec 按 anchor 聚合 → 每个 anchor 一个设备节点
+        by_anchor: Dict[str, List[Dict[str, Any]]] = {}
+        for dev in ata_grouped[ata]:
+            by_anchor.setdefault(_anchor_of_device_id(dev["device_id"]), []).append(dev)
+
+        leaves: List[Dict[str, Any]] = []
+        for anchor, rows in by_anchor.items():
+            leaves.append(_aggregated_device_leaf(anchor, rows, ata))
+        leaves.sort(
+            key=lambda n: (_device_name_sort_key(n["title"]), n["device_id"])
+        )
+        ata_node["children"] = leaves
         tree.append(ata_node)
     return tree
 
@@ -415,6 +717,7 @@ def _spec_to_dict(
         "description": spec.description,
         "status": spec.status,
         "current_version_id": spec.current_version_id,
+        "parser_family_hints": list(spec.parser_family_hints or []),
         "created_by": spec.created_by,
         "created_at": spec.created_at,
         "updated_at": spec.updated_at,
@@ -432,6 +735,108 @@ def _spec_to_dict(
                 "git_export_status": latest.git_export_status,
             }
     return data
+
+
+# ═════════════════════════ parser_family_hints 解析 ═════════════════════════
+
+
+_DEVICE_ANCHOR_SEP = "__"
+
+
+def _anchor_of_device_id(device_id: str) -> str:
+    """还原多总线 spec 的 anchor device_id：ata27_27_4__rs485 → ata27_27_4"""
+    if not device_id:
+        return ""
+    return device_id.split(_DEVICE_ANCHOR_SEP, 1)[0]
+
+
+async def _load_parser_profile_map(
+    db: AsyncSession,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """family → [{parser_key, name, device_model, is_active, ...}]，用于前端展示"""
+    res = await db.execute(select(ParserProfile))
+    rows = list(res.scalars().all())
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for p in rows:
+        fam = (getattr(p, "protocol_family", None) or "").strip()
+        if not fam:
+            continue
+        grouped.setdefault(fam, []).append(
+            {
+                "parser_key": p.parser_key,
+                "name": p.name,
+                "device_model": getattr(p, "device_model", None),
+                "is_active": bool(getattr(p, "is_active", True)),
+            }
+        )
+    return grouped
+
+
+def _resolve_parser_hints(
+    hints: List[str],
+    parser_family_map: Dict[str, List[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    """把 parser_family_hints 展开成 [{family, profiles:[...]}]，便于前端一次性拿到"""
+    out: List[Dict[str, Any]] = []
+    for fam in hints or []:
+        profiles = parser_family_map.get(fam, [])
+        out.append(
+            {
+                "family": fam,
+                "profiles": profiles,
+                "profile_count": len(profiles),
+            }
+        )
+    return out
+
+
+async def resolve_parser_profiles_for_hints(
+    db: AsyncSession, hints: List[str]
+) -> List[Dict[str, Any]]:
+    """公共入口：给一个 hints 列表，返回关联的 parser_profiles 分组视图"""
+    parser_family_map = await _load_parser_profile_map(db)
+    return _resolve_parser_hints(hints or [], parser_family_map)
+
+
+async def list_bus_specs_for_device(
+    db: AsyncSession, device_id: str
+) -> List[Dict[str, Any]]:
+    """列出同一台逻辑设备（同一个 anchor）下的所有 per-bus spec，便于前端切换 bus。"""
+    anchor = _anchor_of_device_id(device_id)
+    if not anchor:
+        return []
+    # like 'anchor' or 'anchor__%'
+    stmt = (
+        select(DeviceProtocolSpec)
+        .where(
+            (DeviceProtocolSpec.device_id == anchor)
+            | (DeviceProtocolSpec.device_id.like(f"{anchor}{_DEVICE_ANCHOR_SEP}%"))
+        )
+        .options(selectinload(DeviceProtocolSpec.versions))
+    )
+    res = await db.execute(stmt)
+    specs = list(res.scalars().all())
+    _BUS_ORDER = {
+        "arinc429": 0,
+        "can": 1,
+        "rs422": 2,
+        "rs485": 3,
+        "mavlink": 4,
+        "discrete": 5,
+        "wireless": 6,
+        "none": 9,
+    }
+    specs.sort(key=lambda s: (_BUS_ORDER.get(s.protocol_family, 99), s.protocol_family))
+    return [
+        {
+            "family": s.protocol_family,
+            "spec_id": s.id,
+            "device_id": s.device_id,
+            "device_name": s.device_name,
+            "current_version_id": s.current_version_id,
+        }
+        for s in specs
+    ]
 
 
 def serialize_version(v: DeviceProtocolVersion) -> Dict[str, Any]:

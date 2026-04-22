@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import { UploadOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { sharedTsnApi } from '../services/api'
+import { sharedTsnApi, configurationApi } from '../services/api'
 
 const { Text } = Typography
 
@@ -28,6 +28,26 @@ function AdminPlatformDataPage() {
 
   const [uploadSortieId, setUploadSortieId] = useState(null)
   const [uploadKind, setUploadKind] = useState(null)
+
+  const [acOptions, setAcOptions] = useState([])
+  const [swOptions, setSwOptions] = useState([])
+
+  const loadConfigOptions = useCallback(async () => {
+    try {
+      const [acRes, swRes] = await Promise.all([
+        configurationApi.listAircraftConfigs(),
+        configurationApi.listSoftwareConfigs(),
+      ])
+      setAcOptions(acRes.data || [])
+      setSwOptions(swRes.data || [])
+    } catch {
+      // 静默失败：未配置构型时不影响其余操作
+    }
+  }, [])
+
+  useEffect(() => {
+    loadConfigOptions()
+  }, [loadConfigOptions])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -154,16 +174,20 @@ function AdminPlatformDataPage() {
   const openCreateSortie = () => {
     setSortieEdit(null)
     sortieForm.resetFields()
+    loadConfigOptions()
     setSortieModalOpen(true)
   }
 
   const openEditSortie = (sortie) => {
     if (!sortie?.id || sortie.id <= 0) return
     setSortieEdit(sortie)
+    loadConfigOptions()
     sortieForm.setFieldsValue({
       sortie_label: sortie.sortie_label,
       experiment_date: sortie.experiment_date ? dayjs(sortie.experiment_date) : null,
       remarks: sortie.remarks || '',
+      aircraft_configuration_id: sortie.aircraft_configuration_id ?? sortie.aircraft_configuration?.id ?? null,
+      software_configuration_id: sortie.software_configuration_id ?? sortie.software_configuration?.id ?? null,
     })
     setSortieModalOpen(true)
   }
@@ -175,6 +199,8 @@ function AdminPlatformDataPage() {
         sortie_label: v.sortie_label?.trim(),
         experiment_date: v.experiment_date ? v.experiment_date.format('YYYY-MM-DD') : null,
         remarks: v.remarks || null,
+        aircraft_configuration_id: v.aircraft_configuration_id ?? null,
+        software_configuration_id: v.software_configuration_id ?? null,
       }
       if (sortieEdit?.id) {
         await sharedTsnApi.updateSortie(sortieEdit.id, payload)
@@ -361,6 +387,17 @@ function AdminPlatformDataPage() {
               <Space wrap>
                 <strong style={{ color: '#e4e4e7' }}>{s.sortie_label}</strong>
                 {s.experiment_date && <Tag>{s.experiment_date}</Tag>}
+                {s.aircraft_configuration?.name && (
+                  <Tag color="geekblue">
+                    飞机构型：{s.aircraft_configuration.name}
+                    {s.aircraft_configuration.version ? ` · ${s.aircraft_configuration.version}` : ''}
+                  </Tag>
+                )}
+                {s.software_configuration?.name && (
+                  <Tag color="purple">
+                    软件构型：{s.software_configuration.name}
+                  </Tag>
+                )}
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {s.files?.length || 0} 个文件
                 </Text>
@@ -470,6 +507,38 @@ function AdminPlatformDataPage() {
           </Form.Item>
           <Form.Item name="experiment_date" label="试验日期">
             <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            name="aircraft_configuration_id"
+            label="飞机构型（决定 TSN / 设备协议版本）"
+            rules={[{ required: true, message: '请选择飞机构型' }]}
+          >
+            <Select
+              placeholder={acOptions.length === 0 ? '暂无可用构型，请先到「构型管理」创建' : '选择飞机构型'}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              options={acOptions.map((it) => ({
+                value: it.id,
+                label: `${it.name}${it.version ? ` · ${it.version}` : ''}${it.tsn_protocol_label ? ` · TSN ${it.tsn_protocol_label}` : ''}`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="software_configuration_id"
+            label="软件构型（决定各设备软件版本号）"
+            rules={[{ required: true, message: '请选择软件构型' }]}
+          >
+            <Select
+              placeholder={swOptions.length === 0 ? '暂无可用构型，请先到「构型管理」导入 Excel' : '选择软件构型'}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              options={swOptions.map((it) => ({
+                value: it.id,
+                label: `${it.name}${it.snapshot_date ? ` · ${it.snapshot_date}` : ''}`,
+              }))}
+            />
           </Form.Item>
           <Form.Item name="remarks" label="备注">
             <Input.TextArea rows={3} placeholder="可选：科目、场地、试验目的等" maxLength={2000} showCount />

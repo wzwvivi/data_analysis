@@ -217,6 +217,11 @@ export const deviceProtocolApi = {
       params: availabilityStatus ? { availability_status: availabilityStatus } : {},
     }),
   getVersion: (versionId) => api.get(`/device-protocol/versions/${versionId}`),
+  compareVersions: (specId, versionAId, versionBId) =>
+    api.get(`/device-protocol/specs/${specId}/compare`, {
+      params: { version_a_id: versionAId, version_b_id: versionBId },
+    }),
+  getChangelog: (specId) => api.get(`/device-protocol/specs/${specId}/changelog`),
   activateVersion: (versionId, body = {}) =>
     api.post(`/device-protocol/versions/${versionId}/activate`, body),
   deprecateVersion: (versionId, body = {}) =>
@@ -579,6 +584,44 @@ export const compareApi = {
 /** 平台总览仪表盘 */
 export const dashboardApi = {
   getOverview: () => api.get('/dashboard/overview'),
+}
+
+/** 构型管理（设备库 / 飞机构型 / 软件构型） */
+export const configurationApi = {
+  // ── 设备库 ──
+  listDevices: (params = {}) => api.get('/configurations/devices', { params }),
+  listDeviceTeams: () => api.get('/configurations/devices/teams'),
+  createDevice: (body) => api.post('/configurations/devices', body),
+  updateDevice: (id, body) => api.put(`/configurations/devices/${id}`, body),
+  deleteDevice: (id) => api.delete(`/configurations/devices/${id}`),
+
+  // ── 飞机构型 ──
+  listAircraftConfigs: () => api.get('/configurations/aircraft'),
+  getAircraftConfig: (id) => api.get(`/configurations/aircraft/${id}`),
+  createAircraftConfig: (body) => api.post('/configurations/aircraft', body),
+  updateAircraftConfig: (id, body) => api.put(`/configurations/aircraft/${id}`, body),
+  deleteAircraftConfig: (id) => api.delete(`/configurations/aircraft/${id}`),
+
+  // ── 软件构型 ──
+  listSoftwareConfigs: () => api.get('/configurations/software'),
+  getSoftwareConfig: (id) => api.get(`/configurations/software/${id}`),
+  createSoftwareConfig: (body) => api.post('/configurations/software', body),
+  updateSoftwareConfig: (id, body) => api.put(`/configurations/software/${id}`, body),
+  deleteSoftwareConfig: (id) => api.delete(`/configurations/software/${id}`),
+  listSoftwareEntries: (id) => api.get(`/configurations/software/${id}/entries`),
+  upsertSoftwareEntries: (id, items, replaceAll = false) =>
+    api.put(`/configurations/software/${id}/entries`, { items, replace_all: replaceAll }),
+  importSoftwareExcel: (formData) =>
+    api.post('/configurations/software/import-excel', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    }),
+
+  // ── 选项 ──
+  listTsnProtocolVersionOptions: () =>
+    api.get('/configurations/options/tsn-protocol-versions'),
+  listDeviceProtocolVersionOptions: () =>
+    api.get('/configurations/options/device-protocol-versions'),
 }
 
 /** 试验工作台（按架次） */

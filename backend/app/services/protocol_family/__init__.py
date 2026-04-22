@@ -17,11 +17,17 @@ from .base import FamilyHandler, SpecDiff, SpecValidation
 from .arinc429 import Arinc429FamilyHandler
 from .can import CanFamilyHandler
 from .rs422 import Rs422FamilyHandler
+from .generic_stub import GenericStubFamilyHandler
 
 from ...models import (
     PROTOCOL_FAMILY_ARINC429,
     PROTOCOL_FAMILY_CAN,
     PROTOCOL_FAMILY_RS422,
+    PROTOCOL_FAMILY_RS485,
+    PROTOCOL_FAMILY_MAVLINK,
+    PROTOCOL_FAMILY_DISCRETE,
+    PROTOCOL_FAMILY_WIRELESS,
+    PROTOCOL_FAMILY_NONE,
 )
 
 
@@ -29,6 +35,13 @@ _REGISTRY: Dict[str, FamilyHandler] = {
     PROTOCOL_FAMILY_ARINC429: Arinc429FamilyHandler(),
     PROTOCOL_FAMILY_CAN: CanFamilyHandler(),
     PROTOCOL_FAMILY_RS422: Rs422FamilyHandler(),
+    # 下面四种使用通用 stub handler（frame 结构、最小校验）
+    PROTOCOL_FAMILY_RS485: GenericStubFamilyHandler("rs485", "RS485"),
+    PROTOCOL_FAMILY_MAVLINK: GenericStubFamilyHandler("mavlink", "MAVLink"),
+    PROTOCOL_FAMILY_DISCRETE: GenericStubFamilyHandler("discrete", "离散量"),
+    PROTOCOL_FAMILY_WIRELESS: GenericStubFamilyHandler("wireless", "无线"),
+    # "none" 对应 TSN 接收方占位：协议在 TSN ICD 里，设备树这里只挂名字和关联解析器
+    PROTOCOL_FAMILY_NONE: GenericStubFamilyHandler("none", "无总线"),
 }
 
 
@@ -51,4 +64,5 @@ __all__ = [
     "Arinc429FamilyHandler",
     "CanFamilyHandler",
     "Rs422FamilyHandler",
+    "GenericStubFamilyHandler",
 ]

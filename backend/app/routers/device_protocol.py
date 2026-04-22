@@ -122,9 +122,15 @@ async def preview_device_identity(
 @router.get("/specs")
 async def list_specs(
     family: Optional[str] = Query(None),
+    include_parsers: bool = Query(
+        True,
+        description="是否把 parser_family_hints 解析成对应的 parser_profiles 一起返回",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    items = await dps.list_specs(db, family=family, include_counts=True)
+    items = await dps.list_specs(
+        db, family=family, include_counts=True, include_parsers=include_parsers
+    )
     return {"total": len(items), "items": items}
 
 
@@ -155,14 +161,20 @@ async def get_spec_detail(
     )
     handler = get_family_handler(spec.protocol_family)
     latest_spec_json = versions[0].spec_json if versions else None
+    spec_dict = dps._spec_to_dict(spec, include_counts=False)
+    hints = list(spec_dict.get("parser_family_hints") or [])
+    parser_profiles = await dps.resolve_parser_profiles_for_hints(db, hints)
+    bus_specs = await dps.list_bus_specs_for_device(db, spec.device_id)
     return {
-        "spec": dps._spec_to_dict(spec, include_counts=False),
+        "spec": spec_dict,
         "versions": [dps.serialize_version(v) for v in filtered],
         "summary": handler.summarize_spec(latest_spec_json or {}),
         "labels_view": handler.labels_view(latest_spec_json or {}) if latest_spec_json else [],
         "latest_spec_json": latest_spec_json,
         "latest_version_id": versions[0].id if versions else None,
         "latest_version_name": versions[0].version_name if versions else None,
+        "parser_profiles": parser_profiles,
+        "bus_specs": bus_specs,
     }
 
 
@@ -184,6 +196,32 @@ async def list_spec_versions(
         "total": len(versions),
         "items": [dps.serialize_version(v) for v in versions],
     }
+
+
+@router.get("/specs/{spec_id}/compare")
+async def compare_spec_versions(
+    spec_id: int,
+    version_a_id: int = Query(..., description="版本 A 的 id"),
+    version_b_id: int = Query(..., description="版本 B 的 id"),
+    db: AsyncSession = Depends(get_db),
+):
+    """对比同一设备下的两个已发布版本，返回结构化 diff（新增/删除/变更/元信息）"""
+    try:
+        return await dps.compare_versions(
+            db, spec_id=spec_id, version_a_id=version_a_id, version_b_id=version_b_id
+        )
+    except DeviceProtocolError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/specs/{spec_id}/changelog")
+async def get_spec_changelog(spec_id: int, db: AsyncSession = Depends(get_db)):
+    """设备协议变更记录：按版本倒序，携带 CR 关键字段与相邻版本 change_stats"""
+    try:
+        items = await dps.build_changelog(db, spec_id)
+    except DeviceProtocolError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"total": len(items), "items": items}
 
 
 @router.get("/versions/{version_id}")

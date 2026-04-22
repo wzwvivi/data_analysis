@@ -10,11 +10,20 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..constants.shared_platform_assets import VIDEO_EXTS, list_asset_kind_options
 from ..database import get_db
 from ..deps import get_current_user, get_current_user_media, require_admin
-from ..models import SharedSortie, SharedTsnFile, User
+from ..models import (
+    AircraftConfiguration,
+    Protocol,
+    ProtocolVersion,
+    SharedSortie,
+    SharedTsnFile,
+    SoftwareConfiguration,
+    User,
+)
 from ..services import shared_tsn_service as sts
 
 router = APIRouter(prefix="/api/shared-tsn", tags=["平台共享TSN"])
@@ -65,12 +74,29 @@ class SharedSortieCreate(BaseModel):
     sortie_label: str = Field(..., min_length=1, max_length=300)
     experiment_date: Optional[date] = None
     remarks: Optional[str] = Field(None, max_length=2000)
+    aircraft_configuration_id: Optional[int] = None
+    software_configuration_id: Optional[int] = None
 
 
 class SharedSortieUpdate(BaseModel):
     sortie_label: Optional[str] = Field(None, min_length=1, max_length=300)
     experiment_date: Optional[date] = None
     remarks: Optional[str] = Field(None, max_length=2000)
+    aircraft_configuration_id: Optional[int] = None
+    software_configuration_id: Optional[int] = None
+
+
+class AircraftConfigSummary(BaseModel):
+    id: int
+    name: str
+    version: Optional[str] = None
+    tsn_protocol_label: Optional[str] = None
+
+
+class SoftwareConfigSummary(BaseModel):
+    id: int
+    name: str
+    snapshot_date: Optional[str] = None
 
 
 class SharedSortieResponse(BaseModel):
@@ -79,6 +105,10 @@ class SharedSortieResponse(BaseModel):
     experiment_date: Optional[str] = None
     remarks: Optional[str] = None
     created_at: Optional[str] = None
+    aircraft_configuration_id: Optional[int] = None
+    software_configuration_id: Optional[int] = None
+    aircraft_configuration: Optional[AircraftConfigSummary] = None
+    software_configuration: Optional[SoftwareConfigSummary] = None
     files: List[SharedTsnResponse] = []
 
     class Config:
@@ -116,6 +146,56 @@ async def _sortie_label_map(db: AsyncSession, sortie_ids: List[int]) -> Dict[int
         return {}
     r = await db.execute(select(SharedSortie).where(SharedSortie.id.in_(sortie_ids)))
     return {s.id: s.sortie_label for s in r.scalars().all()}
+
+
+async def _aircraft_summary(
+    db: AsyncSession, cfg: Optional[AircraftConfiguration]
+) -> Optional[AircraftConfigSummary]:
+    if not cfg:
+        return None
+    label = None
+    if cfg.tsn_protocol_version_id:
+        r = await db.execute(
+            select(ProtocolVersion, Protocol)
+            .join(Protocol, Protocol.id == ProtocolVersion.protocol_id)
+            .where(ProtocolVersion.id == cfg.tsn_protocol_version_id)
+        )
+        row = r.first()
+        if row:
+            pv, p = row
+            label = f"{p.name} / {pv.version}"
+    return AircraftConfigSummary(
+        id=cfg.id, name=cfg.name, version=cfg.version, tsn_protocol_label=label
+    )
+
+
+def _software_summary(
+    cfg: Optional[SoftwareConfiguration],
+) -> Optional[SoftwareConfigSummary]:
+    if not cfg:
+        return None
+    return SoftwareConfigSummary(
+        id=cfg.id,
+        name=cfg.name,
+        snapshot_date=cfg.snapshot_date.isoformat() if cfg.snapshot_date else None,
+    )
+
+
+async def _sortie_to_resp(
+    db: AsyncSession, s: SharedSortie, files: Optional[List[SharedTsnResponse]] = None
+) -> SharedSortieResponse:
+    return SharedSortieResponse(
+        id=s.id,
+        sortie_label=s.sortie_label,
+        experiment_date=s.experiment_date.isoformat() if s.experiment_date else None,
+        remarks=s.remarks,
+        created_at=s.created_at.isoformat() if s.created_at else None,
+        aircraft_configuration_id=s.aircraft_configuration_id,
+        software_configuration_id=s.software_configuration_id,
+        aircraft_configuration=await _aircraft_summary(db, s.aircraft_configuration),
+        software_configuration=_software_summary(s.software_configuration),
+        files=files or [],
+    )
 
 
 @router.get("/asset-kinds")
@@ -245,16 +325,7 @@ async def list_sorties_tree(
     for s in sorties:
         files = [_to_resp(f, s.sortie_label) for f in (s.files or [])]
         files.sort(key=lambda x: x.id, reverse=True)
-        out.append(
-            SharedSortieResponse(
-                id=s.id,
-                sortie_label=s.sortie_label,
-                experiment_date=s.experiment_date.isoformat() if s.experiment_date else None,
-                remarks=s.remarks,
-                created_at=s.created_at.isoformat() if s.created_at else None,
-                files=files,
-            )
-        )
+        out.append(await _sortie_to_resp(db, s, files))
     if loose:
         unmapped = [_to_resp(f, None) for f in loose]
         out.append(
@@ -282,15 +353,19 @@ async def create_sortie(
         experiment_date=body.experiment_date,
         remarks=body.remarks,
         uploaded_by_id=admin.id,
+        aircraft_configuration_id=body.aircraft_configuration_id,
+        software_configuration_id=body.software_configuration_id,
     )
-    return SharedSortieResponse(
-        id=row.id,
-        sortie_label=row.sortie_label,
-        experiment_date=row.experiment_date.isoformat() if row.experiment_date else None,
-        remarks=row.remarks,
-        created_at=row.created_at.isoformat() if row.created_at else None,
-        files=[],
+    r = await db.execute(
+        select(SharedSortie)
+        .options(
+            selectinload(SharedSortie.aircraft_configuration),
+            selectinload(SharedSortie.software_configuration),
+        )
+        .where(SharedSortie.id == row.id)
     )
+    row = r.scalar_one()
+    return await _sortie_to_resp(db, row, [])
 
 
 @router.patch("/sorties/{sortie_id}", response_model=SharedSortieResponse)
@@ -312,27 +387,17 @@ async def update_sortie(
         sortie_label=patch.get("sortie_label"),
         experiment_date=patch.get("experiment_date"),
         remarks=patch.get("remarks"),
+        aircraft_configuration_id=patch.get("aircraft_configuration_id"),
+        software_configuration_id=patch.get("software_configuration_id"),
         patch_keys=set(patch.keys()),
     )
     sorties = await sts.list_sorties_with_files(db)
     for s in sorties:
         if s.id == row.id:
-            return SharedSortieResponse(
-                id=s.id,
-                sortie_label=s.sortie_label,
-                experiment_date=s.experiment_date.isoformat() if s.experiment_date else None,
-                remarks=s.remarks,
-                created_at=s.created_at.isoformat() if s.created_at else None,
-                files=[_to_resp(f, s.sortie_label) for f in (s.files or [])],
+            return await _sortie_to_resp(
+                db, s, [_to_resp(f, s.sortie_label) for f in (s.files or [])]
             )
-    return SharedSortieResponse(
-        id=row.id,
-        sortie_label=row.sortie_label,
-        experiment_date=row.experiment_date.isoformat() if row.experiment_date else None,
-        remarks=row.remarks,
-        created_at=row.created_at.isoformat() if row.created_at else None,
-        files=[],
-    )
+    return await _sortie_to_resp(db, row, [])
 
 
 @router.delete("/sorties/{sortie_id}")

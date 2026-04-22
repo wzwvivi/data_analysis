@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Layout,
   Tree,
@@ -28,6 +28,7 @@ import {
   Badge,
   Row,
   Col,
+  Timeline,
 } from 'antd'
 import {
   ApartmentOutlined,
@@ -43,11 +44,16 @@ import {
   FileSearchOutlined,
   BranchesOutlined,
   WarningOutlined,
+  DiffOutlined,
+  HistoryOutlined,
+  SwapOutlined,
+  RollbackOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { deviceProtocolApi } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import Arinc429SpecEditor from './device-protocol/Arinc429SpecEditor'
+import SpecDiffView from './device-protocol/components/SpecDiffView'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
@@ -56,18 +62,42 @@ const FAMILY_COLORS = {
   arinc429: 'purple',
   can: 'blue',
   rs422: 'geekblue',
+  rs485: 'cyan',
+  mavlink: 'magenta',
+  discrete: 'orange',
+  wireless: 'green',
+  none: 'default',
 }
 
 const FAMILY_LABEL = {
   arinc429: 'ARINC 429',
   can: 'CAN',
   rs422: 'RS422',
+  rs485: 'RS485',
+  mavlink: 'MAVLink',
+  discrete: '离散量',
+  wireless: '无线',
+  none: '无总线',
 }
 
 const FAMILY_TAG = {
   arinc429: '429',
   can: 'CAN',
   rs422: '422',
+  rs485: '485',
+  mavlink: 'MAV',
+  discrete: 'DISC',
+  wireless: 'RF',
+  none: '—',
+}
+
+const BUS_ORDER = ['arinc429', 'can', 'rs422', 'rs485', 'mavlink', 'discrete', 'wireless', 'none']
+function sortFamilies(list) {
+  return (list || []).slice().sort((a, b) => {
+    const ia = BUS_ORDER.indexOf(a)
+    const ib = BUS_ORDER.indexOf(b)
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+  })
 }
 
 
@@ -93,8 +123,20 @@ function filterTreeByKeyword(nodes, keyword) {
 }
 
 
+// 递归统计某节点下的真实设备数（leaf: type === 'device'）
+function countDevicesUnder(node) {
+  if (!node) return 0
+  if (node.type === 'device') return 1
+  const kids = node.children || []
+  let n = 0
+  for (const k of kids) n += countDevicesUnder(k)
+  return n
+}
+
+
 function DeviceProtocolPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const canWrite = ['admin', 'device_team'].includes((user?.role || '').trim())
   const isAdmin = (user?.role || '').trim() === 'admin'
@@ -122,6 +164,24 @@ function DeviceProtocolPage() {
   const [crsLoading, setCrsLoading] = useState(false)
 
   const [tab, setTab] = useState('overview')
+
+  // ── Labels 视图：历史版本浏览 ──
+  // null 表示"最新版本"；具体 id 则只读展示该版本 spec_json
+  const [labelVersionId, setLabelVersionId] = useState(null)
+  const [labelVersionData, setLabelVersionData] = useState(null)
+  const [labelVersionLoading, setLabelVersionLoading] = useState(false)
+
+  // ── 版本 Tab 内 Segmented ──
+  const [versionsSeg, setVersionsSeg] = useState('list') // list | changelog | compare
+  const [changelog, setChangelog] = useState([])
+  const [changelogLoading, setChangelogLoading] = useState(false)
+  const [changelogExpanded, setChangelogExpanded] = useState({}) // {version_id: bool}
+
+  // ── 版本对比面板 ──
+  const [compareA, setCompareA] = useState(null)
+  const [compareB, setCompareB] = useState(null)
+  const [compareResult, setCompareResult] = useState(null)
+  const [compareLoading, setCompareLoading] = useState(false)
 
   const [createVisible, setCreateVisible] = useState(false)
   const [createLoading, setCreateLoading] = useState(false)
@@ -286,21 +346,61 @@ function DeviceProtocolPage() {
     const mapNode = (n) => {
       const isDevice = n.type === 'device'
       const isFamilyNode = n.type === 'family'
+      const isAtaNode = n.type === 'ata'
+      const deviceCount = isDevice ? 0 : countDevicesUnder(n)
       return {
         key: n.key,
         title: (
-          <Space size={6}>
+          <Space size={6} style={{ width: '100%' }}>
             {isFamilyNode ? (
               <Tag color={FAMILY_COLORS[n.family] || 'default'} style={{ margin: 0 }}>
                 {FAMILY_LABEL[n.family] || (n.family || '').toUpperCase()}
               </Tag>
             ) : null}
             {isDevice && groupBy === 'ata' ? (
-              <Tag color={FAMILY_COLORS[n.family] || 'default'} style={{ margin: 0 }}>
-                {FAMILY_TAG[n.family] || (n.family || '').toUpperCase()}
+              sortFamilies(n.families && n.families.length ? n.families : [n.family]).map((f) => (
+                <Tag key={f} color={FAMILY_COLORS[f] || 'default'} style={{ margin: 0 }}>
+                  {FAMILY_TAG[f] || (f || '').toUpperCase()}
+                </Tag>
+              ))
+            ) : null}
+            <span
+              style={{
+                fontWeight: isAtaNode || isFamilyNode ? 600 : 400,
+                color: isAtaNode ? '#e4e4e7' : undefined,
+              }}
+            >
+              {n.title}
+            </span>
+            {isDevice && (n.parser_family_hints || []).length > 0 ? (
+              <Tooltip
+                title={`关联解析器: ${(n.parser_profiles || [])
+                  .map((p) => `${p.family}(${p.profile_count})`)
+                  .join(', ')}`}
+              >
+                <Tag
+                  color="gold"
+                  style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 6px' }}
+                >
+                  ⛓ {n.parser_family_hints.join(',')}
+                </Tag>
+              </Tooltip>
+            ) : null}
+            {!isDevice && deviceCount > 0 ? (
+              <Tag
+                style={{
+                  margin: 0,
+                  fontSize: 11,
+                  lineHeight: '16px',
+                  padding: '0 6px',
+                  background: '#27272a',
+                  border: '1px solid #3f3f46',
+                  color: '#a1a1aa',
+                }}
+              >
+                {deviceCount}
               </Tag>
             ) : null}
-            <span>{n.title}</span>
           </Space>
         ),
         selectable: true,
@@ -311,7 +411,9 @@ function DeviceProtocolPage() {
     return filteredTree.map(mapNode)
   }, [filteredTree, groupBy])
 
-  const expandedKeysAll = useMemo(() => {
+  // 展开状态由用户自己控制，默认把所有"有子节点"的键都展开一次；
+  // 之后 onExpand 接管。搜索关键字变化时，把命中路径上的节点都展开。
+  const allParentKeys = useMemo(() => {
     const keys = []
     const walk = (arr) => {
       (arr || []).forEach((n) => {
@@ -325,6 +427,16 @@ function DeviceProtocolPage() {
     return keys
   }, [antdTreeData])
 
+  const [expandedKeys, setExpandedKeys] = useState([])
+  const [autoExpandParent, setAutoExpandParent] = useState(true)
+
+  // 初次加载 / 搜索关键字变化时，展开所有父节点
+  useEffect(() => {
+    setExpandedKeys(allParentKeys)
+    setAutoExpandParent(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyword, groupBy, familyFilter])
+
   const onSelectTree = (keys, info) => {
     const meta = info?.node?.__meta
     if (!meta) return
@@ -332,6 +444,15 @@ function DeviceProtocolPage() {
     setSelectedMeta(meta)
     if (meta.type === 'device') {
       setTab('overview')
+      // 切换设备：重置 Labels 历史视图 / 版本 Segment / 对比面板
+      setLabelVersionId(null)
+      setLabelVersionData(null)
+      setVersionsSeg('list')
+      setCompareA(null)
+      setCompareB(null)
+      setCompareResult(null)
+      setChangelog([])
+      setChangelogExpanded({})
       loadSpec(meta.spec_id)
       loadDrafts(meta.family, meta.spec_id)
     } else {
@@ -339,6 +460,80 @@ function DeviceProtocolPage() {
       loadDrafts(meta.family || null)
     }
   }
+
+  // ── 初次进入/刷新时，从 URL query 恢复视图状态（tab / seg / labelVer / a / b） ──
+  useEffect(() => {
+    const paramTab = searchParams.get('tab')
+    if (paramTab && ['overview', 'versions', 'labels', 'drafts'].includes(paramTab)) {
+      setTab(paramTab)
+    }
+    const seg = searchParams.get('seg')
+    if (seg && ['list', 'changelog', 'compare'].includes(seg)) {
+      setVersionsSeg(seg)
+    }
+    const lv = searchParams.get('labelVer')
+    if (lv) setLabelVersionId(Number(lv))
+    const a = searchParams.get('a')
+    const b = searchParams.get('b')
+    if (a) setCompareA(Number(a))
+    if (b) setCompareB(Number(b))
+    // 尝试从 URL 恢复选中设备
+    const specParam = searchParams.get('spec')
+    if (specParam) {
+      const sid = Number(specParam)
+      if (!Number.isNaN(sid)) {
+        setSelectedKey(`spec:${sid}`)
+        setSelectedMeta({ type: 'device', spec_id: sid })
+        loadSpec(sid)
+        loadDrafts(null, sid)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── 同步 URL query ──
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams)
+    if (selectedMeta?.type === 'device') {
+      next.set('spec', String(selectedMeta.spec_id))
+      if (tab && tab !== 'overview') next.set('tab', tab); else next.delete('tab')
+      if (tab === 'versions' && versionsSeg !== 'list') next.set('seg', versionsSeg); else next.delete('seg')
+      if (tab === 'labels' && labelVersionId) next.set('labelVer', String(labelVersionId)); else next.delete('labelVer')
+      if (versionsSeg === 'compare' && compareA) next.set('a', String(compareA)); else next.delete('a')
+      if (versionsSeg === 'compare' && compareB) next.set('b', String(compareB)); else next.delete('b')
+    } else {
+      next.delete('spec'); next.delete('tab'); next.delete('seg')
+      next.delete('labelVer'); next.delete('a'); next.delete('b')
+    }
+    const qs = next.toString()
+    const curQs = searchParams.toString()
+    if (qs !== curQs) setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMeta, tab, versionsSeg, labelVersionId, compareA, compareB])
+
+  // ── 切到"更改记录"段时自动加载 ──
+  useEffect(() => {
+    if (selectedMeta?.type === 'device' && tab === 'versions' && versionsSeg === 'changelog') {
+      loadChangelog(selectedMeta.spec_id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMeta, tab, versionsSeg])
+
+  // ── 切到"版本对比"段时若已有 A/B 则自动算 ──
+  useEffect(() => {
+    if (
+      selectedMeta?.type === 'device' &&
+      tab === 'versions' &&
+      versionsSeg === 'compare' &&
+      compareA &&
+      compareB &&
+      compareA !== compareB &&
+      !compareResult
+    ) {
+      runCompare(selectedMeta.spec_id, compareA, compareB)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMeta, tab, versionsSeg, compareA, compareB])
 
   const loadSpec = async (specId) => {
     setSpecLoading(true)
@@ -353,14 +548,94 @@ function DeviceProtocolPage() {
     }
   }
 
+  // ── 加载指定版本的完整 spec_json（用于 Labels 切换历史版本浏览） ──
+  const loadVersionForLabels = useCallback(async (versionId) => {
+    if (!versionId) {
+      setLabelVersionData(null)
+      return
+    }
+    setLabelVersionLoading(true)
+    try {
+      const { data } = await deviceProtocolApi.getVersion(versionId)
+      setLabelVersionData(data)
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '加载历史版本失败')
+      setLabelVersionData(null)
+    } finally {
+      setLabelVersionLoading(false)
+    }
+  }, [])
+
+  const loadChangelog = useCallback(async (specId) => {
+    if (!specId) {
+      setChangelog([])
+      return
+    }
+    setChangelogLoading(true)
+    try {
+      const { data } = await deviceProtocolApi.getChangelog(specId)
+      setChangelog(data?.items || [])
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '加载变更记录失败')
+      setChangelog([])
+    } finally {
+      setChangelogLoading(false)
+    }
+  }, [])
+
+  const runCompare = useCallback(async (specId, aId, bId) => {
+    if (!specId || !aId || !bId) return
+    if (aId === bId) {
+      message.warning('请选择两个不同的版本')
+      return
+    }
+    setCompareLoading(true)
+    try {
+      const { data } = await deviceProtocolApi.compareVersions(specId, aId, bId)
+      setCompareResult(data)
+    } catch (e) {
+      message.error(e?.response?.data?.detail || '对比失败')
+      setCompareResult(null)
+    } finally {
+      setCompareLoading(false)
+    }
+  }, [])
+
+  // ── Labels 切历史版本：加载该版本 spec_json ──
+  useEffect(() => {
+    if (labelVersionId) {
+      loadVersionForLabels(labelVersionId)
+    } else {
+      setLabelVersionData(null)
+    }
+  }, [labelVersionId, loadVersionForLabels])
+
   const reloadAll = () => {
     loadAtaSystems()
     loadTree(familyFilter, groupBy)
-    if (selectedMeta?.type === 'device') loadSpec(selectedMeta.spec_id)
+    if (selectedMeta?.type === 'device') {
+      loadSpec(selectedMeta.spec_id)
+      if (versionsSeg === 'changelog') loadChangelog(selectedMeta.spec_id)
+    }
     loadDrafts(familyFilter, selectedMeta?.type === 'device' ? selectedMeta.spec_id : null)
     loadCRs(familyFilter)
     loadPendingForMe(familyFilter)
     loadAllSpecs(familyFilter)
+  }
+
+  // ── 跳到"版本对比"段并预填版本 ──
+  const jumpToCompare = (versionAId, versionBId) => {
+    setCompareA(versionAId || null)
+    setCompareB(versionBId || null)
+    setCompareResult(null)
+    setVersionsSeg('compare')
+    setTab('versions')
+  }
+
+  // ── 在 Labels Tab 查看某个历史版本 ──
+  const openLabelsForVersion = (versionId) => {
+    setLabelVersionId(versionId || null)
+    setTab('labels')
   }
 
   // ── 基于某个版本迭代（克隆草稿） ──
@@ -651,6 +926,33 @@ function DeviceProtocolPage() {
                 激活报告
               </Button>
             )}
+            <Tooltip title="在 Labels Tab 以只读模式查看该版本的 Label 定义">
+              <Button
+                size="small"
+                icon={<FileSearchOutlined />}
+                onClick={() => openLabelsForVersion(rec.id)}
+              >
+                查看 Labels
+              </Button>
+            </Tooltip>
+            <Tooltip title="与最新版本对比（可在对比面板再改）">
+              <Button
+                size="small"
+                icon={<DiffOutlined />}
+                onClick={() => {
+                  const versions = specDetail?.versions || []
+                  const latestId = versions[0]?.id
+                  if (!latestId || latestId === rec.id) {
+                    // 没有其他版本时，退化为让用户在对比面板自己选
+                    jumpToCompare(rec.id, null)
+                  } else {
+                    jumpToCompare(latestId, rec.id)
+                  }
+                }}
+              >
+                对比…
+              </Button>
+            </Tooltip>
             {canWrite && (
               <Tooltip title="基于此版本创建新草稿，发布时自动升主版本号">
                 <Button
@@ -757,6 +1059,406 @@ function DeviceProtocolPage() {
     },
   ]
 
+  // ── Labels 段：支持选版本只读浏览历史 ──
+  const renderLabelsSection = (spec, labels, versions, hasActiveDraft) => {
+    const latestVerId = versions[0]?.id || null
+    const latestVerName = versions[0]?.version_name
+    const isLatest = !labelVersionId || labelVersionId === latestVerId
+    // 要显示的 spec_json / labels_view
+    const displayedSpec = isLatest
+      ? specDetail?.latest_spec_json
+      : labelVersionData?.spec_json
+    const displayedLabels = isLatest ? labels : (labelVersionData?.labels_view || [])
+    const displayedVerName = isLatest
+      ? latestVerName
+      : labelVersionData?.version_name
+    const displayedStatus = isLatest
+      ? versions[0]?.availability_status
+      : labelVersionData?.availability_status
+
+    const viewBar = (
+      <Card size="small" style={{ marginBottom: 12 }} bodyStyle={{ padding: '8px 12px' }}>
+        <Space size={8} wrap style={{ width: '100%' }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>查看版本</Text>
+          <Select
+            size="small"
+            style={{ minWidth: 240 }}
+            value={labelVersionId ?? latestVerId ?? undefined}
+            onChange={(v) => setLabelVersionId(v === latestVerId ? null : v)}
+            placeholder="选择版本"
+            options={versions.map((v) => {
+              const tagColor = v.availability_status === 'Available' ? 'green'
+                : v.availability_status === 'PendingCode' ? 'gold' : 'default'
+              const isLatestOpt = v.id === latestVerId
+              return {
+                value: v.id,
+                label: (
+                  <Space size={4}>
+                    <Tag color="purple" style={{ margin: 0 }}>{v.version_name}</Tag>
+                    <Tag color={tagColor} style={{ margin: 0 }}>{v.availability_status}</Tag>
+                    {isLatestOpt && <Tag color="blue" style={{ margin: 0 }}>最新</Tag>}
+                  </Space>
+                ),
+              }
+            })}
+          />
+          {displayedStatus && (
+            <Tag color={
+              displayedStatus === 'Available' ? 'green'
+                : displayedStatus === 'PendingCode' ? 'gold' : 'default'
+            }>
+              {displayedStatus}
+            </Tag>
+          )}
+          {!isLatest && (
+            <Button
+              size="small"
+              icon={<RollbackOutlined />}
+              onClick={() => setLabelVersionId(null)}
+            >
+              回到最新
+            </Button>
+          )}
+          <Button
+            size="small"
+            icon={<DiffOutlined />}
+            onClick={() => {
+              const currentId = labelVersionId || latestVerId
+              if (!currentId) return
+              // 选一个不同的作为对端；优先最新，若当前就是最新则选次新
+              let other = latestVerId
+              if (other === currentId) other = versions[1]?.id
+              jumpToCompare(latestVerId, currentId === latestVerId ? versions[1]?.id : currentId)
+              void other
+            }}
+          >
+            对比…
+          </Button>
+        </Space>
+      </Card>
+    )
+
+    if (spec.protocol_family === 'arinc429') {
+      if (labelVersionLoading && !isLatest) {
+        return <><>{viewBar}</><Card><Spin /></Card></>
+      }
+      if (!displayedSpec) {
+        return <><>{viewBar}</><Card><Empty description="该版本暂无 labels" /></Card></>
+      }
+      const alertMsg = isLatest
+        ? (canWrite ? null : '当前账号为只读，点击 Label 卡片可查看位图/字段定义细节，无法修改')
+        : `当前查看历史版本 ${displayedVerName || ''}（只读），非最新版本`
+      return (
+        <>
+          {viewBar}
+          {alertMsg && (
+            <Alert
+              type={isLatest ? 'warning' : 'warning'}
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={alertMsg}
+            />
+          )}
+          <Arinc429SpecEditor value={displayedSpec} readOnly />
+        </>
+      )
+    }
+    return (
+      <>
+        {viewBar}
+        <Card>
+          {labelVersionLoading && !isLatest ? (
+            <Spin />
+          ) : displayedLabels.length === 0 ? (
+            <Empty description="该版本暂无 labels" />
+          ) : (
+            <Table
+              size="small"
+              rowKey="key"
+              dataSource={displayedLabels}
+              pagination={{ pageSize: 20, showSizeChanger: false }}
+              columns={buildLabelColumns(spec.protocol_family)}
+            />
+          )}
+        </Card>
+      </>
+    )
+  }
+
+  // ── 版本 Tab：Segmented = 版本列表 / 更改记录 / 版本对比 ──
+  const renderVersionsSection = (spec, versions) => {
+    const segBar = (
+      <Segmented
+        value={versionsSeg}
+        onChange={(v) => setVersionsSeg(v)}
+        style={{ marginBottom: 12 }}
+        options={[
+          { value: 'list', label: <Space size={4}><BranchesOutlined />版本列表</Space> },
+          { value: 'changelog', label: <Space size={4}><HistoryOutlined />更改记录</Space> },
+          { value: 'compare', label: <Space size={4}><SwapOutlined />版本对比</Space> },
+        ]}
+      />
+    )
+
+    if (versionsSeg === 'list') {
+      return (
+        <>
+          {segBar}
+          <Card>
+            <Table
+              size="small"
+              rowKey="id"
+              columns={versionColumns}
+              dataSource={versions}
+              pagination={false}
+            />
+          </Card>
+        </>
+      )
+    }
+
+    if (versionsSeg === 'changelog') {
+      return (
+        <>
+          {segBar}
+          <Card
+            extra={
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={() => loadChangelog(spec.id)}
+                loading={changelogLoading}
+              >
+                刷新
+              </Button>
+            }
+          >
+            {changelogLoading ? (
+              <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+            ) : changelog.length === 0 ? (
+              <Empty description="暂无变更记录" />
+            ) : (
+              <Timeline
+                items={changelog.map((row) => {
+                  const stats = row.change_stats || {}
+                  const statusColor =
+                    row.availability_status === 'Available' ? 'green'
+                      : row.availability_status === 'PendingCode' ? 'gold'
+                        : 'gray'
+                  const expanded = !!changelogExpanded[row.version_id]
+                  return {
+                    color: statusColor,
+                    children: (
+                      <div style={{ marginBottom: 12 }}>
+                        <Space size={8} wrap>
+                          <Tag color="purple" style={{ margin: 0 }}>{row.version_name}</Tag>
+                          <Tag color={
+                            row.availability_status === 'Available' ? 'green'
+                              : row.availability_status === 'PendingCode' ? 'gold' : 'default'
+                          }>
+                            {row.availability_status}
+                          </Tag>
+                          {row.created_at && (
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              {dayjs(row.created_at).format('YYYY-MM-DD HH:mm')}
+                            </Text>
+                          )}
+                          {row.created_by && (
+                            <Text type="secondary" style={{ fontSize: 12 }}>· {row.created_by}</Text>
+                          )}
+                          {row.prev_version_name && (
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              ← {row.prev_version_name}
+                            </Text>
+                          )}
+                        </Space>
+                        <div style={{ marginTop: 4 }}>
+                          <Space size={6} wrap>
+                            {stats.added > 0 && <Tag color="green" style={{ margin: 0 }}>+{stats.added}</Tag>}
+                            {stats.removed > 0 && <Tag color="red" style={{ margin: 0 }}>-{stats.removed}</Tag>}
+                            {stats.changed > 0 && <Tag color="orange" style={{ margin: 0 }}>~{stats.changed}</Tag>}
+                            {stats.meta_changed > 0 && <Tag style={{ margin: 0 }}>元信息 {stats.meta_changed}</Tag>}
+                            {!stats.added && !stats.removed && !stats.changed && !stats.meta_changed && (
+                              <Text type="secondary" style={{ fontSize: 12 }}>无结构变更</Text>
+                            )}
+                          </Space>
+                        </div>
+                        {row.submit_note && (
+                          <Typography.Paragraph style={{ margin: '6px 0 0 0', color: '#d4d4d8', whiteSpace: 'pre-wrap', fontSize: 12 }}>
+                            {row.submit_note}
+                          </Typography.Paragraph>
+                        )}
+                        <Space size={6} style={{ marginTop: 6 }} wrap>
+                          <Button
+                            size="small"
+                            onClick={() => setChangelogExpanded((prev) => ({
+                              ...prev,
+                              [row.version_id]: !expanded,
+                            }))}
+                          >
+                            {expanded ? '收起 Diff' : '查看详细变更'}
+                          </Button>
+                          <Button
+                            size="small"
+                            icon={<FileSearchOutlined />}
+                            onClick={() => openLabelsForVersion(row.version_id)}
+                          >
+                            在 Labels 查看
+                          </Button>
+                          {row.prev_version_id && (
+                            <Button
+                              size="small"
+                              icon={<DiffOutlined />}
+                              onClick={() => jumpToCompare(row.prev_version_id, row.version_id)}
+                            >
+                              与上一版对比
+                            </Button>
+                          )}
+                          {row.cr_id && (
+                            <Button
+                              size="small"
+                              onClick={() => navigate(`/device-protocol/change-requests/${row.cr_id}`)}
+                            >
+                              审批 CR#{row.cr_id}
+                            </Button>
+                          )}
+                        </Space>
+                        {expanded && (
+                          <div style={{ marginTop: 10 }}>
+                            <SpecDiffView diff={row.diff_summary} emptyHint="与上一版本相比无 Diff" />
+                          </div>
+                        )}
+                      </div>
+                    ),
+                  }
+                })}
+              />
+            )}
+          </Card>
+        </>
+      )
+    }
+
+    // compare 段
+    return (
+      <>
+        {segBar}
+        <Card>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Text type="secondary">版本 A</Text>
+              <Select
+                style={{ minWidth: 220 }}
+                value={compareA || undefined}
+                onChange={(v) => { setCompareA(v); setCompareResult(null) }}
+                placeholder="选择版本 A"
+                options={versions.map((v) => ({
+                  value: v.id,
+                  label: `${v.version_name} · ${v.availability_status}`,
+                }))}
+              />
+              <Text type="secondary">版本 B</Text>
+              <Select
+                style={{ minWidth: 220 }}
+                value={compareB || undefined}
+                onChange={(v) => { setCompareB(v); setCompareResult(null) }}
+                placeholder="选择版本 B"
+                options={versions.map((v) => ({
+                  value: v.id,
+                  label: `${v.version_name} · ${v.availability_status}`,
+                }))}
+              />
+              <Button
+                type="primary"
+                icon={<SwapOutlined />}
+                loading={compareLoading}
+                disabled={!compareA || !compareB || compareA === compareB}
+                onClick={() => runCompare(spec.id, compareA, compareB)}
+              >
+                开始对比
+              </Button>
+              {compareA && compareB && compareA !== compareB && (
+                <Button
+                  icon={<SwapOutlined rotate={90} />}
+                  onClick={() => {
+                    const a = compareA; setCompareA(compareB); setCompareB(a); setCompareResult(null)
+                  }}
+                >
+                  交换 A/B
+                </Button>
+              )}
+            </Space>
+            {!compareResult ? (
+              <Empty
+                description={
+                  !compareA || !compareB
+                    ? '请选择两个版本，然后点击"开始对比"'
+                    : compareA === compareB
+                      ? '请选择两个不同的版本'
+                      : '点击"开始对比"查看结构化 Diff'
+                }
+              />
+            ) : (
+              <>
+                <Row gutter={12}>
+                  <Col span={12}>
+                    <Card size="small" type="inner" title={
+                      <Space><Tag color="purple">{compareResult.version_a?.version_name}</Tag>
+                        <Text type="secondary" style={{ fontSize: 12 }}>版本 A</Text>
+                      </Space>
+                    }>
+                      <Descriptions size="small" column={1}>
+                        <Descriptions.Item label="可用性">
+                          <Tag color={
+                            compareResult.version_a?.availability_status === 'Available' ? 'green'
+                              : compareResult.version_a?.availability_status === 'PendingCode' ? 'gold' : 'default'
+                          }>
+                            {compareResult.version_a?.availability_status}
+                          </Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="创建时间">
+                          {compareResult.version_a?.created_at ? dayjs(compareResult.version_a.created_at).format('YYYY-MM-DD HH:mm') : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="发布人">
+                          {compareResult.version_a?.created_by || '-'}
+                        </Descriptions.Item>
+                      </Descriptions>
+                    </Card>
+                  </Col>
+                  <Col span={12}>
+                    <Card size="small" type="inner" title={
+                      <Space><Tag color="purple">{compareResult.version_b?.version_name}</Tag>
+                        <Text type="secondary" style={{ fontSize: 12 }}>版本 B</Text>
+                      </Space>
+                    }>
+                      <Descriptions size="small" column={1}>
+                        <Descriptions.Item label="可用性">
+                          <Tag color={
+                            compareResult.version_b?.availability_status === 'Available' ? 'green'
+                              : compareResult.version_b?.availability_status === 'PendingCode' ? 'gold' : 'default'
+                          }>
+                            {compareResult.version_b?.availability_status}
+                          </Tag>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="创建时间">
+                          {compareResult.version_b?.created_at ? dayjs(compareResult.version_b.created_at).format('YYYY-MM-DD HH:mm') : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="发布人">
+                          {compareResult.version_b?.created_by || '-'}
+                        </Descriptions.Item>
+                      </Descriptions>
+                    </Card>
+                  </Col>
+                </Row>
+                <SpecDiffView diff={compareResult.diff} emptyHint="两版本内容一致" />
+              </>
+            )}
+          </Space>
+        </Card>
+      </>
+    )
+  }
+
   // ── Right pane ──
   const renderDeviceContent = () => {
     if (!selectedMeta || selectedMeta.type !== 'device') {
@@ -780,6 +1482,8 @@ function DeviceProtocolPage() {
     const summary = specDetail.summary || {}
     const labels = specDetail.labels_view || []
     const versions = specDetail.versions || []
+    const busSpecs = specDetail.bus_specs || []
+    const parserProfiles = specDetail.parser_profiles || []
     const hasActiveDraft = drafts.some((d) => ['draft', 'pending'].includes(d.status) && d.spec_id === spec.id)
 
     return (
@@ -826,6 +1530,65 @@ function DeviceProtocolPage() {
                     ) : '-'}
                   </Descriptions.Item>
                   <Descriptions.Item label="创建人">{spec.created_by || '-'}</Descriptions.Item>
+                  {busSpecs.length > 1 ? (
+                    <Descriptions.Item label="总线" span={2}>
+                      <Space size={4} wrap>
+                        {busSpecs.map((b) => {
+                          const active = b.spec_id === spec.id
+                          return (
+                            <Tag
+                              key={b.spec_id}
+                              color={active ? FAMILY_COLORS[b.family] || 'blue' : 'default'}
+                              style={{
+                                cursor: active ? 'default' : 'pointer',
+                                fontWeight: active ? 600 : 400,
+                                margin: 0,
+                              }}
+                              onClick={() => {
+                                if (active) return
+                                setSelectedMeta((prev) => ({
+                                  ...(prev || {}),
+                                  type: 'device',
+                                  spec_id: b.spec_id,
+                                  device_id: b.device_id,
+                                  family: b.family,
+                                }))
+                                loadSpec(b.spec_id)
+                                loadDrafts(b.family, b.spec_id)
+                              }}
+                            >
+                              {FAMILY_LABEL[b.family] || b.family}
+                            </Tag>
+                          )
+                        })}
+                      </Space>
+                    </Descriptions.Item>
+                  ) : null}
+                  <Descriptions.Item label="关联解析器" span={2}>
+                    {parserProfiles.length === 0 ? (
+                      <Text type="secondary">（未关联平台解析器）</Text>
+                    ) : (
+                      <Space size={6} wrap>
+                        {parserProfiles.map((p) => (
+                          <Tooltip
+                            key={p.family}
+                            title={
+                              p.profiles && p.profiles.length
+                                ? p.profiles
+                                    .map((x) => `${x.parser_key} · ${x.name}`)
+                                    .join('\n')
+                                : '暂未找到对应的 parser_profile'
+                            }
+                          >
+                            <Tag color="gold" style={{ margin: 0 }}>
+                              {p.family}
+                              {p.profile_count > 0 ? ` (${p.profile_count})` : ''}
+                            </Tag>
+                          </Tooltip>
+                        ))}
+                      </Space>
+                    )}
+                  </Descriptions.Item>
                   <Descriptions.Item label="描述" span={2}>{spec.description || '-'}</Descriptions.Item>
                   {spec.protocol_family === 'arinc429' && (
                     <>
@@ -854,53 +1617,12 @@ function DeviceProtocolPage() {
           {
             key: 'versions',
             label: `版本 (${versions.length})`,
-            children: (
-              <Card>
-                <Table size="small" rowKey="id" columns={versionColumns} dataSource={versions} pagination={false} />
-              </Card>
-            ),
+            children: renderVersionsSection(spec, versions),
           },
           {
             key: 'labels',
             label: spec.protocol_family === 'arinc429' ? `Labels (${labels.length})` : `数据项 (${labels.length})`,
-            children: (
-              spec.protocol_family === 'arinc429' ? (
-                specDetail.latest_spec_json ? (
-                  <>
-                    <Alert
-                      type={canWrite ? 'info' : 'warning'}
-                      showIcon
-                      style={{ marginBottom: 12 }}
-                      message={
-                        canWrite
-                          ? `当前显示最新发布版本${specDetail.latest_version_name ? ` ${specDetail.latest_version_name}` : ''}（只读）。修改请点击右上角「${hasActiveDraft ? '继续编辑草稿' : '修改协议'}」进入草稿。`
-                          : `当前账号为只读，点击 Label 卡片可查看位图/字段定义细节，无法修改`
-                      }
-                    />
-                    <Arinc429SpecEditor
-                      value={specDetail.latest_spec_json}
-                      readOnly
-                    />
-                  </>
-                ) : (
-                  <Card><Empty description="当前最新版本暂无 labels" /></Card>
-                )
-              ) : (
-                <Card>
-                  {labels.length === 0 ? (
-                    <Empty description="当前最新版本暂无 labels" />
-                  ) : (
-                    <Table
-                      size="small"
-                      rowKey="key"
-                      dataSource={labels}
-                      pagination={{ pageSize: 20, showSizeChanger: false }}
-                      columns={buildLabelColumns(spec.protocol_family)}
-                    />
-                  )}
-                </Card>
-              )
-            ),
+            children: renderLabelsSection(spec, labels, versions, hasActiveDraft),
           },
           {
             key: 'drafts',
@@ -944,7 +1666,7 @@ function DeviceProtocolPage() {
   }
 
   return (
-    <Layout style={{ background: 'transparent', minHeight: 'calc(100vh - 112px)' }}>
+    <Layout style={{ background: 'transparent', height: 'calc(100vh - 112px)' }}>
       <Sider
         collapsible
         collapsed={collapsed}
@@ -958,9 +1680,11 @@ function DeviceProtocolPage() {
           marginRight: 16,
           border: '1px solid rgba(70, 70, 82, 0.3)',
           overflow: 'hidden',
+          height: '100%',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid rgba(63,63,70,0.4)' }}>
+       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid rgba(63,63,70,0.4)', flex: '0 0 auto' }}>
           <Button
             type="text"
             size="small"
@@ -975,7 +1699,7 @@ function DeviceProtocolPage() {
           )}
         </div>
         {!collapsed && (
-          <div style={{ padding: '8px 10px' }}>
+          <div style={{ padding: '8px 10px', flex: '0 0 auto' }}>
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Segmented
                 size="small"
@@ -1031,7 +1755,7 @@ function DeviceProtocolPage() {
           </div>
         )}
         {!collapsed && (
-          <div style={{ padding: '4px 6px', height: 'calc(100% - 200px)', overflow: 'auto' }}>
+          <div style={{ padding: '4px 6px', flex: '1 1 auto', minHeight: 0, overflow: 'auto' }}>
             {treeLoading ? <div style={{ padding: 24, textAlign: 'center' }}><Spin /></div> : (
               antdTreeData.length === 0 ? (
                 <Empty description="暂无设备" />
@@ -1042,15 +1766,20 @@ function DeviceProtocolPage() {
                   treeData={antdTreeData}
                   selectedKeys={selectedKey ? [selectedKey] : []}
                   onSelect={onSelectTree}
-                  expandedKeys={expandedKeysAll}
-                  autoExpandParent
+                  expandedKeys={expandedKeys}
+                  autoExpandParent={autoExpandParent}
+                  onExpand={(keys) => {
+                    setExpandedKeys(keys)
+                    setAutoExpandParent(false)
+                  }}
                 />
               )
             )}
           </div>
         )}
+       </div>
       </Sider>
-      <Content>
+      <Content style={{ height: '100%', overflow: 'auto', paddingRight: 4 }}>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           {!canWrite && (
             <Alert type="info" showIcon message="当前账号无写权限：仅设备团队 / 管理员可新建设备、修改协议" />

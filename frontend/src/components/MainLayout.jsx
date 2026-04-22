@@ -17,6 +17,7 @@ import {
   ApartmentOutlined,
   DashboardOutlined,
   AimOutlined,
+  SettingOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useAuth } from '../context/AuthContext'
@@ -156,6 +157,7 @@ function MainLayout() {
         label: '系统配置',
         children: [
           { key: '/admin/platform-data', icon: <CloudUploadOutlined />, label: '平台共享数据' },
+          { key: '/admin/configurations', icon: <SettingOutlined />, label: '构型管理' },
           { key: '/admin/users', icon: <TeamOutlined />, label: '用户管理' },
         ],
       })
@@ -195,6 +197,7 @@ function MainLayout() {
     if (path.startsWith('/event-analysis')) return '/fms-event-analysis'
     if (path.startsWith('/admin/protocol-manager')) return '/admin/protocol-manager'
     if (path.startsWith('/admin/platform-data')) return '/admin/platform-data'
+    if (path.startsWith('/admin/configurations')) return '/admin/configurations'
     if (path.startsWith('/admin/users')) return '/admin/users'
     return path
   }
@@ -255,6 +258,8 @@ function MainLayout() {
       push('网络数据分析', null); push('协议管理', null)
     } else if (path.startsWith('/admin/platform-data')) {
       push('系统配置', null); push('平台共享数据', null)
+    } else if (path.startsWith('/admin/configurations')) {
+      push('系统配置', null); push('构型管理', null)
     } else if (path.startsWith('/admin/users')) {
       push('系统配置', null); push('用户管理', null)
     }

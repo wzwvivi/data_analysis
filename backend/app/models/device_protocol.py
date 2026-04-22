@@ -32,11 +32,23 @@ from ..database import Base
 PROTOCOL_FAMILY_ARINC429 = "arinc429"
 PROTOCOL_FAMILY_CAN = "can"
 PROTOCOL_FAMILY_RS422 = "rs422"
+PROTOCOL_FAMILY_RS485 = "rs485"
+PROTOCOL_FAMILY_MAVLINK = "mavlink"
+PROTOCOL_FAMILY_DISCRETE = "discrete"          # 离散量
+PROTOCOL_FAMILY_WIRELESS = "wireless"          # 无线
+# "none" 用于 TSN 接收方等 **没有设备级总线** 的占位设备
+# （例如 31-1-显控计算机：协议在 TSN ICD 里，这里只挂名字 / 关联解析协议）
+PROTOCOL_FAMILY_NONE = "none"
 
 DEVICE_PROTOCOL_FAMILIES = (
     PROTOCOL_FAMILY_ARINC429,
     PROTOCOL_FAMILY_CAN,
     PROTOCOL_FAMILY_RS422,
+    PROTOCOL_FAMILY_RS485,
+    PROTOCOL_FAMILY_MAVLINK,
+    PROTOCOL_FAMILY_DISCRETE,
+    PROTOCOL_FAMILY_WIRELESS,
+    PROTOCOL_FAMILY_NONE,
 )
 
 
@@ -45,12 +57,20 @@ DRAFT_KIND_TSN_NETWORK = "tsn_network"
 DRAFT_KIND_DEVICE_ARINC429 = "device_arinc429"
 DRAFT_KIND_DEVICE_CAN = "device_can"
 DRAFT_KIND_DEVICE_RS422 = "device_rs422"
+DRAFT_KIND_DEVICE_RS485 = "device_rs485"
+DRAFT_KIND_DEVICE_MAVLINK = "device_mavlink"
+DRAFT_KIND_DEVICE_DISCRETE = "device_discrete"
+DRAFT_KIND_DEVICE_WIRELESS = "device_wireless"
 
 DRAFT_KINDS = (
     DRAFT_KIND_TSN_NETWORK,
     DRAFT_KIND_DEVICE_ARINC429,
     DRAFT_KIND_DEVICE_CAN,
     DRAFT_KIND_DEVICE_RS422,
+    DRAFT_KIND_DEVICE_RS485,
+    DRAFT_KIND_DEVICE_MAVLINK,
+    DRAFT_KIND_DEVICE_DISCRETE,
+    DRAFT_KIND_DEVICE_WIRELESS,
 )
 
 
@@ -59,6 +79,10 @@ def draft_kind_for_family(family: str) -> str:
         PROTOCOL_FAMILY_ARINC429: DRAFT_KIND_DEVICE_ARINC429,
         PROTOCOL_FAMILY_CAN: DRAFT_KIND_DEVICE_CAN,
         PROTOCOL_FAMILY_RS422: DRAFT_KIND_DEVICE_RS422,
+        PROTOCOL_FAMILY_RS485: DRAFT_KIND_DEVICE_RS485,
+        PROTOCOL_FAMILY_MAVLINK: DRAFT_KIND_DEVICE_MAVLINK,
+        PROTOCOL_FAMILY_DISCRETE: DRAFT_KIND_DEVICE_DISCRETE,
+        PROTOCOL_FAMILY_WIRELESS: DRAFT_KIND_DEVICE_WIRELESS,
     }
     return mapping.get(family, DRAFT_KIND_DEVICE_ARINC429)
 
@@ -80,6 +104,37 @@ GIT_EXPORT_STATUSES = (
 # ── 设备状态 ──
 DEVICE_SPEC_ACTIVE = "active"
 DEVICE_SPEC_DEPRECATED = "deprecated"
+
+
+class AtaSystem(Base):
+    """ATA 系统元数据表（设备协议树的第一层）
+
+    `code` 对齐 `DeviceProtocolSpec.ata_code`（例如 ``ata32``），`display_name`
+    是人类可读长名（例如 ``ATA32-起落架系统``）。`sort_order` 便于前端按数字
+    自然排序（ATA21 → ATA23 → ATA24 ...）。
+
+    没登记在这里的 ATA 码依然能由 spec 动态出现在树上，只是没有长名 / 自定义顺序。
+    """
+
+    __tablename__ = "ata_systems"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(
+        String(20),
+        nullable=False,
+        unique=True,
+        index=True,
+        comment="与 DeviceProtocolSpec.ata_code 对齐，例如 ata32",
+    )
+    display_name = Column(
+        String(200), nullable=False, comment="长显示名，例如 ATA32-起落架系统"
+    )
+    sort_order = Column(
+        Integer, nullable=False, default=0, comment="排序权重：ATA 编号（21, 23, ...）"
+    )
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class DeviceProtocolSpec(Base):
@@ -126,6 +181,17 @@ class DeviceProtocolSpec(Base):
         ForeignKey("device_protocol_versions.id", use_alter=True, name="fk_spec_current_version"),
         nullable=True,
         comment="当前 Available 版本（冗余指针，便于查询）",
+    )
+
+    # ── 与平台 parser_profiles 的关联 ──
+    # 一台设备可能被多个平台解析器覆盖（例如 IRS 同时被 irs_v3 和 fms_irs_fwd_v0.4 解析）。
+    # 存的是 ParserProfile.protocol_family 的字符串列表（例如 ["irs", "fms_irs_fwd"]）。
+    # 为空或 None 表示"平台上还没有对应解析协议"。
+    parser_family_hints = Column(
+        JSON,
+        nullable=True,
+        default=list,
+        comment="关联的平台解析协议 family 列表，如 ['irs', 'fms_irs_fwd']",
     )
 
     created_by = Column(String(64), nullable=True)

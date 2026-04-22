@@ -9,11 +9,18 @@ import {
 } from '@ant-design/icons'
 import { autoFlightAnalysisApi, sharedTsnApi, parseApi, protocolApi } from '../services/api'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
+import {
+  HISTORY_TASK_LIST_PAGE,
+  HISTORY_TASK_LIST_PAGE_SIZE,
+  sortTasksByCreatedAtAsc,
+  taskNoForHistoryRow,
+} from '../utils/historyTaskList'
 import dayjs from 'dayjs'
 
 function AutoFlightAnalysisPage() {
   const navigate = useNavigate()
   const [taskList, setTaskList] = useState([])
+  const [listTotal, setListTotal] = useState(0)
   const [listLoading, setListLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -60,11 +67,21 @@ function AutoFlightAnalysisPage() {
     if (inherit) setBundleVersionId(inherit)
   }, [parseTaskId, parseTasks])
 
+  const sortedTaskList = useMemo(
+    () => sortTasksByCreatedAtAsc(taskList),
+    [taskList],
+  )
+
   const loadTaskList = useCallback(async () => {
     setListLoading(true)
     try {
-      const res = await autoFlightAnalysisApi.listTasks(1, 50)
-      setTaskList(res.data.items || [])
+      const res = await autoFlightAnalysisApi.listTasks(
+        HISTORY_TASK_LIST_PAGE,
+        HISTORY_TASK_LIST_PAGE_SIZE,
+      )
+      const items = res.data.items || []
+      setTaskList(items)
+      setListTotal(res.data?.total ?? items.length)
     } catch {
       message.error('加载任务列表失败')
     } finally {
@@ -179,9 +196,16 @@ function AutoFlightAnalysisPage() {
       title: '任务编号',
       key: 'task_no',
       width: 90,
-      render: (_, __, index) => (
-        <span style={{ fontFamily: 'monospace' }}>{index + 1}</span>
-      ),
+      render: (_, __, index) => {
+        const n = taskNoForHistoryRow(
+          listTotal,
+          HISTORY_TASK_LIST_PAGE,
+          HISTORY_TASK_LIST_PAGE_SIZE,
+          sortedTaskList.length,
+          index,
+        )
+        return <span style={{ fontFamily: 'monospace' }}>{n != null && n > 0 ? n : '—'}</span>
+      },
     },
     { title: '任务名', dataIndex: 'name', key: 'name', ellipsis: true },
     {
@@ -360,7 +384,7 @@ function AutoFlightAnalysisPage() {
           rowKey="id"
           size="small"
           loading={listLoading}
-          dataSource={taskList}
+          dataSource={sortedTaskList}
           columns={historyColumns}
           pagination={false}
           scroll={{ x: 1090 }}

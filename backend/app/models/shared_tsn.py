@@ -19,10 +19,34 @@ class SharedSortie(Base):
     uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # ── 构型关联（可空以兼容历史架次）──
+    aircraft_configuration_id = Column(
+        Integer,
+        ForeignKey("aircraft_configurations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="绑定的飞机构型（决定 TSN/设备协议版本）",
+    )
+    software_configuration_id = Column(
+        Integer,
+        ForeignKey("software_configurations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="绑定的软件构型（决定各设备软件版本号）",
+    )
+
     files = relationship(
         "SharedTsnFile",
         back_populates="sortie",
         foreign_keys="SharedTsnFile.sortie_id",
+    )
+    aircraft_configuration = relationship(
+        "AircraftConfiguration",
+        foreign_keys=[aircraft_configuration_id],
+    )
+    software_configuration = relationship(
+        "SoftwareConfiguration",
+        foreign_keys=[software_configuration_id],
     )
 
 

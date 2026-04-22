@@ -23,6 +23,7 @@ from .routers import (
     notifications_router,
     dashboard_router,
     workbench_router,
+    configuration_router,
 )
 from .config import UPLOAD_DIR, DATA_DIR, FLIGHT_ASSISTANT_URL
 from .init_data import init_all_data
@@ -85,6 +86,7 @@ app.include_router(auto_flight_analysis_router)
 app.include_router(compare_router)
 app.include_router(dashboard_router)
 app.include_router(workbench_router)
+app.include_router(configuration_router)
 
 
 @app.get("/")

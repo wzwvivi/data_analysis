@@ -93,7 +93,11 @@ async def list_shared_files(db: AsyncSession) -> List[SharedTsnFile]:
 async def list_sorties_with_files(db: AsyncSession) -> List[SharedSortie]:
     r = await db.execute(
         select(SharedSortie)
-        .options(selectinload(SharedSortie.files))
+        .options(
+            selectinload(SharedSortie.files),
+            selectinload(SharedSortie.aircraft_configuration),
+            selectinload(SharedSortie.software_configuration),
+        )
         .order_by(SharedSortie.created_at.desc())
     )
     return list(r.scalars().unique().all())
@@ -106,12 +110,16 @@ async def create_sortie(
     experiment_date: Optional[date],
     remarks: Optional[str],
     uploaded_by_id: Optional[int],
+    aircraft_configuration_id: Optional[int] = None,
+    software_configuration_id: Optional[int] = None,
 ) -> SharedSortie:
     row = SharedSortie(
         sortie_label=sortie_label.strip(),
         experiment_date=experiment_date,
         remarks=remarks.strip() if remarks else None,
         uploaded_by_id=uploaded_by_id,
+        aircraft_configuration_id=aircraft_configuration_id,
+        software_configuration_id=software_configuration_id,
     )
     db.add(row)
     await db.commit()
@@ -126,6 +134,8 @@ async def update_sortie_meta(
     sortie_label: Optional[str] = None,
     experiment_date: Optional[date] = None,
     remarks: Optional[str] = None,
+    aircraft_configuration_id: Optional[int] = None,
+    software_configuration_id: Optional[int] = None,
     patch_keys: Optional[Set[str]] = None,
 ) -> SharedSortie:
     if patch_keys is not None:
@@ -135,6 +145,10 @@ async def update_sortie_meta(
             row.experiment_date = experiment_date
         if "remarks" in patch_keys:
             row.remarks = remarks.strip() if remarks else None
+        if "aircraft_configuration_id" in patch_keys:
+            row.aircraft_configuration_id = aircraft_configuration_id
+        if "software_configuration_id" in patch_keys:
+            row.software_configuration_id = software_configuration_id
     await db.commit()
     await db.refresh(row)
     return row

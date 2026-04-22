@@ -16,6 +16,7 @@ import AutoFlightAnalysisTaskPage from './pages/AutoFlightAnalysisTaskPage'
 import ComparePage from './pages/ComparePage'
 import AdminPlatformDataPage from './pages/AdminPlatformDataPage'
 import AdminUserPage from './pages/AdminUserPage'
+import ConfigurationManagerPage from './pages/ConfigurationManagerPage'
 import ProtocolManagerPage from './pages/ProtocolManagerPage'
 import NetworkConfigPage from './pages/NetworkConfigPage'
 import DraftEditorPage from './pages/network-config/DraftEditorPage'
@@ -144,6 +145,14 @@ function AppRoutes() {
           element={(
             <AdminRoute>
               <AdminPlatformDataPage />
+            </AdminRoute>
+          )}
+        />
+        <Route
+          path="admin/configurations"
+          element={(
+            <AdminRoute>
+              <ConfigurationManagerPage />
             </AdminRoute>
           )}
         />

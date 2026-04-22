@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  Alert,
   Button,
   Card,
   Descriptions,
@@ -11,8 +10,6 @@ import {
   Modal,
   Space,
   Steps,
-  Table,
-  Tabs,
   Tag,
   Timeline,
   Typography,
@@ -28,6 +25,7 @@ import {
 import dayjs from 'dayjs'
 import { deviceProtocolApi } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
+import SpecDiffView from './components/SpecDiffView'
 
 const { Text, Paragraph } = Typography
 
@@ -220,45 +218,6 @@ function ChangeRequestPage() {
 
   const draft = cr.device_draft || {}
 
-  const addedColumns = [
-    { title: 'Key', dataIndex: 'key', width: 180 },
-    { title: '名称', dataIndex: 'name' },
-  ]
-  const removedColumns = addedColumns
-  const changedColumns = [
-    { title: 'Key', dataIndex: 'key', width: 180 },
-    { title: '名称', dataIndex: 'name' },
-    {
-      title: '字段变更',
-      dataIndex: 'changes',
-      render: (changes) => {
-        if (!changes || !Object.keys(changes).length) return <Text type="secondary">—</Text>
-        return (
-          <Space direction="vertical" size={2} style={{ width: '100%' }}>
-            {Object.entries(changes).map(([k, v]) => {
-              const oldVal = v && typeof v === 'object' && 'old' in v ? v.old : undefined
-              const newVal = v && typeof v === 'object' && 'new' in v ? v.new : v
-              return (
-                <div key={k} style={{ fontSize: 12 }}>
-                  <Text type="secondary">{k}:</Text>{' '}
-                  {oldVal !== undefined && (
-                    <>
-                      <Text delete>{JSON.stringify(oldVal)}</Text>
-                      {' → '}
-                    </>
-                  )}
-                  <Text code>{JSON.stringify(newVal)}</Text>
-                </div>
-              )
-            })}
-          </Space>
-        )
-      },
-    },
-  ]
-
-  const metaChangedEntries = Object.entries(diff.meta_changed || {})
-
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Card
@@ -325,84 +284,7 @@ function ChangeRequestPage() {
       </Card>
 
       <Card title="Diff 详情" size="small">
-        {!cr.diff_summary || !cr.diff_summary.summary ? (
-          <Alert type="info" message="无 Diff（可能是全量新建）" showIcon />
-        ) : (
-          <>
-            <Descriptions size="small" bordered column={4} style={{ marginBottom: 12 }}>
-              <Descriptions.Item label="新增">{diff.summary?.added || 0}</Descriptions.Item>
-              <Descriptions.Item label="删除">{diff.summary?.removed || 0}</Descriptions.Item>
-              <Descriptions.Item label="变更">{diff.summary?.changed || 0}</Descriptions.Item>
-              <Descriptions.Item label="元信息">{diff.summary?.meta_changed || 0}</Descriptions.Item>
-            </Descriptions>
-            <Tabs
-              items={[
-                {
-                  key: 'added',
-                  label: `新增 (${(diff.items_added || []).length})`,
-                  children: (diff.items_added || []).length === 0 ? (
-                    <Empty description="无新增项" />
-                  ) : (
-                    <Table
-                      size="small"
-                      rowKey={(r) => r.key}
-                      dataSource={diff.items_added}
-                      columns={addedColumns}
-                      pagination={{ pageSize: 10 }}
-                    />
-                  ),
-                },
-                {
-                  key: 'removed',
-                  label: `删除 (${(diff.items_removed || []).length})`,
-                  children: (diff.items_removed || []).length === 0 ? (
-                    <Empty description="无删除项" />
-                  ) : (
-                    <Table
-                      size="small"
-                      rowKey={(r) => r.key}
-                      dataSource={diff.items_removed}
-                      columns={removedColumns}
-                      pagination={{ pageSize: 10 }}
-                    />
-                  ),
-                },
-                {
-                  key: 'changed',
-                  label: `变更 (${(diff.items_changed || []).length})`,
-                  children: (diff.items_changed || []).length === 0 ? (
-                    <Empty description="无字段变更" />
-                  ) : (
-                    <Table
-                      size="small"
-                      rowKey={(r) => r.key}
-                      dataSource={diff.items_changed}
-                      columns={changedColumns}
-                      pagination={{ pageSize: 10 }}
-                    />
-                  ),
-                },
-                {
-                  key: 'meta',
-                  label: `元信息 (${metaChangedEntries.length})`,
-                  children: metaChangedEntries.length === 0 ? (
-                    <Empty description="元信息无变更" />
-                  ) : (
-                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                      {metaChangedEntries.map(([k, v]) => (
-                        <div key={k} style={{ fontSize: 12 }}>
-                          <Tag>{k}</Tag>
-                          <Text delete>{JSON.stringify(v?.old)}</Text>{' → '}
-                          <Text code>{JSON.stringify(v?.new)}</Text>
-                        </div>
-                      ))}
-                    </Space>
-                  ),
-                },
-              ]}
-            />
-          </>
-        )}
+        <SpecDiffView diff={diff} emptyHint="无 Diff（可能是全量新建）" />
       </Card>
 
       <Card title="审批历史" size="small">

@@ -15,6 +15,7 @@ from .device_protocol import router as device_protocol_router
 from .notifications import router as notifications_router
 from .dashboard import router as dashboard_router
 from .workbench import router as workbench_router
+from .configuration import router as configuration_router
 
 __all__ = [
     "protocol_router",
@@ -33,4 +34,5 @@ __all__ = [
     "notifications_router",
     "dashboard_router",
     "workbench_router",
+    "configuration_router",
 ]

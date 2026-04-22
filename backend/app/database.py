@@ -671,6 +671,20 @@ async def init_db():
                         "ON device_protocol_specs(protocol_family, ata_code)"
                     )
                 )
+                # 幂等补列：parser_family_hints — 关联平台 parser_profiles 的 family 列表
+                spec_cols = {
+                    row[1]
+                    for row in sync_conn.execute(
+                        text("PRAGMA table_info(device_protocol_specs)")
+                    ).fetchall()
+                }
+                if 'parser_family_hints' not in spec_cols:
+                    print("[DB] ALTER device_protocol_specs ADD COLUMN parser_family_hints")
+                    sync_conn.execute(
+                        text(
+                            "ALTER TABLE device_protocol_specs ADD COLUMN parser_family_hints JSON"
+                        )
+                    )
             if 'device_protocol_versions' in inspector.get_table_names():
                 sync_conn.execute(
                     text(
@@ -848,6 +862,30 @@ async def init_db():
                 """))
                 sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_shared_sorties_created ON shared_sorties(created_at)"))
                 print("[DB] 已创建 shared_sorties 表")
+
+            # 架次 × 构型 关联（幂等列迁移）
+            if 'shared_sorties' in inspector.get_table_names():
+                ss_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(shared_sorties)")).fetchall()}
+                if 'aircraft_configuration_id' not in ss_cols:
+                    sync_conn.execute(text(
+                        "ALTER TABLE shared_sorties ADD COLUMN aircraft_configuration_id INTEGER "
+                        "REFERENCES aircraft_configurations(id)"
+                    ))
+                    sync_conn.execute(text(
+                        "CREATE INDEX IF NOT EXISTS ix_shared_sorties_aircraft_cfg "
+                        "ON shared_sorties(aircraft_configuration_id)"
+                    ))
+                    print("[DB] 已添加 shared_sorties.aircraft_configuration_id 列")
+                if 'software_configuration_id' not in ss_cols:
+                    sync_conn.execute(text(
+                        "ALTER TABLE shared_sorties ADD COLUMN software_configuration_id INTEGER "
+                        "REFERENCES software_configurations(id)"
+                    ))
+                    sync_conn.execute(text(
+                        "CREATE INDEX IF NOT EXISTS ix_shared_sorties_software_cfg "
+                        "ON shared_sorties(software_configuration_id)"
+                    ))
+                    print("[DB] 已添加 shared_sorties.software_configuration_id 列")
 
             if 'shared_tsn_files' in inspector.get_table_names():
                 st_cols = {row[1] for row in sync_conn.execute(text("PRAGMA table_info(shared_tsn_files)")).fetchall()}
