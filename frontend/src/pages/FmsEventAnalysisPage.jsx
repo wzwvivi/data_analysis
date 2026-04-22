@@ -9,7 +9,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, MinusCircleOutlined,
   ClockCircleOutlined, FileSearchOutlined, DownloadOutlined,
 } from '@ant-design/icons'
-import { parseApi, fmsEventAnalysisApi, networkConfigApi } from '../services/api'
+import { parseApi, fmsEventAnalysisApi, protocolApi } from '../services/api'
 import dayjs from 'dayjs'
 
 function FmsEventAnalysisPage() {
@@ -41,10 +41,10 @@ function FmsEventAnalysisPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await networkConfigApi.listVersions('Available')
+        const res = await protocolApi.listVersions()
         if (cancelled) return
         const items = (res.data?.items || res.data || []).filter(v =>
-          (v.availability_status || v.status) === 'Available'
+          !v.availability_status || v.availability_status === 'Available'
         )
         setAvailableVersions(items)
       } catch {

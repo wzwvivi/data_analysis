@@ -7,7 +7,7 @@ import {
 import {
   UploadOutlined, ReloadOutlined, PlayCircleOutlined,
 } from '@ant-design/icons'
-import { autoFlightAnalysisApi, sharedTsnApi, parseApi, networkConfigApi } from '../services/api'
+import { autoFlightAnalysisApi, sharedTsnApi, parseApi, protocolApi } from '../services/api'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import dayjs from 'dayjs'
 
@@ -36,10 +36,10 @@ function AutoFlightAnalysisPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await networkConfigApi.listVersions('Available')
+        const res = await protocolApi.listVersions()
         if (cancelled) return
         const items = (res.data?.items || res.data || []).filter(v =>
-          (v.availability_status || v.status) === 'Available'
+          !v.availability_status || v.availability_status === 'Available'
         )
         setAvailableVersions(items)
         if (items.length > 0) {
