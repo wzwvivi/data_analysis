@@ -249,7 +249,7 @@ class AutoFlightAnalysisService:
             await self.db.execute(
                 select(AutoFlightAnalysisTask)
                 .where(filt)
-                .order_by(AutoFlightAnalysisTask.created_at.desc())
+                .order_by(AutoFlightAnalysisTask.created_at.asc(), AutoFlightAnalysisTask.id.asc())
                 .offset(offset)
                 .limit(page_size)
             )

@@ -12,8 +12,7 @@ import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import {
   HISTORY_TASK_LIST_PAGE,
   HISTORY_TASK_LIST_PAGE_SIZE,
-  sortTasksByCreatedAtAsc,
-  taskNoForHistoryRow,
+  chronologicalTaskNo,
 } from '../utils/historyTaskList'
 import dayjs from 'dayjs'
 
@@ -28,7 +27,6 @@ const TOLERANCE_OPTIONS = [
 function FccEventAnalysisPage() {
   const navigate = useNavigate()
   const [taskList, setTaskList] = useState([])
-  const [listTotal, setListTotal] = useState(0)
   const [listLoading, setListLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -66,11 +64,6 @@ function FccEventAnalysisPage() {
     return () => { cancelled = true }
   }, [])
 
-  const sortedTaskList = useMemo(
-    () => sortTasksByCreatedAtAsc(taskList),
-    [taskList],
-  )
-
   const loadTaskList = useCallback(async () => {
     setListLoading(true)
     try {
@@ -78,9 +71,7 @@ function FccEventAnalysisPage() {
         HISTORY_TASK_LIST_PAGE,
         HISTORY_TASK_LIST_PAGE_SIZE,
       )
-      const items = res.data.items || []
-      setTaskList(items)
-      setListTotal(res.data?.total ?? items.length)
+      setTaskList(res.data.items || [])
     } catch {
       message.error('加载任务列表失败')
     } finally {
@@ -161,16 +152,11 @@ function FccEventAnalysisPage() {
       title: '任务编号',
       key: 'task_no',
       width: 90,
-      render: (_, __, index) => {
-        const n = taskNoForHistoryRow(
-          listTotal,
-          HISTORY_TASK_LIST_PAGE,
-          HISTORY_TASK_LIST_PAGE_SIZE,
-          sortedTaskList.length,
-          index,
-        )
-        return <span style={{ fontFamily: 'monospace' }}>{n != null && n > 0 ? n : '—'}</span>
-      },
+      render: (_, __, index) => (
+        <span style={{ fontFamily: 'monospace' }}>
+          {chronologicalTaskNo(HISTORY_TASK_LIST_PAGE, HISTORY_TASK_LIST_PAGE_SIZE, index)}
+        </span>
+      ),
     },
     { title: '文件', dataIndex: 'pcap_filename', key: 'pcap_filename', ellipsis: true },
     {
@@ -327,7 +313,7 @@ function FccEventAnalysisPage() {
           rowKey="id"
           size="small"
           loading={listLoading}
-          dataSource={sortedTaskList}
+          dataSource={taskList}
           columns={historyColumns}
           pagination={false}
           scroll={{ x: 800 }}

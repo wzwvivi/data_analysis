@@ -12,8 +12,7 @@ import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import {
   HISTORY_TASK_LIST_PAGE,
   HISTORY_TASK_LIST_PAGE_SIZE,
-  sortTasksByCreatedAtAsc,
-  taskNoForHistoryRow,
+  chronologicalTaskNo,
 } from '../utils/historyTaskList'
 import dayjs from 'dayjs'
 
@@ -23,7 +22,6 @@ import dayjs from 'dayjs'
 function StandaloneFmsEventPage() {
   const navigate = useNavigate()
   const [taskList, setTaskList] = useState([])
-  const [listTotal, setListTotal] = useState(0)
   const [listLoading, setListLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -62,11 +60,6 @@ function StandaloneFmsEventPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const sortedTaskList = useMemo(
-    () => sortTasksByCreatedAtAsc(taskList),
-    [taskList],
-  )
-
   const loadTaskList = useCallback(async () => {
     setListLoading(true)
     try {
@@ -74,9 +67,7 @@ function StandaloneFmsEventPage() {
         HISTORY_TASK_LIST_PAGE,
         HISTORY_TASK_LIST_PAGE_SIZE,
       )
-      const items = res.data.items || []
-      setTaskList(items)
-      setListTotal(res.data?.total ?? items.length)
+      setTaskList(res.data.items || [])
     } catch {
       message.error('加载任务列表失败')
     } finally {
@@ -162,16 +153,11 @@ function StandaloneFmsEventPage() {
       title: '任务编号',
       key: 'task_no',
       width: 90,
-      render: (_, __, index) => {
-        const n = taskNoForHistoryRow(
-          listTotal,
-          HISTORY_TASK_LIST_PAGE,
-          HISTORY_TASK_LIST_PAGE_SIZE,
-          sortedTaskList.length,
-          index,
-        )
-        return <span style={{ fontFamily: 'monospace' }}>{n != null && n > 0 ? n : '—'}</span>
-      },
+      render: (_, __, index) => (
+        <span style={{ fontFamily: 'monospace' }}>
+          {chronologicalTaskNo(HISTORY_TASK_LIST_PAGE, HISTORY_TASK_LIST_PAGE_SIZE, index)}
+        </span>
+      ),
     },
     { title: '文件', dataIndex: 'pcap_filename', key: 'pcap_filename', ellipsis: true },
     {
@@ -332,7 +318,7 @@ function StandaloneFmsEventPage() {
           rowKey="id"
           size="small"
           loading={listLoading}
-          dataSource={sortedTaskList}
+          dataSource={taskList}
           columns={historyColumns}
           pagination={false}
           scroll={{ x: 800 }}

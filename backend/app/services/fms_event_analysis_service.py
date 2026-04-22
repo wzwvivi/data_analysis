@@ -464,7 +464,7 @@ class FmsEventAnalysisService:
         q = (
             select(EventAnalysisTask)
             .where(filt)
-            .order_by(EventAnalysisTask.created_at.desc())
+            .order_by(EventAnalysisTask.created_at.asc(), EventAnalysisTask.id.asc())
             .offset(offset)
             .limit(page_size)
         )
