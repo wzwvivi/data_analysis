@@ -77,13 +77,74 @@ async def _validate_parse_profiles(
     service: ParserService,
     *,
     device_parser_map: Optional[str],
+    device_protocol_version_map: Optional[Dict[str, int]] = None,
     protocol_version_id: Optional[int],
 ):
-    """校验设备-解析器映射，返回 (dpm, profile_names)。"""
+    """校验解析计划，返回 ``(dpm, display_names)``。
+
+    Phase 7 双路径：
+    - 新路径：``device_protocol_version_map`` 非空 → 校验每个 version 存在、
+      ``parser_key`` 已绑定、对应 Python 类已注册。``dpm`` 可为 ``None``（由
+      parser_service 按 family→version 推导）。
+    - 老路径：``device_parser_map`` 非空 → 走旧的 ParserProfile 校验逻辑，
+      供老任务"重新解析"以及仍未升级的旧前端使用。
+    至少要有一条路径；两路径都缺直接 400。
+    """
     import json
 
+    # ── 新路径：device_protocol_version_map ──
+    if device_protocol_version_map:
+        from sqlalchemy import select as _select
+        from app.models.device_protocol import DeviceProtocolVersion
+        from app.services.parsers import ParserRegistry
+
+        display_names: List[str] = []
+        seen_keys: set = set()
+        for fam, version_id in device_protocol_version_map.items():
+            row = await service.db.execute(
+                _select(DeviceProtocolVersion).where(
+                    DeviceProtocolVersion.id == int(version_id)
+                )
+            )
+            ver = row.scalar_one_or_none()
+            if ver is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"设备协议版本 {version_id} 不存在（family={fam}）",
+                )
+            parser_key = (ver.parser_key or "").strip()
+            if not parser_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"版本 {ver.version_name}（family={fam}）未绑定 parser_key，"
+                        f"请先在设备协议管理中配置"
+                    ),
+                )
+            meta = ParserRegistry.metadata(parser_key)
+            if meta is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"parser_key={parser_key} 未在代码中注册",
+                )
+            if parser_key not in seen_keys:
+                seen_keys.add(parser_key)
+                display_names.append(meta["display_name"])
+
+        if protocol_version_id:
+            version = await service.protocol_service.get_version(protocol_version_id)
+            if not version:
+                raise HTTPException(status_code=400, detail="TSN网络配置版本不存在")
+
+        # 新路径不回填 device_parser_map（完全不依赖 ParserProfile）
+        return None, display_names
+
+    # ── 老路径：device_parser_map ──
     if not device_parser_map:
-        raise HTTPException(status_code=400, detail="已禁用旧模式，请使用 device_parser_map 指定设备解析器映射")
+        raise HTTPException(
+            status_code=400,
+            detail="请传 device_protocol_version_map（推荐）或 device_parser_map",
+        )
     try:
         raw = json.loads(device_parser_map)
         if not isinstance(raw, dict) or not raw:
@@ -222,58 +283,9 @@ def _resolve_ports_devices(
     return ports, devices
 
 
-# ========== 解析版本相关接口 ==========
-
-@router.get("/profiles", response_model=ParserProfileListResponse)
-async def list_parser_profiles(db: AsyncSession = Depends(get_db)):
-    """获取可用的解析版本列表"""
-    service = ParserService(db)
-    profiles = await service.get_parser_profiles(active_only=True)
-    
-    return ParserProfileListResponse(
-        total=len(profiles),
-        items=[
-            ParserProfileResponse(
-                id=p.id,
-                name=p.name,
-                version=p.version,
-                device_model=p.device_model,
-                protocol_family=p.protocol_family,
-                parser_key=p.parser_key,
-                is_active=p.is_active,
-                description=p.description,
-                supported_ports=p.supported_ports,
-                created_at=p.created_at,
-            )
-            for p in profiles
-        ]
-    )
-
-
-@router.get("/profiles/{profile_id}", response_model=ParserProfileResponse)
-async def get_parser_profile(profile_id: int, db: AsyncSession = Depends(get_db)):
-    """获取解析版本详情"""
-    service = ParserService(db)
-    profile = await service.get_parser_profile(profile_id)
-    
-    if not profile:
-        raise HTTPException(status_code=404, detail="解析版本不存在")
-    
-    return ParserProfileResponse(
-        id=profile.id,
-        name=profile.name,
-        version=profile.version,
-        device_model=profile.device_model,
-        protocol_family=profile.protocol_family,
-        parser_key=profile.parser_key,
-        is_active=profile.is_active,
-        description=profile.description,
-        supported_ports=profile.supported_ports,
-        created_at=profile.created_at,
-    )
-
-
 # ========== 上传和解析接口 ==========
+# Phase 7：旧 /profiles 两个读接口已下线；parser 元数据统一走 /api/parsers/registry
+# （见 routers/device_protocol.py::list_parser_registry）。
 
 def _streaming_copy_with_size_check(
     src, dst_path: Path, max_size: int
@@ -345,12 +357,13 @@ async def upload_and_parse(
         raise HTTPException(status_code=413, detail=str(exc)) from exc
 
     service = ParserService(db)
+    dpv_map = _parse_device_protocol_version_map(device_protocol_version_map)
     dpm, profile_names = await _validate_parse_profiles(
         service,
         device_parser_map=device_parser_map,
+        device_protocol_version_map=dpv_map,
         protocol_version_id=protocol_version_id,
     )
-    dpv_map = _parse_device_protocol_version_map(device_protocol_version_map)
 
     upload_path = UPLOAD_DIR / "pcap"
     upload_path.mkdir(parents=True, exist_ok=True)
@@ -402,12 +415,13 @@ async def upload_from_shared_pcap(
         raise HTTPException(status_code=400, detail="共享文件扩展名不支持")
 
     service = ParserService(db)
+    dpv_map = _parse_device_protocol_version_map(device_protocol_version_map)
     dpm, profile_names = await _validate_parse_profiles(
         service,
         device_parser_map=device_parser_map,
+        device_protocol_version_map=dpv_map,
         protocol_version_id=protocol_version_id,
     )
-    dpv_map = _parse_device_protocol_version_map(device_protocol_version_map)
 
     src = Path(row.file_path)
     if not src.is_file():

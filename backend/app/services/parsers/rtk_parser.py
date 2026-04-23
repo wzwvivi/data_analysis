@@ -45,6 +45,9 @@ class RTKParser(BaseParser):
 
     parser_key = "rtk_v1.4"
     name = "RTK地基接收机"
+    display_name = "RTK 地基接收机"
+    parser_version = "V1.4"
+    protocol_family = "rtk"
     supported_ports = []
 
     # ---- 枚举映射表 ----

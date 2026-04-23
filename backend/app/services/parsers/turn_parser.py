@@ -61,6 +61,9 @@ _FIELD_NAME_TO_LABEL = build_field_name_to_label(_LABEL_INTS)
 class TurnParser(Arinc429Mixin, BaseParser):
     parser_key = "turn_v2"
     name = "前轮转弯系统"
+    display_name = "前轮转弯系统"
+    parser_version = "V2"
+    protocol_family = "turn"
     supported_ports = [7019, 7020, 8017, 8018, 8019]
 
     _LABEL_INTS = _LABEL_INTS

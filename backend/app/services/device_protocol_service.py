@@ -48,7 +48,6 @@ from ..models import (
     GIT_EXPORT_FAILED,
     GIT_EXPORT_SKIPPED,
     GIT_EXPORT_PENDING,
-    ParserProfile,
     ProtocolChangeRequest,
     draft_kind_for_family,
 )
@@ -273,8 +272,9 @@ async def list_specs(
     *,
     family: Optional[str] = None,
     include_counts: bool = True,
-    include_parsers: bool = False,
 ) -> List[Dict[str, Any]]:
+    """列设备规格；Phase 7 起不再提供 parser_profiles 展开，版本树节点直接
+    使用 DeviceProtocolVersion.parser_key 展示所绑 Python 解析器。"""
     stmt = select(DeviceProtocolSpec).order_by(
         DeviceProtocolSpec.protocol_family, DeviceProtocolSpec.device_id
     )
@@ -283,20 +283,7 @@ async def list_specs(
     stmt = stmt.options(selectinload(DeviceProtocolSpec.versions))
     res = await db.execute(stmt)
     specs = list(res.scalars().all())
-
-    parser_family_map: Dict[str, List[Dict[str, Any]]] = {}
-    if include_parsers:
-        parser_family_map = await _load_parser_profile_map(db)
-
-    items: List[Dict[str, Any]] = []
-    for s in specs:
-        d = _spec_to_dict(s, include_counts=include_counts)
-        if include_parsers:
-            d["parser_profiles"] = _resolve_parser_hints(
-                d.get("parser_family_hints") or [], parser_family_map
-            )
-        items.append(d)
-    return items
+    return [_spec_to_dict(s, include_counts=include_counts) for s in specs]
 
 
 async def get_spec_by_id(
@@ -467,6 +454,7 @@ async def build_changelog(db: AsyncSession, spec_id: int) -> List[Dict[str, Any]
                 "version_seq": v.version_seq,
                 "description": v.description,
                 "availability_status": v.availability_status,
+                "parser_key": v.parser_key,
                 "created_at": v.created_at,
                 "created_by": v.created_by,
                 "activated_at": v.activated_at,
@@ -547,8 +535,8 @@ async def build_device_tree(
     ).scalars().all()
     ata_meta: Dict[str, AtaSystem] = {row.code: row for row in ata_meta_rows}
 
-    # parser family → profiles（用于设备节点上展示关联解析器）
-    parser_family_map = await _load_parser_profile_map(db)
+    # Phase 7：设备节点直接展示 DeviceProtocolVersion.parser_key（由 _spec_to_dict
+    # 从 versions 里取出 latest_parser_key），不再按 family 聚合 ParserProfile。
 
     # family 总线展示顺序（其它家族放后面）
     _BUS_ORDER = {
@@ -577,7 +565,6 @@ async def build_device_tree(
 
     def _single_device_leaf(dev: Dict[str, Any], ata: str) -> Dict[str, Any]:
         """按总线呈现单个 spec 的叶子（仅 group_by='family' 用）"""
-        hints = list(dev.get("parser_family_hints") or [])
         return {
             "key": f"spec:{dev['id']}",
             "type": "device",
@@ -587,8 +574,7 @@ async def build_device_tree(
             "families": [dev["protocol_family"]],
             "ata_code": ata,
             "title": dev["device_name"],
-            "parser_family_hints": hints,
-            "parser_profiles": _resolve_parser_hints(hints, parser_family_map),
+            "parser_key": dev.get("latest_parser_key"),
         }
 
     def _aggregated_device_leaf(
@@ -605,8 +591,6 @@ async def build_device_tree(
         # 展示用总线顺序
         rows_sorted = sorted(rows, key=lambda r: _bus_sort_key(r["protocol_family"]))
         families = [r["protocol_family"] for r in rows_sorted]
-        # 设备级 hints 统一取 primary（realign 会保证所有 per-bus 行 hints 一致）
-        hints = list(primary.get("parser_family_hints") or [])
         bus_specs = [
             {
                 "family": r["protocol_family"],
@@ -626,8 +610,7 @@ async def build_device_tree(
             "families": families,
             "ata_code": ata,
             "title": primary["device_name"],
-            "parser_family_hints": hints,
-            "parser_profiles": _resolve_parser_hints(hints, parser_family_map),
+            "parser_key": primary.get("latest_parser_key"),
             "bus_specs": bus_specs,
         }
 
@@ -720,7 +703,6 @@ def _spec_to_dict(
         "description": spec.description,
         "status": spec.status,
         "current_version_id": spec.current_version_id,
-        "parser_family_hints": list(spec.parser_family_hints or []),
         "created_by": spec.created_by,
         "created_at": spec.created_at,
         "updated_at": spec.updated_at,
@@ -737,10 +719,22 @@ def _spec_to_dict(
                 "created_at": latest.created_at,
                 "git_export_status": latest.git_export_status,
             }
+            # Phase 7：设备节点展示所绑 Python parser_key（优先用最新 Available
+            # 版本，兜底退到 latest）。
+            available_versions = [
+                v for v in versions
+                if v.availability_status == AVAILABILITY_AVAILABLE
+                and (v.parser_key or "").strip()
+            ]
+            if available_versions:
+                pick = max(available_versions, key=lambda v: v.version_seq or 0)
+            else:
+                pick = latest
+            data["latest_parser_key"] = pick.parser_key or None
     return data
 
 
-# ═════════════════════════ parser_family_hints 解析 ═════════════════════════
+# ═════════════════════════ 设备 anchor 解析 ═════════════════════════
 
 
 _DEVICE_ANCHOR_SEP = "__"
@@ -770,54 +764,6 @@ def _anchor_of_device_id(device_id: str) -> str:
     if suffix in _BUS_ANCHOR_SUFFIXES:
         return base
     return device_id
-
-
-async def _load_parser_profile_map(
-    db: AsyncSession,
-) -> Dict[str, List[Dict[str, Any]]]:
-    """family → [{parser_key, name, device_model, is_active, ...}]，用于前端展示"""
-    res = await db.execute(select(ParserProfile))
-    rows = list(res.scalars().all())
-    grouped: Dict[str, List[Dict[str, Any]]] = {}
-    for p in rows:
-        fam = (getattr(p, "protocol_family", None) or "").strip()
-        if not fam:
-            continue
-        grouped.setdefault(fam, []).append(
-            {
-                "parser_key": p.parser_key,
-                "name": p.name,
-                "device_model": getattr(p, "device_model", None),
-                "is_active": bool(getattr(p, "is_active", True)),
-            }
-        )
-    return grouped
-
-
-def _resolve_parser_hints(
-    hints: List[str],
-    parser_family_map: Dict[str, List[Dict[str, Any]]],
-) -> List[Dict[str, Any]]:
-    """把 parser_family_hints 展开成 [{family, profiles:[...]}]，便于前端一次性拿到"""
-    out: List[Dict[str, Any]] = []
-    for fam in hints or []:
-        profiles = parser_family_map.get(fam, [])
-        out.append(
-            {
-                "family": fam,
-                "profiles": profiles,
-                "profile_count": len(profiles),
-            }
-        )
-    return out
-
-
-async def resolve_parser_profiles_for_hints(
-    db: AsyncSession, hints: List[str]
-) -> List[Dict[str, Any]]:
-    """公共入口：给一个 hints 列表，返回关联的 parser_profiles 分组视图"""
-    parser_family_map = await _load_parser_profile_map(db)
-    return _resolve_parser_hints(hints or [], parser_family_map)
 
 
 async def list_bus_specs_for_device(
@@ -866,6 +812,28 @@ async def list_bus_specs_for_device(
     ]
 
 
+async def _inherit_parser_key_from_latest_version(
+    db: AsyncSession, spec_id: int
+) -> Optional[str]:
+    """发布新版本时，从同 spec 下已存在的最新版本继承 ``parser_key``。
+
+    Phase 7 起 parser_key 下沉到 version，同一设备的新版本通常沿用老版本的
+    Python 实现（ICD 小改）。如果设备首次发版（没有任何 version），这里返回
+    ``None``，让编辑器在 Pending 阶段手动指定。
+    """
+    res = await db.execute(
+        select(DeviceProtocolVersion.parser_key)
+        .where(
+            DeviceProtocolVersion.spec_id == int(spec_id),
+            DeviceProtocolVersion.parser_key.isnot(None),
+        )
+        .order_by(DeviceProtocolVersion.version_seq.desc())
+        .limit(1)
+    )
+    key = res.scalar_one_or_none()
+    return (key or None)
+
+
 def serialize_version(v: DeviceProtocolVersion) -> Dict[str, Any]:
     return {
         "id": v.id,
@@ -874,6 +842,7 @@ def serialize_version(v: DeviceProtocolVersion) -> Dict[str, Any]:
         "version_seq": v.version_seq,
         "description": v.description,
         "availability_status": v.availability_status,
+        "parser_key": v.parser_key,
         "activated_at": v.activated_at,
         "activated_by": v.activated_by,
         "forced_activation": bool(getattr(v, "forced_activation", False)),
@@ -1215,6 +1184,19 @@ async def get_activation_report(
 # ═════════════════════════ Available 版本查询（供用户上传页 + ParserService）═════════════════════════
 
 
+def _parser_family_of(parser_key: Optional[str]) -> Optional[str]:
+    """Phase 7：从 ``parser_key`` 反查 ``ParserRegistry`` 的 protocol_family。"""
+    from app.services.parsers import ParserRegistry
+    key = (parser_key or "").strip()
+    if not key:
+        return None
+    meta = ParserRegistry.metadata(key)
+    if not meta:
+        return None
+    fam = (meta.get("protocol_family") or "").strip()
+    return fam or None
+
+
 async def list_available_versions(
     db: AsyncSession,
     *,
@@ -1225,9 +1207,10 @@ async def list_available_versions(
     """列出所有 ``availability_status=Available`` 的设备协议版本（扁平）。
 
     过滤：
-    - ``parser_family``：匹配 ``DeviceProtocolSpec.parser_family_hints`` 任一元素
+    - ``parser_family``：按 ``parser_key → ParserRegistry.protocol_family`` 匹配
+      （Phase 7：原先的 ``DeviceProtocolSpec.parser_family_hints`` 路径已下线）
     - ``ata``：按 ``ata_code`` 精确匹配
-    - ``protocol_family``：按 ``protocol_family`` 精确匹配
+    - ``protocol_family``：按总线 family（arinc429/can/...）精确匹配
     排序：``activated_at DESC``（未激活的放最后，按 created_at DESC 兜底）。
     """
     stmt = (
@@ -1254,8 +1237,8 @@ async def list_available_versions(
     items: List[Dict[str, Any]] = []
     pf_key = (parser_family or "").strip() or None
     for v, s in rows:
-        hints = list(s.parser_family_hints or [])
-        if pf_key and pf_key not in hints:
+        fam = _parser_family_of(v.parser_key)
+        if pf_key and fam != pf_key:
             continue
         items.append(
             {
@@ -1264,10 +1247,12 @@ async def list_available_versions(
                 "device_id": s.device_id,
                 "device_name": s.device_name,
                 "protocol_family": s.protocol_family,
-                "parser_family_hints": hints,
+                "parser_family": fam,
                 "ata_code": s.ata_code,
                 "version_name": v.version_name,
                 "version_seq": v.version_seq,
+                "availability_status": v.availability_status,
+                "parser_key": v.parser_key,
                 "activated_at": v.activated_at,
                 "activated_by": v.activated_by,
                 "has_bundle": device_bundle_exists(v.id),
@@ -1279,19 +1264,16 @@ async def list_available_versions(
 async def get_active_device_version_by_parser_family(
     db: AsyncSession, parser_family: str
 ) -> Optional[DeviceProtocolVersion]:
-    """按 ``parser_family_hints`` 取对应设备的最新 Available 版本。
+    """按 parser family 取对应设备的最新 Available 版本。
 
-    用于 ParserService 老任务兜底（ParseTask.device_protocol_version_map 为空时）。
+    Phase 7：family 判定基于 ``version.parser_key → ParserRegistry.protocol_family``。
+    仅用于 ParserService 老任务兜底（ParseTask.device_protocol_version_map 为空时）。
     """
     pf = (parser_family or "").strip()
     if not pf:
         return None
     stmt = (
         select(DeviceProtocolVersion)
-        .join(
-            DeviceProtocolSpec,
-            DeviceProtocolSpec.id == DeviceProtocolVersion.spec_id,
-        )
         .where(DeviceProtocolVersion.availability_status == AVAILABILITY_AVAILABLE)
         .order_by(
             DeviceProtocolVersion.activated_at.desc().nullslast(),
@@ -1300,11 +1282,7 @@ async def get_active_device_version_by_parser_family(
     )
     res = await db.execute(stmt)
     for v in res.scalars().all():
-        spec_res = await db.execute(
-            select(DeviceProtocolSpec).where(DeviceProtocolSpec.id == v.spec_id)
-        )
-        s = spec_res.scalar_one_or_none()
-        if s and pf in (s.parser_family_hints or []):
+        if _parser_family_of(v.parser_key) == pf:
             return v
     return None
 
@@ -1770,6 +1748,11 @@ class DeviceDraftHandler:
         normalized_spec["protocol_meta"]["version"] = target_version_name
 
         # 4) 物化 Version（PendingCode）
+        #    Phase 7：从同 spec 下最新版本继承 parser_key（同一设备 Python 一般
+        #    不变）；找不到（首次发版）时留空，由管理员在版本编辑页手动指定。
+        inferred_parser_key = await _inherit_parser_key_from_latest_version(
+            db, spec.id
+        )
         version = DeviceProtocolVersion(
             spec_id=spec.id,
             version_name=target_version_name,
@@ -1778,6 +1761,7 @@ class DeviceDraftHandler:
             + f"\n[由设备协议草稿 #{draft.id} 发布 → {target_version_name}，admin={admin_username}]",
             spec_json=normalized_spec,
             availability_status=AVAILABILITY_PENDING_CODE,
+            parser_key=inferred_parser_key,
             git_export_status=GIT_EXPORT_PENDING,
             published_from_draft_id=draft.id,
             created_by=admin_username,

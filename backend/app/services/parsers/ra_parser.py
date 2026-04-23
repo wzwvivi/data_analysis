@@ -48,6 +48,9 @@ _FIELD_NAME_TO_LABEL = build_field_name_to_label(_LABEL_INTS)
 class RAParser(Arinc429Mixin, BaseParser):
     parser_key = "ra_v1.0"
     name = "无线电高度表"
+    display_name = "无线电高度表"
+    parser_version = "V1.0"
+    protocol_family = "ra"
     supported_ports = [7007, 7008, 7009, 7010, 7011, 7012]
 
     _LABEL_INTS = _LABEL_INTS

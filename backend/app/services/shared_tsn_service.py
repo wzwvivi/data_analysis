@@ -22,14 +22,30 @@ from ..constants.shared_platform_assets import (
 )
 from ..models import SharedSortie, SharedTsnFile
 from .video_web_transcode import (
+    _is_browser_playable,
     ffprobe_primary_video_codec,
     is_hevc_codec,
+    make_browser_playable,
+    needs_browser_preprocess,
     transcode_hevc_file_to_browser_mp4,
 )
 
 logger = logging.getLogger(__name__)
 
 SHARED_SUBDIR = "shared_tsn"
+
+# 视频预处理队列 (ffmpeg): 串行执行, 避免多份 ffmpeg 同时吃满 CPU 把 pcap 解析/API 饿死。
+# 默认 1; 若目标机更强可设 VIDEO_TRANSCODE_CONCURRENCY=2。
+_VIDEO_CONCURRENCY = max(1, int(os.environ.get("VIDEO_TRANSCODE_CONCURRENCY", "1")))
+_VIDEO_SEM: Optional[asyncio.Semaphore] = None
+
+
+def _get_video_semaphore() -> asyncio.Semaphore:
+    """惰性创建: 必须在 asyncio event loop 里才能实例化 Semaphore。"""
+    global _VIDEO_SEM
+    if _VIDEO_SEM is None:
+        _VIDEO_SEM = asyncio.Semaphore(_VIDEO_CONCURRENCY)
+    return _VIDEO_SEM
 
 
 def shared_storage_dir() -> Path:
@@ -182,6 +198,120 @@ def _should_transcode_hevc_for_web(
     return bool(asset_type and asset_type.startswith("video_"))
 
 
+def _validate_shared_upload_meta(
+    *,
+    filename: str,
+    asset_type: Optional[str],
+    legacy_flat: bool,
+) -> None:
+    """只校验文件名/资产类型；不碰字节流，便于先 validate 再落盘。"""
+    if legacy_flat:
+        ext = Path(filename).suffix.lower()
+        from ..config import ALLOWED_EXTENSIONS
+
+        if ext not in ALLOWED_EXTENSIONS:
+            raise ValueError(f"不支持的文件类型，允许: {ALLOWED_EXTENSIONS}")
+    else:
+        if not asset_type or asset_type not in VALID_ASSET_KEYS:
+            raise ValueError("请选择数据类型")
+        validate_extension_for_asset(filename, asset_type)
+
+
+def allocate_shared_storage_path(filename: str) -> Path:
+    """为上传分配一个最终落盘路径（shared_storage_dir 下的 uuid 前缀名）。"""
+    stored = f"{uuid.uuid4().hex}_{Path(filename).name}"
+    return shared_storage_dir() / stored
+
+
+async def create_shared_from_path(
+    db: AsyncSession,
+    *,
+    filename: str,
+    stored_path: Path,
+    file_size: int,
+    uploaded_by_id: Optional[int],
+    sortie_id: Optional[int] = None,
+    asset_type: Optional[str] = None,
+    legacy_flat: bool = False,
+) -> SharedTsnFile:
+    """已落盘的文件入库；架次/资产类型校验失败会清理 stored_path。
+
+    用于流式上传场景：router 先把请求体流式写到 ``stored_path``，再调用本函数。
+    """
+    try:
+        _validate_shared_upload_meta(
+            filename=filename, asset_type=asset_type, legacy_flat=legacy_flat
+        )
+        if not legacy_flat and not sortie_id:
+            raise ValueError("请选择试验架次")
+        if file_size > MAX_UPLOAD_SIZE:
+            raise ValueError("文件超过大小限制")
+
+        sortie = await get_sortie_by_id(db, sortie_id) if sortie_id else None
+        if sortie_id and not sortie:
+            raise ValueError("试验架次不存在")
+
+        vp_status = None
+        vp_progress = None
+        vp_err = None
+
+        if (
+            _should_transcode_hevc_for_web(filename, asset_type, legacy_flat)
+            and VIDEO_TRANSCODE_HEVC
+        ):
+            codec = await asyncio.to_thread(ffprobe_primary_video_codec, stored_path)
+            # 入队条件放宽: 任何"容器/编码不被浏览器直接接受"的视频都进队列。
+            # 成本: 多做了 .mkv/.avi/.ts 等的 remux 处理（秒级）。
+            # 收益: 浏览器端不再出现"上传成功但播不了"的黑屏/白屏。
+            if needs_browser_preprocess(stored_path, codec):
+                ffmpeg_ok = bool(shutil.which("ffmpeg") or os.environ.get("FFMPEG_PATH"))
+                if ffmpeg_ok:
+                    vp_status = "transcoding"
+                    vp_progress = 5
+                else:
+                    vp_status = "failed"
+                    vp_progress = 0
+                    if is_hevc_codec(codec):
+                        vp_err = "服务器未安装 ffmpeg，无法将 HEVC 转为浏览器可播的 H.264"
+                    else:
+                        vp_err = "服务器未安装 ffmpeg，无法将该容器/编码转为浏览器可播"
+            else:
+                vp_status = "ready"
+                vp_progress = 100
+
+        is_video_row = (asset_type and asset_type.startswith("video_")) or (
+            legacy_flat and Path(filename).suffix.lower().lstrip(".") in VIDEO_EXTS
+        )
+        if vp_status is None and is_video_row:
+            vp_status = "ready"
+            vp_progress = 100
+
+        row = SharedTsnFile(
+            original_filename=Path(filename).name,
+            file_path=str(stored_path.resolve()),
+            file_size=file_size,
+            uploaded_by_id=uploaded_by_id,
+            experiment_date=sortie.experiment_date if sortie else None,
+            experiment_label=None,
+            sortie_id=sortie_id,
+            asset_type=asset_type if not legacy_flat else None,
+            video_processing_status=vp_status,
+            video_processing_progress=vp_progress,
+            video_processing_error=vp_err,
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        return row
+    except Exception:
+        # 入库失败则清理已落盘的临时文件，避免孤儿占用磁盘
+        try:
+            stored_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 async def create_shared_from_upload(
     db: AsyncSession,
     *,
@@ -192,83 +322,36 @@ async def create_shared_from_upload(
     asset_type: Optional[str] = None,
     legacy_flat: bool = False,
 ) -> SharedTsnFile:
-    """上传平台共享文件。
-
-    - 新版：必须提供 sortie_id 与 asset_type（且在合法枚举内）。
-    - legacy_flat=True：沿用旧逻辑，不要求架次（仅兼容旧客户端）。
-    """
-    if legacy_flat:
-        ext = Path(filename).suffix.lower()
-        from ..config import ALLOWED_EXTENSIONS
-
-        if ext not in ALLOWED_EXTENSIONS:
-            raise ValueError(f"不支持的文件类型，允许: {ALLOWED_EXTENSIONS}")
-    else:
-        if not sortie_id:
-            raise ValueError("请选择试验架次")
-        if not asset_type or asset_type not in VALID_ASSET_KEYS:
-            raise ValueError("请选择数据类型")
-        validate_extension_for_asset(filename, asset_type)
-
+    """兼容旧调用：仍接受整份 bytes。新 router 已改用流式版本 create_shared_from_path。"""
+    _validate_shared_upload_meta(
+        filename=filename, asset_type=asset_type, legacy_flat=legacy_flat
+    )
     if len(file_bytes) > MAX_UPLOAD_SIZE:
         raise ValueError("文件超过大小限制")
 
-    stored = f"{uuid.uuid4().hex}_{Path(filename).name}"
-    dest = shared_storage_dir() / stored
+    dest = allocate_shared_storage_path(filename)
     dest.write_bytes(file_bytes)
 
-    vp_status = None
-    vp_progress = None
-    vp_err = None
-
-    if _should_transcode_hevc_for_web(filename, asset_type, legacy_flat) and VIDEO_TRANSCODE_HEVC:
-        codec = await asyncio.to_thread(ffprobe_primary_video_codec, dest)
-        if is_hevc_codec(codec):
-            ffmpeg_ok = bool(shutil.which("ffmpeg") or os.environ.get("FFMPEG_PATH"))
-            if ffmpeg_ok:
-                vp_status = "transcoding"
-                vp_progress = 5
-            else:
-                vp_status = "failed"
-                vp_progress = 0
-                vp_err = "服务器未安装 ffmpeg，无法将 HEVC 转为浏览器可播的 H.264"
-        else:
-            vp_status = "ready"
-            vp_progress = 100
-
-    is_video_row = (asset_type and asset_type.startswith("video_")) or (
-        legacy_flat and Path(filename).suffix.lower().lstrip(".") in VIDEO_EXTS
-    )
-    if vp_status is None and is_video_row:
-        vp_status = "ready"
-        vp_progress = 100
-
-    sortie = await get_sortie_by_id(db, sortie_id) if sortie_id else None
-    if sortie_id and not sortie:
-        dest.unlink(missing_ok=True)
-        raise ValueError("试验架次不存在")
-
-    row = SharedTsnFile(
-        original_filename=Path(filename).name,
-        file_path=str(dest.resolve()),
+    return await create_shared_from_path(
+        db,
+        filename=filename,
+        stored_path=dest,
         file_size=len(file_bytes),
         uploaded_by_id=uploaded_by_id,
-        experiment_date=sortie.experiment_date if sortie else None,
-        experiment_label=None,
         sortie_id=sortie_id,
-        asset_type=asset_type if not legacy_flat else None,
-        video_processing_status=vp_status,
-        video_processing_progress=vp_progress,
-        video_processing_error=vp_err,
+        asset_type=asset_type,
+        legacy_flat=legacy_flat,
     )
-    db.add(row)
-    await db.commit()
-    await db.refresh(row)
-    return row
 
 
 async def run_hevc_transcode_job(shared_id: int) -> None:
-    """后台将 HEVC 转为 H.264；上传接口快速返回后再执行。"""
+    """后台预处理视频: 先 remux 快速通道, 不行再 libx264 重编码。
+
+    实际策略见 ``video_web_transcode.make_browser_playable``。
+
+    通过 ``_VIDEO_SEM`` 串行化, 避免多份 ffmpeg 同时跑把 CPU 打满。
+    注意: 只有 "等到 semaphore + 实际跑 ffmpeg" 的那段才会阻塞, DB 事务不长时间持有。
+    """
     from ..database import async_session
 
     async with async_session() as db:
@@ -286,27 +369,49 @@ async def run_hevc_transcode_job(shared_id: int) -> None:
         row.video_processing_progress = 10
         await db.commit()
 
-        try:
-            new_path = await asyncio.to_thread(transcode_hevc_file_to_browser_mp4, path)
-            row.video_processing_progress = 85
-            await db.commit()
+    # 重新开一个 session 跑 ffmpeg, 不要让 DB 事务跨过长时间 ffmpeg 调用。
+    sem = _get_video_semaphore()
+    try:
+        async with sem:
+            # 进入真正执行时更新进度, 让前端能看到"从排队到编码"的转换
+            async with async_session() as db2:
+                row2 = await get_shared_by_id(db2, shared_id)
+                if row2 and row2.video_processing_status == "transcoding":
+                    row2.video_processing_progress = 20
+                    await db2.commit()
+            new_path_raw = await asyncio.to_thread(make_browser_playable, path)
+        new_path = Path(new_path_raw)
+    except Exception as e:
+        logger.exception("run_hevc_transcode_job ffmpeg failed shared_id=%s", shared_id)
+        async with async_session() as db3:
+            row3 = await get_shared_by_id(db3, shared_id)
+            if row3:
+                row3.video_processing_status = "failed"
+                row3.video_processing_error = str(e)[:800]
+                row3.video_processing_progress = 0
+                await db3.commit()
+        return
 
-            row.file_path = str(Path(new_path).resolve())
-            codec = await asyncio.to_thread(ffprobe_primary_video_codec, Path(row.file_path))
-            if is_hevc_codec(codec):
-                row.video_processing_status = "failed"
-                row.video_processing_error = "转码未完成，输出仍为 HEVC 或无法解码"
-                row.video_processing_progress = 0
-            else:
-                row.video_processing_status = "ready"
-                row.video_processing_progress = 100
-                row.video_processing_error = None
-        except Exception as e:
-            logger.exception("run_hevc_transcode_job failed shared_id=%s", shared_id)
-            row.video_processing_status = "failed"
-            row.video_processing_error = str(e)[:800]
-            row.video_processing_progress = 0
-        await db.commit()
+    async with async_session() as db4:
+        row4 = await get_shared_by_id(db4, shared_id)
+        if not row4:
+            return
+        row4.file_path = str(new_path.resolve())
+        row4.video_processing_progress = 85
+        await db4.commit()
+
+        codec = await asyncio.to_thread(ffprobe_primary_video_codec, Path(row4.file_path))
+        if _is_browser_playable(Path(row4.file_path), codec):
+            row4.video_processing_status = "ready"
+            row4.video_processing_progress = 100
+            row4.video_processing_error = None
+        else:
+            row4.video_processing_status = "failed"
+            row4.video_processing_progress = 0
+            row4.video_processing_error = (
+                f"预处理后仍不被浏览器识别 (codec={codec}, ext={new_path.suffix})"
+            )
+        await db4.commit()
 
 
 async def update_shared_meta(

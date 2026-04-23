@@ -269,12 +269,6 @@ export const protocolApi = {
 
 // 解析任务相关API
 export const parseApi = {
-  // 获取解析版本列表
-  getProfiles: () => api.get('/parse/profiles'),
-  
-  // 获取解析版本详情
-  getProfile: (profileId) => api.get(`/parse/profiles/${profileId}`),
-  
   // 上传并解析
   upload: (formData, onUploadProgress) => api.post('/parse/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },

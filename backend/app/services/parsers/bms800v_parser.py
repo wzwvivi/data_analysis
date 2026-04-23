@@ -7,11 +7,12 @@ TSN 包结构:
   Byte 4-7 : 功能状态集 (4B)
   Byte 8+  : CAN_FRAME 序列, 每帧 16B, 每 4 帧后插入 4B 功能状态集
 
-CAN_FRAME (16B):
-  Byte 0-3 : CAN 仲裁域 (wire format, big-endian)
-              Extended frame: BaseID(11)|SRR(1)|IDE(1)|ExtID(18)|RTR(1)
-  Byte 4-7 : DLC / 状态
-  Byte 8-15: 8B CAN 数据
+CAN_FRAME (16B) 采用"裸 CAN 帧 + 补齐"布局:
+  Byte 0-3  : CAN 仲裁域 (wire format, big-endian)
+               Extended frame: BaseID(11)|SRR(1)|IDE(1)|ExtID(18)|RTR(1)
+  Byte 4    : DLC/控制字节
+  Byte 5-12 : 8B CAN 数据
+  Byte 13-15: 补齐/保留
 
 TSN 存储的 4 字节是 CAN 总线线上格式 (wire format), 不是标准 29-bit CAN-ID.
 需要通过 decode_can_wire_id() 转换后才能与 ICD 定义的 CAN-ID 比较.
@@ -148,10 +149,24 @@ def _can_frame_valid(payload: bytes, byte_offset: int, expected_cid: int) -> boo
     return True
 
 
+def _extract_can_data_from_frame(frame_bytes: bytes) -> bytes:
+    """从 16B 裸 CAN 帧提取 8B 数据区。
+
+    当前 TSN 录制格式下，16B 帧布局为:
+      [0:4]=arb, [4]=dlc, [5:13]=8B data, [13:16]=padding
+    """
+    if len(frame_bytes) < 16:
+        frame_bytes = frame_bytes + b"\x00" * (16 - len(frame_bytes))
+    return frame_bytes[5:13]
+
+
 @ParserRegistry.register
 class BMS800VParser(BaseParser):
     parser_key = "bms_800v_v2.5"
     name = "800V动力电池BMS"
+    display_name = "800V 动力电池 BMS"
+    parser_version = "V2.5"
+    protocol_family = "bms_800v"
     supported_ports: List[int] = _ALL_PORTS
 
     def can_parse_port(self, port: int) -> bool:
@@ -199,7 +214,7 @@ class BMS800VParser(BaseParser):
                 continue
 
             frame_bytes = payload[byte_offset: byte_offset + 16]
-            can_data = frame_bytes[8:16]
+            can_data = _extract_can_data_from_frame(frame_bytes)
 
             info = _MESSAGES.get(expected_cid)
             if not info:

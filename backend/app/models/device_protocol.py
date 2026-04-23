@@ -183,16 +183,8 @@ class DeviceProtocolSpec(Base):
         comment="当前 Available 版本（冗余指针，便于查询）",
     )
 
-    # ── 与平台 parser_profiles 的关联 ──
-    # 一台设备可能被多个平台解析器覆盖（例如 IRS 同时被 irs_v3 和 fms_irs_fwd_v0.4 解析）。
-    # 存的是 ParserProfile.protocol_family 的字符串列表（例如 ["irs", "fms_irs_fwd"]）。
-    # 为空或 None 表示"平台上还没有对应解析协议"。
-    parser_family_hints = Column(
-        JSON,
-        nullable=True,
-        default=list,
-        comment="关联的平台解析协议 family 列表，如 ['irs', 'fms_irs_fwd']",
-    )
+    # Phase 7：parser_key 下沉到 DeviceProtocolVersion；spec 本身不再持有
+    # 关联 parser 的任何信息（原 ``parser_family_hints`` 字段已下线）。
 
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -233,6 +225,18 @@ class DeviceProtocolVersion(Base):
     version_seq = Column(Integer, nullable=False, default=1, comment="序号，用于排序")
     description = Column(Text, nullable=True)
     source_file = Column(String(255), nullable=True, comment="来源文件（Excel 导入等）")
+
+    # ── 绑定的 Python 解析器（ParserRegistry 的 key，如 'adc_v2.2'） ──
+    # 一个 parser_key 可以对应多个版本（数据差异用 spec_json 表达）；
+    # 但一个版本只能绑一个 parser_key（bundle 与 Python 一对一）。
+    # 一个设备（DeviceProtocolSpec）下不同版本允许切换 parser_key，
+    # 用来表达 "ICD 大改版需要换 Python 实现" 的罕见场景。
+    parser_key = Column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="绑定的 Python parser_key（ParserRegistry 注册名）；过渡期允许 NULL，稳定后应全量回填",
+    )
 
     # 全量规格 JSON；家族 handler 负责 validate/diff
     spec_json = Column(JSON, nullable=False, default=dict)

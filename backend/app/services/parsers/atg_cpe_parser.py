@@ -157,6 +157,9 @@ def _extract_label_from_field_name(field_name: str) -> Optional[int]:
 class ATGCPEParser(Arinc429Mixin, BaseParser):
     parser_key = "atg_cpe_v20260402"
     name = "ATG设备(CPE)"
+    display_name = "ATG设备(CPE)"
+    parser_version = "20260402"
+    protocol_family = "atg"
     supported_ports: List[int] = []
 
     _LABEL_DEFS = _LABEL_DEFS

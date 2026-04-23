@@ -16,6 +16,7 @@ import {
   DashboardOutlined,
   AimOutlined,
   SettingOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useAuth } from '../context/AuthContext'
@@ -122,6 +123,15 @@ function MainLayout() {
       })
     }
 
+    // 设备协议管理：放在"网络数据分析"分组底部，仅对有权限的用户（默认管理员）显示
+    if (hasPageAccess('device-protocol')) {
+      networkChildren.push({
+        key: '/device-protocol',
+        icon: <ApartmentOutlined />,
+        label: '设备协议管理',
+      })
+    }
+
     if (networkChildren.length > 0) {
       items.push({ type: 'group', label: '网络数据分析', children: networkChildren })
     }
@@ -183,7 +193,7 @@ function MainLayout() {
     if (path.startsWith('/workbench')) return '/workbench'
     if (path.startsWith('/tasks/')) return '/tasks'
     if (path.startsWith('/network-config')) return '/network-config'
-    if (path.startsWith('/device-protocol')) return null
+    if (path.startsWith('/device-protocol')) return '/device-protocol'
     if (path.startsWith('/compare')) return '/compare'
     if (path.startsWith('/auto-flight-analysis')) return '/auto-flight-analysis'
     if (path.startsWith('/fcc-event-analysis')) return '/fcc-event-analysis'

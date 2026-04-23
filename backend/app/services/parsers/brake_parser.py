@@ -64,6 +64,9 @@ _FIELD_NAME_TO_LABEL = build_field_name_to_label(_LABEL_INTS)
 class BrakeParser(Arinc429Mixin, BaseParser):
     parser_key = "brake_v7.3"
     name = "机轮刹车系统"
+    display_name = "机轮刹车系统"
+    parser_version = "V7.3"
+    protocol_family = "brake"
     supported_ports: List[int] = [7087, 7088, 7089, 7090, 8032, 8033, 8034]
 
     _LABEL_INTS = _LABEL_INTS

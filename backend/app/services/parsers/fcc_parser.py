@@ -43,6 +43,9 @@ def _decode_main_fcc(vote_byte: int) -> Optional[str]:
 class FCCParser(BaseParser):
     parser_key = "fcc_v13"
     name = "FCC飞控数据"
+    display_name = "FCC 飞控数据"
+    parser_version = "V13"
+    protocol_family = "fcc"
     supported_ports: List[int] = []
 
     OUTPUT_COLUMNS = [

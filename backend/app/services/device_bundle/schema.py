@@ -130,7 +130,7 @@ class DeviceBundle(BaseModel):
     device_id: str = ""
     device_name: str = ""
     protocol_family: str = "arinc429"
-    parser_family: Optional[str] = None   # "adc" / "brake" / "ra" / ... (由 parser_family_hints 推断)
+    parser_family: Optional[str] = None   # "adc" / "brake" / "ra" / ... (由 version.parser_key 反查 ParserRegistry 得到)
     ata_code: Optional[str] = None
     generated_at: datetime
 

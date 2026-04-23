@@ -47,6 +47,9 @@ _FIELD_NAME_TO_LABEL = build_field_name_to_label(_LABEL_INTS)
 class LGCUParser(Arinc429Mixin, BaseParser):
     parser_key = "lgcu_v4.0"
     name = "电起落架收放控制单元"
+    display_name = "电起落架收放控制单元"
+    parser_version = "V4.0"
+    protocol_family = "lgcu"
     supported_ports: List[int] = [7077, 7078, 7079, 7080, 8021, 8022, 8023, 8024]
 
     _LABEL_INTS = _LABEL_INTS

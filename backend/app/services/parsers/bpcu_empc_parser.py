@@ -7,7 +7,7 @@ TSN 包结构:
   Byte 4-7 : 功能状态集 (4B)
   Byte 8+  : CAN_FRAME 序列, 每帧 16B, 每 4 帧后插入 4B 功能状态集
 
-CAN_FRAME (16B) = 4B CAN 仲裁域 (wire format) + 4B DLC/状态 + 8B 数据
+CAN_FRAME (16B) = 4B CAN仲裁域 + 1B DLC/控制 + 8B数据 + 3B补齐
 
 端口:
   7050, 7051 : LBPCU (左BPCU)
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
 from .base import BaseParser, ParserRegistry, FieldLayout
-from .bms800v_parser import _can_frame_valid
+from .bms800v_parser import _can_frame_valid, _extract_can_data_from_frame
 
 
 def _extract_intel(data: bytes, startbit: int, length: int) -> int:
@@ -77,6 +77,9 @@ _BASE_COLUMNS = ["timestamp", "source_port", "can_id_hex", "msg_name"]
 class BPCUEMPCParser(BaseParser):
     parser_key = "bpcu_empc_v1"
     name = "BPCU/EMPC配电系统"
+    display_name = "BPCU/EMPC 配电系统"
+    parser_version = "V1"
+    protocol_family = "bpcu_empc"
     supported_ports: List[int] = _ALL_PORTS
 
     def can_parse_port(self, port: int) -> bool:
@@ -123,7 +126,7 @@ class BPCUEMPCParser(BaseParser):
                 continue
 
             frame_bytes = payload[byte_offset: byte_offset + 16]
-            can_data = frame_bytes[8:16]
+            can_data = _extract_can_data_from_frame(frame_bytes)
 
             info = _MESSAGES.get(expected_cid)
             if not info:

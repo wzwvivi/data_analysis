@@ -142,6 +142,9 @@ class ADCParser(Arinc429Mixin, BaseParser):
 
     parser_key = "adc_v2.2"
     name = "大气数据系统"
+    display_name = "大气数据系统"
+    parser_version = "V2.2"
+    protocol_family = "adc"
     supported_ports: List[int] = [
         7001, 7002, 7003, 7022, 7023, 7024, 7025, 7026, 7027,
         8003, 8004, 8005, 8006, 8007, 8008,

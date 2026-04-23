@@ -53,6 +53,9 @@ def _decode_auto_flight_frame(data: bytes) -> Dict[str, Any]:
 class AutoFlightParser(BaseParser):
     parser_key = "auto_flight_v13"
     name = "自动飞行数据"
+    display_name = "自动飞行数据"
+    parser_version = "V13"
+    protocol_family = "auto_flight"
     supported_ports: List[int] = []
 
     OUTPUT_COLUMNS = [

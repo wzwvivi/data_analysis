@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
 from .base import BaseParser, ParserRegistry, FieldLayout
-from .bms800v_parser import _can_frame_valid
+from .bms800v_parser import _can_frame_valid, _extract_can_data_from_frame
 
 _DATA_DIR = Path(__file__).parent
 
@@ -60,6 +60,9 @@ def _extract_intel(data: bytes, startbit: int, length: int) -> int:
 class MCUParser(BaseParser):
     parser_key = "mcu_v6.0"
     name = "MCU电推电驱"
+    display_name = "MCU 电推电驱"
+    parser_version = "V6.0"
+    protocol_family = "mcu"
     supported_ports: List[int] = _ALL_PORTS
 
     def can_parse_port(self, port: int) -> bool:
@@ -106,7 +109,7 @@ class MCUParser(BaseParser):
                 continue
 
             frame_bytes = payload[byte_offset: byte_offset + 16]
-            can_data = frame_bytes[8:16]
+            can_data = _extract_can_data_from_frame(frame_bytes)
 
             info = _MESSAGES.get(expected_cid)
             if not info:

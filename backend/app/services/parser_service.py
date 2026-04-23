@@ -75,17 +75,22 @@ class ParserService:
         selected_devices: List[str] = None,
         device_protocol_version_map: Optional[Dict[str, int]] = None,
     ) -> ParseTask:
-        """创建解析任务
+        """创建解析任务（Phase 7：主路径走 device_protocol_version_map）。
 
-        仅新模式: device_parser_map = {"设备名": parser_profile_id, ...}
-        device_protocol_version_map = {"parser_family": device_protocol_version_id}
+        - ``device_protocol_version_map``：``{parser_family: device_protocol_version_id}``，
+          新前端应只传这个字段。parser_service 会按 version.parser_key 实例化 parser。
+        - ``device_parser_map``：``{device_name: parser_profile_id}``，老字段。
+          为了让旧版前端、以及老任务"重新解析"仍然可用，这里保留读入，
+          但至少要有两者之一，否则直接拒绝建任务。
         """
-        if not device_parser_map:
-            raise ValueError("已禁用旧模式，create_task 必须提供 device_parser_map")
+        if not device_parser_map and not device_protocol_version_map:
+            raise ValueError(
+                "create_task 必须提供 device_protocol_version_map 或 device_parser_map"
+            )
         task = ParseTask(
             filename=filename,
             file_path=file_path,
-            device_parser_map=device_parser_map,
+            device_parser_map=device_parser_map or None,
             protocol_version_id=protocol_version_id,
             selected_ports=selected_ports,
             selected_devices=selected_devices,
@@ -675,49 +680,6 @@ class ParserService:
                         print(f"[Parser] Bundle v{task.protocol_version_id} 无法生成: {exc}")
                         runtime_bundle = None
 
-            # 设备协议 Bundle 加载（按 parser_family 分组，来自 ParseTask.device_protocol_version_map）
-            # 老任务（或用户没选）时回落到「取该 parser_family 的最新 Available 版本」
-            device_bundle_by_family: Dict[str, Any] = {}
-            dpv_map_raw: Dict[str, int] = dict(task.device_protocol_version_map or {})
-            device_families_needed: set = set()
-            for pid in set(int(v) for v in task.device_parser_map.values() if v is not None):
-                profile_dv = await self.get_parser_profile(pid)
-                if profile_dv and profile_dv.protocol_family:
-                    device_families_needed.add(profile_dv.protocol_family)
-
-            if device_families_needed:
-                from .device_protocol_service import (
-                    get_active_device_version_by_parser_family,
-                )
-
-                for fam in device_families_needed:
-                    dv_id = dpv_map_raw.get(fam)
-                    if dv_id is None:
-                        fallback = await get_active_device_version_by_parser_family(
-                            self.db, fam
-                        )
-                        if fallback is not None:
-                            dv_id = fallback.id
-                            print(
-                                f"[Parser] device_bundle 回落：parser_family={fam} "
-                                f"→ version_id={dv_id}（最新 Available）"
-                            )
-                    if dv_id is None:
-                        continue
-                    b = try_load_device_bundle(int(dv_id))
-                    if b is not None:
-                        device_bundle_by_family[fam] = b
-                        print(
-                            f"[Parser] 已加载 device_bundle family={fam} "
-                            f"v{dv_id} (labels={len(b.labels)})"
-                        )
-                    else:
-                        print(
-                            f"[Parser] device_bundle 加载失败 family={fam} "
-                            f"v{dv_id} — 该 family 的 429 word 将整体跳过 "
-                            f"（bundle 为 ARINC429 解析唯一来源）"
-                        )
-
             # 获取所有端口定义
             port_device_map: Dict[int, str] = {}
             if task.protocol_version_id:
@@ -730,67 +692,177 @@ class ParserService:
                         port_device_map[port.port_number] = port.message_name
                     elif port.description:
                         port_device_map[port.port_number] = port.description
-            
-            # 获取设备到端口映射
+
+            # 获取设备到端口映射 + 设备到 parser_family 映射（新主路径需要）
             device_port_map: Dict[str, List[int]] = {}
+            device_family_map: Dict[str, str] = {}
             if task.protocol_version_id:
                 device_port_map = await self.protocol_service.get_device_port_mapping(task.protocol_version_id)
-            
-            # =============== 构建解析计划 ===============
-            # 合并同一个 parser 的端口，避免重复读取文件
-            # merged_plan: {pid: (parser_instance, set_of_ports, [labels])}
-            merged_plan: Dict[int, tuple] = {}
-            
-            if not task.device_parser_map:
-                await self.update_task_status(task_id, "failed", error_message="已禁用旧模式：任务缺少 device_parser_map")
+                # get_devices_with_family 顺带推断 parser_family，我们复用
+                devs_with_fam = await self.protocol_service.get_devices_with_family(task.protocol_version_id)
+                for d in devs_with_fam:
+                    fam = (d.get("protocol_family") or "").strip()
+                    if fam:
+                        device_family_map[d["device_name"]] = fam
+
+            # =============== 构建解析计划（Phase 7：device_protocol_version_map 为主路径） ===============
+            # 算法：
+            #   1. 确定要解析的 (parser_family → version_id) 映射：
+            #      - 优先取 task.device_protocol_version_map（新任务路径）
+            #      - 老任务回落：扫 device_parser_map 的 ParserProfile，按其 protocol_family
+            #        查 Available 最新版本。
+            #   2. 对每个 family：
+            #      - 加载 version，拿 version.parser_key
+            #      - ParserRegistry.create(parser_key)
+            #      - 注入 runtime_bundle（TSN 网络配置）+ device_bundle（版本化的 429 labels）
+            #   3. 把要解析的设备端口按 device_family_map 分配到对应 parser_key。
+            # merged_plan key 是字符串 parser_key；同一 parser_key 不会跨 family 复用。
+            merged_plan: Dict[str, tuple] = {}
+            device_bundle_by_family: Dict[str, Any] = {}
+            families_to_parse: Dict[str, int] = {}
+            # 记住每个 family 选中的设备（用于端口分配）
+            selected_devices_by_family: Dict[str, List[str]] = {}
+
+            # 1a) 新任务：task.device_protocol_version_map
+            dpv_map_raw: Dict[str, int] = {
+                f: int(v)
+                for f, v in (task.device_protocol_version_map or {}).items()
+                if v is not None
+            }
+            families_to_parse.update(dpv_map_raw)
+
+            # 1b) 老任务回落：device_parser_map 的 profile.protocol_family
+            legacy_pid_to_family: Dict[int, str] = {}
+            if task.device_parser_map:
+                from .device_protocol_service import (
+                    get_active_device_version_by_parser_family,
+                )
+                for dev_name, pid in task.device_parser_map.items():
+                    if pid is None:
+                        continue
+                    pid_int = int(pid)
+                    profile_fb = await self.get_parser_profile(pid_int)
+                    if not profile_fb or not profile_fb.protocol_family:
+                        continue
+                    fam = profile_fb.protocol_family
+                    legacy_pid_to_family[pid_int] = fam
+                    selected_devices_by_family.setdefault(fam, []).append(dev_name)
+                    if fam not in families_to_parse:
+                        fb_ver = await get_active_device_version_by_parser_family(
+                            self.db, fam
+                        )
+                        if fb_ver is not None:
+                            families_to_parse[fam] = fb_ver.id
+                            print(
+                                f"[Parser] 老任务回落：parser_family={fam} "
+                                f"→ version_id={fb_ver.id}（最新 Available）"
+                            )
+
+            # 1c) 新任务：通过 device_family_map + selected_devices 反推每个 family 选中的设备
+            task_selected_devices = list(task.selected_devices or [])
+            if dpv_map_raw and task_selected_devices:
+                for dev_name in task_selected_devices:
+                    fam = device_family_map.get(dev_name)
+                    if fam and fam in dpv_map_raw:
+                        selected_devices_by_family.setdefault(fam, []).append(dev_name)
+
+            if not families_to_parse:
+                await self.update_task_status(
+                    task_id,
+                    "failed",
+                    error_message="任务既无 device_protocol_version_map 也无 device_parser_map，无法构建解析计划",
+                )
                 return False
-            print(f"[Parser] 使用 device_parser_map 模式")
-            for dev_name, pid in task.device_parser_map.items():
-                pid = int(pid)
-                dev_ports = device_port_map.get(dev_name, [])
-                if not dev_ports:
-                    print(f"[Parser]   设备 {dev_name}: 无对应端口，跳过")
+
+            # 2) 为每个 family 加载 version，实例化 parser，注入 bundle
+            from app.models.device_protocol import DeviceProtocolVersion  # noqa: WPS433
+            print(f"[Parser] 构建解析计划（families={list(families_to_parse.keys())}）")
+            for fam, version_id in families_to_parse.items():
+                ver_row = await self.db.execute(
+                    select(DeviceProtocolVersion).where(
+                        DeviceProtocolVersion.id == int(version_id)
+                    )
+                )
+                ver = ver_row.scalar_one_or_none()
+                if ver is None:
+                    print(f"[Parser]   警告: family={fam} version_id={version_id} 不存在，跳过")
                     continue
-                
-                if pid not in merged_plan:
-                    profile = await self.get_parser_profile(pid)
-                    if not profile:
-                        print(f"[Parser]   警告: 解析器 {pid} 不存在，跳过设备 {dev_name}")
+                parser_key = (ver.parser_key or "").strip()
+                if not parser_key:
+                    print(
+                        f"[Parser]   警告: family={fam} version_id={version_id} 未绑定 parser_key，"
+                        f"跳过（请在设备协议管理中配置）"
+                    )
+                    continue
+                if parser_key in merged_plan:
+                    # 两个 family 共用同一个 parser 是不应该发生的，但幂等处理
+                    print(
+                        f"[Parser]   注意: parser_key={parser_key} 已被前一个 family 占用，跳过 family={fam}"
+                    )
+                    continue
+                parser = ParserRegistry.create(parser_key)
+                if parser is None:
+                    print(f"[Parser]   警告: parser_key={parser_key} 未注册，跳过 family={fam}")
+                    continue
+                try:
+                    parser.set_bundle(runtime_bundle)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[Parser]   警告: {parser_key} set_bundle 失败: {exc}")
+                dev_b = try_load_device_bundle(int(ver.id))
+                if dev_b is not None:
+                    device_bundle_by_family[fam] = dev_b
+                    set_dev = getattr(parser, "set_device_bundle", None)
+                    if callable(set_dev):
+                        try:
+                            set_dev(dev_b)
+                            print(
+                                f"[Parser]   {parser_key} (family={fam}) "
+                                f"<- device_bundle v{ver.id} (labels={len(dev_b.labels)})"
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            print(
+                                f"[Parser]   警告: {parser_key} set_device_bundle 失败: {exc}"
+                            )
+                else:
+                    print(
+                        f"[Parser]   警告: family={fam} version_id={ver.id} 的 device_bundle 加载失败 "
+                        f"— 该 family 的 429 word 将整体跳过（bundle 为 ARINC429 解析唯一来源）"
+                    )
+                meta = ParserRegistry.metadata(parser_key) or {}
+                display_name = meta.get("display_name") or parser_key
+                merged_plan[parser_key] = (parser, set(), [], display_name, fam)
+
+            # 3) 端口分配：把每个 family 选中的设备端口加到对应 parser_key 的 plan
+            for parser_key, (parser, ports_set, dev_labels, display_name, fam) in list(merged_plan.items()):
+                devs = selected_devices_by_family.get(fam, [])
+                if not devs:
+                    print(f"[Parser]   family={fam} 未选中任何设备 → parser_key={parser_key} 无端口可解析")
+                    continue
+                for dev_name in devs:
+                    dev_ports = device_port_map.get(dev_name, [])
+                    if not dev_ports:
+                        print(f"[Parser]   设备 {dev_name} 在 TSN 网络配置里没有端口，跳过")
                         continue
-                    parser = ParserRegistry.create(profile.parser_key)
-                    if not parser:
-                        print(f"[Parser]   警告: 解析器 {profile.parser_key} 未注册")
-                        continue
-                    # MR4: 注入版本化 Bundle（parser 内部按需读取 arinc_labels / can_frames）
-                    try:
-                        parser.set_bundle(runtime_bundle)
-                    except Exception as exc:
-                        print(f"[Parser]   警告: {profile.parser_key} set_bundle 失败: {exc}")
-                    # TSN 对齐：按 parser_family 注入设备协议 bundle（供 arinc429 parser _get_label_def 消费）
-                    dev_b = device_bundle_by_family.get(profile.protocol_family or "")
-                    if dev_b is not None:
-                        set_dev = getattr(parser, "set_device_bundle", None)
-                        if callable(set_dev):
-                            try:
-                                set_dev(dev_b)
-                            except Exception as exc:  # noqa: BLE001
-                                print(
-                                    f"[Parser]   警告: {profile.parser_key} "
-                                    f"set_device_bundle 失败: {exc}"
-                                )
-                    merged_plan[pid] = (parser, set(), [], profile.name)
-                
-                merged_plan[pid][1].update(dev_ports)
-                merged_plan[pid][2].append(dev_name)
-                print(f"[Parser]   {dev_name} -> {merged_plan[pid][3]}: 端口 {sorted(dev_ports)}")
-            
+                    ports_set.update(dev_ports)
+                    dev_labels.append(dev_name)
+                    print(
+                        f"[Parser]   {dev_name} -> {display_name} "
+                        f"(parser_key={parser_key}): 端口 {sorted(dev_ports)}"
+                    )
+
+            # 过滤掉未分配到任何端口的 parser（避免误走）
+            for k in list(merged_plan.keys()):
+                if not merged_plan[k][1]:
+                    print(f"[Parser]   parser_key={k} 无端口，从计划中移除")
+                    merged_plan.pop(k)
+
             if not merged_plan:
                 await self.update_task_status(task_id, "failed", error_message="未能构建有效的解析计划")
                 return False
             
             # 汇总所有需要解析的端口
             all_target_ports = set()
-            for _, (_, ports, _, _) in merged_plan.items():
+            for _, (_, ports, _, _, _) in merged_plan.items():
                 all_target_ports.update(ports)
             
             target_ports_list = sorted(all_target_ports)
@@ -828,14 +900,19 @@ class ParserService:
             
             await self.update_task_status(task_id, "processing", progress=95)
 
-            # --- 辅助：从溢出文件 + 内存中合并某个 (pid, port) 的全部记录 ---
-            def _load_full_port(pid_: int, port_: int) -> List[Dict]:
+            # --- 辅助：从溢出文件 + 内存中合并某个 (parser_key, port) 的全部记录 ---
+            def _spill_slug(pk: str) -> str:
+                """parser_key 中可能有 '.'，这里统一替换为 '_' 以作文件名。"""
+                return pk.replace(".", "_").replace("/", "_")
+
+            def _load_full_port(pk_: str, port_: int) -> List[Dict]:
                 """将溢出文件中的记录读回并与内存记录合并，替换 all_parsed_data 中的列表。
                 读回后删除溢出文件，避免 _save_results 重复读取。"""
-                mem_recs = all_parsed_data.get(pid_, {}).get(port_, [])
+                mem_recs = all_parsed_data.get(pk_, {}).get(port_, [])
                 if not spill_dir:
                     return mem_recs
-                s_files = sorted(spill_dir.glob(f"spill_{pid_}_{port_}_*.parquet"))
+                slug = _spill_slug(pk_)
+                s_files = sorted(spill_dir.glob(f"spill_{slug}_{port_}_*.parquet"))
                 if not s_files:
                     return mem_recs
                 reloaded: List[Dict] = []
@@ -844,25 +921,23 @@ class ParserService:
                     reloaded.extend(t.to_pylist())
                     sf.unlink(missing_ok=True)
                 reloaded.extend(mem_recs)
-                all_parsed_data.setdefault(pid_, {})[port_] = reloaded
+                all_parsed_data.setdefault(pk_, {})[port_] = reloaded
                 return reloaded
 
             # FCC 后处理：为每行 FCC 记录回填当前主飞控，同时构建 ATG 核对所需的事件列表
-            fcc_pid = None
-            for pid, (parser, _, _, _) in merged_plan.items():
-                if pid in all_parsed_data:
-                    profile_tmp = await self.get_parser_profile(pid)
-                    if profile_tmp and (profile_tmp.protocol_family or "").lower() == "fcc":
-                        fcc_pid = pid
-                        break
+            fcc_pk: Optional[str] = None
+            for pk_, (_, _, _, _, fam_) in merged_plan.items():
+                if pk_ in all_parsed_data and (fam_ or "").lower() == "fcc":
+                    fcc_pk = pk_
+                    break
 
             main_fcc_changes: List[Dict[str, Any]] = []
             irs_selection_events: List[Dict[str, Any]] = []
 
-            if fcc_pid and fcc_pid in all_parsed_data:
+            if fcc_pk and fcc_pk in all_parsed_data:
                 fcc_all_rows: List[Dict[str, Any]] = []
-                for port_fcc in list(all_parsed_data[fcc_pid].keys()):
-                    recs_fcc = _load_full_port(fcc_pid, port_fcc)
+                for port_fcc in list(all_parsed_data[fcc_pk].keys()):
+                    recs_fcc = _load_full_port(fcc_pk, port_fcc)
                     fcc_all_rows.extend(recs_fcc)
                 fcc_all_rows.sort(key=lambda x: x.get("timestamp", 0))
 
@@ -892,23 +967,22 @@ class ParserService:
                       f"{len(main_fcc_changes)} 次主飞控变更, {len(irs_selection_events)} 次 IRS 通道事件")
 
             # ATG 核对列
-            atg_pid = None
-            for pid, (parser, _, _, _) in merged_plan.items():
-                if parser.parser_key == "atg_cpe_v20260402" and pid in all_parsed_data:
-                    atg_pid = pid
+            atg_pk: Optional[str] = None
+            for pk_, (parser, _, _, _, fam_) in merged_plan.items():
+                if (fam_ or "").lower() == "atg" and pk_ in all_parsed_data:
+                    atg_pk = pk_
                     break
-            if atg_pid is not None:
+            if atg_pk is not None:
                 irs_data_by_key: Dict[str, List[Dict[str, Any]]] = {}
                 rtk_data_all: List[Dict[str, Any]] = []
-                for pid2, (parser2, _, _, _) in merged_plan.items():
-                    profile2 = await self.get_parser_profile(pid2)
-                    family2 = (profile2.protocol_family or "").lower() if profile2 else ""
+                for pk2, (parser2, _, _, _, fam2) in merged_plan.items():
+                    family2 = (fam2 or "").lower()
                     if family2 not in {"irs", "rtk"}:
                         continue
-                    if pid2 not in all_parsed_data:
+                    if pk2 not in all_parsed_data:
                         continue
-                    for port2 in list(all_parsed_data[pid2].keys()):
-                        recs2 = _load_full_port(pid2, port2)
+                    for port2 in list(all_parsed_data[pk2].keys()):
+                        recs2 = _load_full_port(pk2, port2)
                         if not recs2:
                             continue
                         sorted_recs = sorted(recs2, key=lambda x: x.get("timestamp", 0))
@@ -923,8 +997,8 @@ class ParserService:
                     irs_data_by_key[k] = sorted(irs_data_by_key[k], key=lambda x: x.get("timestamp", 0))
                 rtk_data_all = sorted(rtk_data_all, key=lambda x: x.get("timestamp", 0))
 
-                for port_number in list(all_parsed_data[atg_pid].keys()):
-                    records = _load_full_port(atg_pid, port_number)
+                for port_number in list(all_parsed_data[atg_pk].keys()):
+                    records = _load_full_port(atg_pk, port_number)
                     if records:
                         print(f"[Parser] ATG 端口 {port_number}: 计算核对列 ({len(records)} 行)...")
                         self.build_atg_check_column(
@@ -939,22 +1013,25 @@ class ParserService:
                 print(f"[Parser] ATG 核对列计算完成")
 
             # 保存结果（进度 96% → 99%）
-            save_items = [
-                (pid, port_number, records)
-                for pid, parsed_data in all_parsed_data.items()
-                for port_number, records in parsed_data.items()
-                if records or (spill_dir and list(spill_dir.glob(f"spill_{pid}_{port_number}_*.parquet")))
-            ]
+            save_items = []
+            for pk_, parsed_data in all_parsed_data.items():
+                slug = _spill_slug(pk_)
+                for port_number, records in parsed_data.items():
+                    has_spill = bool(
+                        spill_dir and list(spill_dir.glob(f"spill_{slug}_{port_number}_*.parquet"))
+                    )
+                    if records or has_spill:
+                        save_items.append((pk_, port_number, records))
             save_total = len(save_items) or 1
 
-            for save_idx, (pid, port_number, records) in enumerate(save_items):
-                profile = await self.get_parser_profile(pid)
-                profile_name = profile.name if profile else f"Parser-{pid}"
-                parser_inst = merged_plan[pid][0] if pid in merged_plan else None
+            for save_idx, (pk_, port_number, records) in enumerate(save_items):
+                plan_entry = merged_plan.get(pk_)
+                parser_inst = plan_entry[0] if plan_entry else None
+                display_name = plan_entry[3] if plan_entry else pk_
 
                 result_file, row_count = await self._save_results(
                     task_id, port_number, records,
-                    parser_id=pid, parser=parser_inst,
+                    parser_slug=_spill_slug(pk_), parser=parser_inst,
                     spill_dir=spill_dir,
                 )
 
@@ -963,9 +1040,9 @@ class ParserService:
                 parse_result = ParseResult(
                     task_id=task_id,
                     port_number=port_number,
-                    message_name=f"{profile_name} - Port {port_number}",
-                    parser_profile_id=pid,
-                    parser_profile_name=profile_name,
+                    message_name=f"{display_name} - Port {port_number}",
+                    parser_profile_id=None,  # Phase 7：不再引用 parser_profiles 表
+                    parser_profile_name=display_name,
                     source_device=source_device,
                     record_count=row_count,
                     result_file=result_file,
@@ -977,8 +1054,8 @@ class ParserService:
 
                 # 释放已保存端口的内存，让 GC 尽早回收
                 del records
-                if pid in all_parsed_data and port_number in all_parsed_data[pid]:
-                    del all_parsed_data[pid][port_number]
+                if pk_ in all_parsed_data and port_number in all_parsed_data[pk_]:
+                    del all_parsed_data[pk_][port_number]
 
                 save_pct = 96 + int((save_idx + 1) / save_total * 3)
                 await self.update_task_status(task_id, "processing", progress=min(save_pct, 99))
@@ -1157,13 +1234,18 @@ class ParserService:
             return {}
     
     @staticmethod
-    def _spill_records(records: List[Dict], spill_dir: Path, pid: int, port: int,
-                       spill_counts: Dict[Tuple[int, int], int]) -> None:
-        """将内存中的记录溢出到临时 Parquet 文件，然后清空列表。"""
-        key = (pid, port)
+    def _spill_records(records: List[Dict], spill_dir: Path, parser_key: str, port: int,
+                       spill_counts: Dict[Tuple[str, int], int]) -> None:
+        """将内存中的记录溢出到临时 Parquet 文件，然后清空列表。
+
+        ``parser_key`` 可能含点号（如 ``adc_v2.2``），文件名里统一换成 ``_``。
+        ``spill_counts`` 的 key 直接用原始 ``parser_key``，外部读取也使用原串。
+        """
+        key = (parser_key, port)
         idx = spill_counts.get(key, 0)
         spill_counts[key] = idx + 1
-        spill_path = spill_dir / f"spill_{pid}_{port}_{idx}.parquet"
+        slug = parser_key.replace(".", "_").replace("/", "_")
+        spill_path = spill_dir / f"spill_{slug}_{port}_{idx}.parquet"
         table = pa.Table.from_pylist(records)
         pq.write_table(table, str(spill_path))
         records.clear()
@@ -1171,10 +1253,10 @@ class ParserService:
     async def _parse_single_pass(
         self,
         file_path: str,
-        merged_plan: Dict[int, tuple],
+        merged_plan: Dict[str, tuple],
         network_layout: Dict[int, List[FieldLayout]],
         task_id: Optional[int] = None,
-    ) -> Tuple[Dict[int, Dict[int, List[Dict]]], Optional[Path]]:
+    ) -> Tuple[Dict[str, Dict[int, List[Dict]]], Optional[Path]]:
         """单次遍历解析：所有解析器共享一次文件遍历，按端口分发到对应解析器。
         
         当单端口记录数超过 _SPILL_THRESHOLD 时，自动溢出到临时 Parquet 文件
@@ -1182,56 +1264,59 @@ class ParserService:
         
         Args:
             file_path: pcapng/pcap 文件路径
-            merged_plan: {parser_id: (parser, ports_set, dev_labels, profile_name)}
+            merged_plan: {parser_key: (parser, ports_set, dev_labels, display_name, family)}
             network_layout: {port: [FieldLayout, ...]}
             
         Returns:
             (data_dict, spill_dir_or_None)
-            data_dict: {parser_id: {port: [record_dict, ...]}}  -- 内存中剩余记录
+            data_dict: {parser_key: {port: [record_dict, ...]}}  -- 内存中剩余记录
             spill_dir: 溢出临时目录（None 表示无溢出）
         """
         try:
             import dpkt
         except ImportError:
             print("[Parser] dpkt未安装")
-            return {}
-        
-        # 步骤A: 构建端口分发表 {port: (parser, pid, field_layout)}
+            return {}, None
+
+        def _slug(pk: str) -> str:
+            return pk.replace(".", "_").replace("/", "_")
+
+        # 步骤A: 构建端口分发表 {port: (parser, parser_key, field_layout)}
         port_dispatch: Dict[int, tuple] = {}
-        for pid, (parser, plan_ports, dev_labels, profile_name) in merged_plan.items():
+        for pk, (parser, plan_ports, dev_labels, display_name, fam) in merged_plan.items():
             if plan_ports is None:
                 continue
             for port in plan_ports:
                 layout = network_layout.get(port)
-                port_dispatch[port] = (parser, pid, layout)
+                port_dispatch[port] = (parser, pk, layout)
         
         target_set = set(port_dispatch.keys())
         if not target_set:
             print("[Parser] 无目标端口，跳过解析")
-            return {}
+            return {}, None
         
         print(f"[Parser] 单次遍历模式，目标端口({len(target_set)}个): {sorted(target_set)}")
-        dispatched = {pid: set() for pid in merged_plan}
-        for port, (_, pid, _) in port_dispatch.items():
-            dispatched[pid].add(port)
-        for pid, (_, _, dev_labels, profile_name) in merged_plan.items():
-            if pid in dispatched:
-                print(f"[Parser]   {profile_name} ({', '.join(dev_labels)}) -> 端口 {sorted(dispatched[pid])}")
+        dispatched: Dict[str, set] = {pk: set() for pk in merged_plan}
+        for port, (_, pk, _) in port_dispatch.items():
+            dispatched[pk].add(port)
+        for pk, (_, _, dev_labels, display_name, _) in merged_plan.items():
+            if pk in dispatched:
+                print(f"[Parser]   {display_name} ({', '.join(dev_labels)}) -> 端口 {sorted(dispatched[pk])}")
         
         # 初始化结果容器
-        all_parsed_data: Dict[int, Dict[int, List[Dict]]] = {}
-        for pid, (_, plan_ports, _, _) in merged_plan.items():
+        all_parsed_data: Dict[str, Dict[int, List[Dict]]] = {}
+        for pk, (_, plan_ports, _, _, _) in merged_plan.items():
             if plan_ports is None:
                 continue
-            all_parsed_data[pid] = {port: [] for port in plan_ports}
+            all_parsed_data[pk] = {port: [] for port in plan_ports}
         
         # 检测哪些解析器支持拼包模式
-        reassembly_parsers = set()
-        for pid, (parser, _, _, profile_name) in merged_plan.items():
+        reassembly_parsers: set = set()
+        for pk, (parser, _, _, display_name, _) in merged_plan.items():
             if hasattr(parser, 'feed_packet'):
-                reassembly_parsers.add(pid)
+                reassembly_parsers.add(pk)
                 parser.reset_buffers()
-                print(f"[Parser]   {profile_name}: 使用拼包模式 (feed_packet)")
+                print(f"[Parser]   {display_name}: 使用拼包模式 (feed_packet)")
         
         packet_count = 0
         matched_count = 0
@@ -1249,15 +1334,15 @@ class ParserService:
         # 溢出落盘：当单端口记录数超过阈值时写入临时 Parquet
         import tempfile
         spill_dir: Optional[Path] = None
-        spill_counts: Dict[Tuple[int, int], int] = {}
+        spill_counts: Dict[Tuple[str, int], int] = {}
 
-        def _maybe_spill(pid_: int, port_: int) -> None:
+        def _maybe_spill(pk_: str, port_: int) -> None:
             nonlocal spill_dir
-            recs = all_parsed_data[pid_][port_]
+            recs = all_parsed_data[pk_][port_]
             if len(recs) >= _SPILL_THRESHOLD:
                 if spill_dir is None:
                     spill_dir = Path(tempfile.mkdtemp(prefix="tsn_spill_"))
-                self._spill_records(recs, spill_dir, pid_, port_, spill_counts)
+                self._spill_records(recs, spill_dir, pk_, port_, spill_counts)
 
         try:
             with open(file_path, 'rb') as f:
@@ -1271,8 +1356,9 @@ class ParserService:
                         print("[Parser] 使用pcap格式读取")
                     except Exception as e2:
                         print(f"[Parser] pcap格式也失败: {e2}")
-                        return {}
+                        return {}, None
                 
+                # ↑↑↑ _parse_single_pass 内部：以 parser_key(str) 作为 all_parsed_data 主键 ↑↑↑
                 for timestamp, buf in pcap:
                     packet_count += 1
                     if packet_count % 50000 == 0:
@@ -1364,7 +1450,7 @@ class ParserService:
                         print(f"[Parser]   解析器{pid} 端口{port}: 内存 {mem_n} 条{extra}")
 
             # 清理空端口（内存中无记录且无溢出文件的端口）
-            result: Dict[int, Dict[int, List[Dict]]] = {}
+            result: Dict[str, Dict[int, List[Dict]]] = {}
             for pid, port_data in all_parsed_data.items():
                 cleaned = {}
                 for p, recs in port_data.items():
@@ -1389,7 +1475,7 @@ class ParserService:
         task_id: int,
         port_number: int,
         records: List[Dict],
-        parser_id: int = None,
+        parser_slug: Optional[str] = None,
         parser: Any = None,
         spill_dir: Optional[Path] = None,
     ) -> Tuple[str, int]:
@@ -1398,14 +1484,17 @@ class ParserService:
         如果存在溢出临时文件，先将内存中剩余记录写为临时 Parquet，
         再用 pyarrow.dataset 合并所有分片为最终文件。
 
+        ``parser_slug`` 是从 ``parser_key`` 生成的文件名安全字符串（Phase 7
+        之后用它替代过去的 ``parser_id``）。
+
         Returns:
             (result_file_path, total_row_count)
         """
         result_dir = DATA_DIR / "results" / str(task_id)
         result_dir.mkdir(parents=True, exist_ok=True)
 
-        if parser_id:
-            result_file = result_dir / f"port_{port_number}_parser_{parser_id}.parquet"
+        if parser_slug:
+            result_file = result_dir / f"port_{port_number}_parser_{parser_slug}.parquet"
         else:
             result_file = result_dir / f"port_{port_number}.parquet"
 
@@ -1419,8 +1508,8 @@ class ParserService:
 
         # 收集溢出文件
         spill_files: List[Path] = []
-        if spill_dir and spill_dir.exists():
-            prefix = f"spill_{parser_id}_{port_number}_"
+        if spill_dir and spill_dir.exists() and parser_slug:
+            prefix = f"spill_{parser_slug}_{port_number}_"
             spill_files = sorted(spill_dir.glob(f"{prefix}*.parquet"))
 
         if not spill_files:

@@ -46,6 +46,9 @@ class IRSParser(BaseParser):
     
     parser_key = "irs_v3"
     name = "IRS惯性基准系统"
+    display_name = "IRS 惯性基准系统"
+    parser_version = "V3"
+    protocol_family = "irs"
     supported_ports = []
     
     DEVICE_ID_MAP = {

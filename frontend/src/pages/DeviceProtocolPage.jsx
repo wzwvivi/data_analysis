@@ -372,17 +372,13 @@ function DeviceProtocolPage() {
             >
               {n.title}
             </span>
-            {isDevice && (n.parser_family_hints || []).length > 0 ? (
-              <Tooltip
-                title={`关联解析器: ${(n.parser_profiles || [])
-                  .map((p) => `${p.family}(${p.profile_count})`)
-                  .join(', ')}`}
-              >
+            {isDevice && n.parser_key ? (
+              <Tooltip title={`当前绑定的 Python parser_key：${n.parser_key}`}>
                 <Tag
                   color="gold"
                   style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 6px' }}
                 >
-                  ⛓ {n.parser_family_hints.join(',')}
+                  ⛓ {n.parser_key}
                 </Tag>
               </Tooltip>
             ) : null}
@@ -1483,7 +1479,8 @@ function DeviceProtocolPage() {
     const labels = specDetail.labels_view || []
     const versions = specDetail.versions || []
     const busSpecs = specDetail.bus_specs || []
-    const parserProfiles = specDetail.parser_profiles || []
+    const latestVersionWithParser = versions.find((v) => v.parser_key && v.availability_status === 'Available') || versions.find((v) => v.parser_key)
+    const latestParserKey = latestVersionWithParser?.parser_key || ''
     const hasActiveDraft = drafts.some((d) => ['draft', 'pending'].includes(d.status) && d.spec_id === spec.id)
 
     return (
@@ -1564,29 +1561,13 @@ function DeviceProtocolPage() {
                       </Space>
                     </Descriptions.Item>
                   ) : null}
-                  <Descriptions.Item label="关联解析器" span={2}>
-                    {parserProfiles.length === 0 ? (
-                      <Text type="secondary">（未关联平台解析器）</Text>
+                  <Descriptions.Item label="Python 解析器" span={2}>
+                    {latestParserKey ? (
+                      <Tooltip title="bundle + Python 一对一绑定；修改请去对应版本编辑页">
+                        <Tag color="gold" style={{ margin: 0 }}>⛓ {latestParserKey}</Tag>
+                      </Tooltip>
                     ) : (
-                      <Space size={6} wrap>
-                        {parserProfiles.map((p) => (
-                          <Tooltip
-                            key={p.family}
-                            title={
-                              p.profiles && p.profiles.length
-                                ? p.profiles
-                                    .map((x) => `${x.parser_key} · ${x.name}`)
-                                    .join('\n')
-                                : '暂未找到对应的 parser_profile'
-                            }
-                          >
-                            <Tag color="gold" style={{ margin: 0 }}>
-                              {p.family}
-                              {p.profile_count > 0 ? ` (${p.profile_count})` : ''}
-                            </Tag>
-                          </Tooltip>
-                        ))}
-                      </Space>
+                      <Text type="secondary">（尚未绑定 Python 实现）</Text>
                     )}
                   </Descriptions.Item>
                   <Descriptions.Item label="描述" span={2}>{spec.description || '-'}</Descriptions.Item>

@@ -24,7 +24,9 @@ from ..models import (
     SoftwareConfiguration,
     User,
 )
+from ..config import MAX_UPLOAD_SIZE, UPLOAD_DIR
 from ..services import shared_tsn_service as sts
+from ..services.disk_maintenance import InsufficientDiskSpace, ensure_free_disk
 
 router = APIRouter(prefix="/api/shared-tsn", tags=["平台共享TSN"])
 
@@ -436,21 +438,66 @@ async def upload_shared(
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    """流式接收上传：边读边写盘，内存占用常驻几 MB；超限/磁盘不足立刻 413。"""
     raw = file.filename or "capture.pcapng"
-    data = await file.read()
     legacy = sortie_id is None and asset_type is None
+
+    # 先做 "不依赖文件内容" 的校验，避免先写了几百 MB 才发现参数不对
+    try:
+        sts._validate_shared_upload_meta(
+            filename=raw, asset_type=asset_type, legacy_flat=legacy
+        )
+        if not legacy and not sortie_id:
+            raise ValueError("请选择试验架次")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 磁盘低空间守卫（和其他上传入口统一）
+    try:
+        ensure_free_disk(UPLOAD_DIR)
+    except InsufficientDiskSpace as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+
+    # 流式写盘：chunk 读, 边读边校验大小, 超限立刻清理
+    dest = sts.allocate_shared_storage_path(raw)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    chunk_size = 1024 * 1024  # 1 MB
+    written = 0
+    try:
+        with open(dest, "wb") as out:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_UPLOAD_SIZE:
+                    out.close()
+                    dest.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"文件大小超过限制（最大 {MAX_UPLOAD_SIZE // (1024 ** 3)}GB）",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"上传写盘失败: {exc}") from exc
+
     try:
         await sts.purge_expired_shared_files(db)
-        row = await sts.create_shared_from_upload(
+        row = await sts.create_shared_from_path(
             db,
             filename=raw,
-            file_bytes=data,
+            stored_path=dest,
+            file_size=written,
             uploaded_by_id=admin.id,
             sortie_id=sortie_id,
             asset_type=asset_type,
             legacy_flat=legacy,
         )
     except ValueError as e:
+        # create_shared_from_path 内部已负责清理 dest
         raise HTTPException(status_code=400, detail=str(e))
     if row.video_processing_status == "transcoding":
         background_tasks.add_task(sts.run_hevc_transcode_job, row.id)

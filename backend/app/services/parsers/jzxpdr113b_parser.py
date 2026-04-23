@@ -419,6 +419,9 @@ class JZXPDR113BParser(Arinc429Mixin, BaseParser):
 
     parser_key = "jzxpdr113b_v20260113"
     name = "S模式应答机"
+    display_name = "S模式应答机"
+    parser_version = "20260113"
+    protocol_family = "xpdr"
     supported_ports = []
 
     _LABEL_DEFS = _LABEL_DEFS
@@ -892,6 +895,9 @@ class RawDataParser(BaseParser):
 
     parser_key = "raw_data_parser"
     name = "原始数据解析器"
+    display_name = "原始数据解析器"
+    parser_version = ""
+    protocol_family = ""
     supported_ports = []
 
     def can_parse_port(self, port: int) -> bool:

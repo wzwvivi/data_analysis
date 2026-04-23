@@ -26,8 +26,12 @@ class BaseParser(ABC):
     """解析器基类"""
     
     # 子类需要定义的属性
-    parser_key: str = ""  # 解析器标识
-    name: str = ""  # 解析器名称
+    parser_key: str = ""  # 解析器标识（ParserRegistry 注册名，全局唯一）
+    name: str = ""  # 解析器名称（历史字段，保留兼容）
+    # Phase 7：统一的"类元数据"。旧 ParserProfile 表下线后，display_name / version
+    # 作为 ParserRegistry 返回的权威元信息，供 API / UI 展示。
+    display_name: str = ""  # 人类可读名（如"大气数据系统"），为空时回落到 parser_key
+    parser_version: str = ""  # 代码版本（如 "V2.2"），可选
     supported_ports: List[int] = []  # 支持的端口列表
     # MR3 opt-in：子类若声明 protocol_family 且 supported_ports 为空，
     # can_parse_port 将回落到 generated.port_registry 动态查找。
@@ -133,3 +137,37 @@ class ParserRegistry:
     def list_parsers(cls) -> List[str]:
         """列出所有已注册的解析器"""
         return list(cls._parsers.keys())
+
+    @classmethod
+    def metadata(cls, parser_key: str) -> Optional[Dict[str, Any]]:
+        """返回 parser 类元数据（替代已下线的 parser_profiles 表）。
+
+        字段语义：
+        - parser_key：唯一标识
+        - display_name：人类可读名（为空时回落到 parser_key）
+        - parser_version：代码版本标签（可选）
+        - protocol_family：协议族（如 adc / brake / ra / xpdr）
+        """
+        parser_class = cls.get(parser_key)
+        if parser_class is None:
+            return None
+        disp = (getattr(parser_class, "display_name", "") or "").strip()
+        if not disp:
+            disp = (getattr(parser_class, "name", "") or "").strip() or parser_key
+        return {
+            "parser_key": parser_class.parser_key,
+            "display_name": disp,
+            "parser_version": (getattr(parser_class, "parser_version", "") or "").strip(),
+            "protocol_family": (getattr(parser_class, "protocol_family", "") or "").strip(),
+        }
+
+    @classmethod
+    def list_metadata(cls) -> List[Dict[str, Any]]:
+        """列出所有 parser 的元数据（给前端 parser_key 下拉用）。"""
+        items: List[Dict[str, Any]] = []
+        for key in cls._parsers:
+            meta = cls.metadata(key)
+            if meta:
+                items.append(meta)
+        items.sort(key=lambda x: (x["protocol_family"] or "", x["parser_key"]))
+        return items

@@ -140,6 +140,9 @@ _ALL_COLUMNS: List[str] = list(dict.fromkeys(
 class FMSFCCParser(BaseParser):
     parser_key = "fms_fcc_v1.5"
     name = "飞管-飞控交互数据"
+    display_name = "飞管-飞控交互数据"
+    parser_version = "V1.5"
+    protocol_family = "fms_fcc"
     supported_ports: List[int] = []
 
     OUTPUT_COLUMNS = _ALL_COLUMNS

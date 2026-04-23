@@ -124,15 +124,11 @@ async def preview_device_identity(
 @router.get("/specs")
 async def list_specs(
     family: Optional[str] = Query(None),
-    include_parsers: bool = Query(
-        True,
-        description="是否把 parser_family_hints 解析成对应的 parser_profiles 一起返回",
-    ),
     db: AsyncSession = Depends(get_db),
 ):
-    items = await dps.list_specs(
-        db, family=family, include_counts=True, include_parsers=include_parsers
-    )
+    """列出设备 spec。Phase 7 起不再附带 ``parser_profiles`` 展开，设备节点
+    直接从 ``latest_parser_key`` 得到所绑 Python parser。"""
+    items = await dps.list_specs(db, family=family, include_counts=True)
     return {"total": len(items), "items": items}
 
 
@@ -164,9 +160,9 @@ async def get_spec_detail(
     handler = get_family_handler(spec.protocol_family)
     latest_spec_json = versions[0].spec_json if versions else None
     spec_dict = dps._spec_to_dict(spec, include_counts=False)
-    hints = list(spec_dict.get("parser_family_hints") or [])
-    parser_profiles = await dps.resolve_parser_profiles_for_hints(db, hints)
     bus_specs = await dps.list_bus_specs_for_device(db, spec.device_id)
+    # Phase 7：不再展开 parser_profiles；前端若要展示所绑 Python parser，
+    # 直接从各 version 的 parser_key + /api/parsers/registry 元数据拼。
     return {
         "spec": spec_dict,
         "versions": [dps.serialize_version(v) for v in filtered],
@@ -175,7 +171,6 @@ async def get_spec_detail(
         "latest_spec_json": latest_spec_json,
         "latest_version_id": versions[0].id if versions else None,
         "latest_version_name": versions[0].version_name if versions else None,
-        "parser_profiles": parser_profiles,
         "bus_specs": bus_specs,
     }
 
@@ -427,9 +422,30 @@ async def download_version_bundle(
 # ═════════════════════════ Available 列表（供用户在上传页下拉使用）═════════════════════════
 
 
+@router.get("/parsers/registry")
+async def list_parser_registry() -> Dict[str, Any]:
+    """列出所有已注册的 Python parser 元数据。
+
+    Phase 7：取代旧 ``/api/parse/profiles``。数据来源是 ``ParserRegistry``
+    的类属性（``display_name / parser_version / protocol_family``），
+    不再查 ``parser_profiles`` 表。
+
+    前端用途：
+    - 设备协议管理页编辑 version 时，挑选绑定的 parser_key。
+    - 上传页只需要 version 的 ``parser_key`` 字段（已经带在 version 对象里），
+      不再主动查这个接口。
+    """
+    from app.services.parsers import ParserRegistry  # noqa: WPS433
+    items = ParserRegistry.list_metadata()
+    return {"total": len(items), "items": items}
+
+
 @router.get("/versions/available")
 async def list_available_versions(
-    parser_family: Optional[str] = Query(default=None, description="parser_family_hints 过滤"),
+    parser_family: Optional[str] = Query(
+        default=None,
+        description="按 Python parser family 过滤（match ParserRegistry.protocol_family）",
+    ),
     ata: Optional[str] = Query(default=None, description="ATA 码过滤（例如 ata32）"),
     protocol_family: Optional[str] = Query(
         default=None, description="协议族过滤（arinc429 / can / rs422）"

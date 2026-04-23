@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ...models import DeviceProtocolSpec, DeviceProtocolVersion
+from ...models import DeviceProtocolVersion
 from ..protocol_family.arinc429 import Arinc429FamilyHandler
 from .loader import (
     device_bundle_path_for,
@@ -85,20 +85,23 @@ async def _load_device_version(
     return pv
 
 
-def _pick_parser_family(spec: Optional[DeviceProtocolSpec]) -> Optional[str]:
-    """从 parser_family_hints 里取第一个非空提示作为 parser_family。"""
-    if spec is None:
+def _pick_parser_family(pv: DeviceProtocolVersion) -> Optional[str]:
+    """从 ``DeviceProtocolVersion.parser_key`` 反查 ``ParserRegistry`` 里的
+    ``protocol_family`` 作为 bundle 的 parser_family（Phase 7）。
+
+    取不到时返回 None——此时 bundle 的 parser_family 留空，运行期 parser
+    依然会按自己代码里的 ``protocol_family`` 类属性工作，互不影响。
+    """
+    from app.services.parsers import ParserRegistry  # 局部 import 避免循环
+
+    key = (getattr(pv, "parser_key", None) or "").strip()
+    if not key:
         return None
-    hints = getattr(spec, "parser_family_hints", None)
-    if not hints:
+    meta = ParserRegistry.metadata(key)
+    if not meta:
         return None
-    if isinstance(hints, (list, tuple)):
-        for h in hints:
-            if h:
-                return str(h)
-    if isinstance(hints, str) and hints.strip():
-        return hints.strip()
-    return None
+    fam = (meta.get("protocol_family") or "").strip()
+    return fam or None
 
 
 # ── spec_json → DeviceBundle 投影 ───────────────────────────────────────
@@ -382,7 +385,7 @@ async def generate_device_bundle(
         )
         normalized = dict(pv.spec_json or {})
 
-    parser_family = _pick_parser_family(pv.spec)
+    parser_family = _pick_parser_family(pv)
     bundle = build_device_bundle(pv, normalized, parser_family=parser_family)
 
     payload = device_bundle_to_dict(bundle)

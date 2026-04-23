@@ -696,20 +696,9 @@ async def init_db():
                         "ON device_protocol_specs(protocol_family, ata_code)"
                     )
                 )
-                # 幂等补列：parser_family_hints — 关联平台 parser_profiles 的 family 列表
-                spec_cols = {
-                    row[1]
-                    for row in sync_conn.execute(
-                        text("PRAGMA table_info(device_protocol_specs)")
-                    ).fetchall()
-                }
-                if 'parser_family_hints' not in spec_cols:
-                    print("[DB] ALTER device_protocol_specs ADD COLUMN parser_family_hints")
-                    sync_conn.execute(
-                        text(
-                            "ALTER TABLE device_protocol_specs ADD COLUMN parser_family_hints JSON"
-                        )
-                    )
+                # Phase 7：parser_family_hints 字段已下线，迁移脚本不再补列。
+                # 老库里可能残留这一列（SQLite 不支持 DROP COLUMN），ORM 不再声明
+                # 该属性，相当于只读历史数据，读写路径都不会命中它。
             if 'device_protocol_versions' in inspector.get_table_names():
                 sync_conn.execute(
                     text(
@@ -736,6 +725,8 @@ async def init_db():
                     ("deprecated_at", "DATETIME"),
                     ("deprecated_by", "VARCHAR(64)"),
                     ("deprecation_reason", "TEXT"),
+                    # Phase 7：parser_key 下沉到 version（bundle ↔ Python 一对一）
+                    ("parser_key", "VARCHAR(100)"),
                 ]
                 for col_name, col_ddl in _lifecycle_cols:
                     if col_name not in ver_cols:
@@ -749,6 +740,12 @@ async def init_db():
                     text(
                         "CREATE INDEX IF NOT EXISTS ix_dev_ver_availability "
                         "ON device_protocol_versions(availability_status)"
+                    )
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_dev_ver_parser_key "
+                        "ON device_protocol_versions(parser_key)"
                     )
                 )
             if 'device_protocol_drafts' in inspector.get_table_names():

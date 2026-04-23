@@ -64,6 +64,9 @@ def _verify_checksum(data: bytes) -> bool:
 class FMSIRSForwardParser(BaseParser):
     parser_key = "fms_irs_fwd_v0.4"
     name = "飞管给惯导转发数据"
+    display_name = "飞管给惯导转发数据"
+    parser_version = "V0.4"
+    protocol_family = "fms_irs_fwd"
     supported_ports: List[int] = _ALL_PORTS
 
     OUTPUT_COLUMNS = OUTPUT_COLUMNS
