@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..background_jobs import run_auto_flight_analysis_task_job
 from ..config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, UPLOAD_DIR
+from ..services.disk_maintenance import InsufficientDiskSpace, ensure_free_disk
 from ..database import get_db
 from ..deps import get_current_user
 from ..services import AutoFlightAnalysisService
@@ -115,6 +116,10 @@ async def upload_standalone(
     suffix = Path(raw_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型，允许: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+    try:
+        ensure_free_disk(UPLOAD_DIR)
+    except InsufficientDiskSpace as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     data = await file.read()
     if len(data) > MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=400, detail="文件超过大小限制")

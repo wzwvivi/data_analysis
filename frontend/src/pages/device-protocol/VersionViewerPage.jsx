@@ -15,6 +15,8 @@ import {
 import { RollbackOutlined, ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { deviceProtocolApi } from '../../services/api'
+import { useAuth } from '../../context/AuthContext'
+import DeviceActivationPanel from './DeviceActivationPanel'
 
 const { Text } = Typography
 
@@ -24,8 +26,12 @@ const FAMILY_LABEL = { arinc429: 'ARINC 429', can: 'CAN', rs422: 'RS422' }
 function VersionViewerPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [version, setVersion] = useState(null)
   const [loading, setLoading] = useState(false)
+  const role = (user?.role || '').trim()
+  const isAdmin = role === 'admin'
+  const canWrite = isAdmin || role === 'device_team'
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -85,6 +91,15 @@ function VersionViewerPage() {
           </Descriptions.Item>
         </Descriptions>
       </Card>
+
+      {version.availability_status === 'PendingCode' ? (
+        <DeviceActivationPanel
+          version={version}
+          canWrite={canWrite}
+          isAdmin={isAdmin}
+          onActivated={load}
+        />
+      ) : null}
 
       <Tabs
         items={[

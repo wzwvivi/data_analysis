@@ -3,16 +3,46 @@ services:
     build: ./backend
     container_name: tsn-backend
     environment:
-      - SERVER_CPU_CORES=2
-      - TASK_PROCESS_WORKERS=1
+      # —— CPU / 并发 ——
+      # 目标机 8 vCPU / 16 GB / 40 GB 磁盘 / 无 Swap；解析并发压到 2，
+      # 其余核心留给 API、前端代理、flight-assistant 以及系统。
+      - SERVER_CPU_CORES=8
+      - TASK_PROCESS_WORKERS=2
+      # —— 解析内存 / IO 调优 ——
+      # 16 GB 内存足够放下 1 GB 级 pcap 单端口的全部 dict，提高 spill 阈值
+      # 可避免"临时 parquet 写入+读回合并"的双倍 IO（典型场景省 10-20% 耗时）
+      - PARSE_SPILL_THRESHOLD=${PARSE_SPILL_THRESHOLD:-500000}
+      # —— 磁盘保护 ——
+      # 结果 parquet 保留天数（超过则在启动/上传时回收），0 表示不自动清理
+      # 默认 0：历史任务永久保留；如需启用自动清理，在 .env 里设 RESULT_RETENTION_DAYS=14
+      - RESULT_RETENTION_DAYS=${RESULT_RETENTION_DAYS:-0}
+      # 上传前剩余磁盘低于此值则拒绝新上传（默认 2 GB）
+      - MIN_FREE_DISK_MB=${MIN_FREE_DISK_MB:-2048}
+      # —— 其他原有配置 ——
       - APP_BASE_DIR=/app_runtime
       # 浏览器打开飞行助手用的绝对 URL；局域网访问时请在 .env 里设 FLIGHT_ASSISTANT_URL=http://<本机IP>:8082
       - FLIGHT_ASSISTANT_URL=${FLIGHT_ASSISTANT_URL:-http://localhost:8082}
+      # 生产环境务必通过 .env 覆盖 JWT_SECRET
+      - JWT_SECRET=${JWT_SECRET:-dev-change-me-use-env-jwt-secret}
     ports:
       - "8081:8081"
     volumes:
       - ./backend-runtime:/app_runtime
     restart: unless-stopped
+    mem_limit: 10g
+    mem_reservation: 2g
+    cpus: "6.0"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   frontend:
     build: ./frontend
@@ -20,8 +50,16 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
 
   flight-assistant:
     build: ./flight_data_webapp
@@ -36,5 +74,13 @@ services:
     volumes:
       - ./backend-runtime:/runtime
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+    mem_limit: 2g
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"

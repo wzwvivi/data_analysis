@@ -2,17 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Switch apt to Aliyun mirror
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null; \
-    apt-get update -qq
+# 不在此镜像内做 apt install，故不再强制换 Debian 源；阿里云源偶发 502 会导致整镜构建失败。
+# 如需国内加速，可在构建机配置 Docker registry mirror 或使用 buildkit 网络代理。
 
-# Switch pip to Aliyun mirror
-RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
-    pip config set global.trusted-host mirrors.aliyun.com
-
+# 使用默认 PyPI，避免国内镜像偶发超时/502；拉长超时与重试以提高构建成功率
+ENV PIP_DEFAULT_TIMEOUT=300
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
+RUN pip install --retries 15 --no-cache-dir -r requirements.txt gunicorn
 
 COPY app.py .
 COPY templates/ templates/

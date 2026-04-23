@@ -20,6 +20,11 @@ class ParseTask(Base):
     parser_profile_ids = Column(JSON, comment="多解析器ID列表(旧字段，兼容)")
     device_parser_map = Column(JSON, comment="设备到解析器映射: {device_name: parser_profile_id}")
     protocol_version_id = Column(Integer, ForeignKey("protocol_versions.id"), nullable=True, comment="TSN网络配置版本ID")
+    device_protocol_version_map = Column(
+        JSON,
+        nullable=True,
+        comment="设备协议版本选择: {parser_family: device_protocol_version_id}，NULL 时按 parser_family 取当前 Available 最新",
+    )
     status = Column(String(20), default="pending", comment="状态: pending/processing/completed/failed/cancelled")
     stage = Column(String(50), nullable=True, comment="解析细分阶段，如 reading/parsing/saving/finalizing")
     selected_ports = Column(JSON, comment="选择解析的端口列表")

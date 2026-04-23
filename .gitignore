@@ -24,6 +24,9 @@ backend-runtime/uploads/
 backend-runtime/data/*.db-journal
 backend-runtime/data/*.db-wal
 backend-runtime/data/*.db-shm
+# 手工/迁移前备份的 SQLite 副本，勿提交（体积大且易含敏感数据）
+backend-runtime/data/*bak*
+backend/_tmp429/
 
 # Local scratch / accidental copies
 backend/debug_task57.py

@@ -31,8 +31,20 @@ print(f"[Config] DATABASE = {DATA_DIR}/tsn_analyzer.db")
 print(f"[Config] DB exists = {(DATA_DIR / 'tsn_analyzer.db').exists()}")
 
 # 文件上传配置
-MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024  # 5GB
+# 目标生产机 40GB 磁盘（剩 ~22GB），单次上传压到 2GB 防止磁盘写满。
+# 需要上传更大文件时，通过环境变量覆盖: MAX_UPLOAD_SIZE_MB=5120 -> 5GB
+_max_upload_mb = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "2048"))
+MAX_UPLOAD_SIZE = _max_upload_mb * 1024 * 1024
 ALLOWED_EXTENSIONS = {".pcapng", ".pcap", ".cap"}
+
+# 解析结果（data/results/<task>/*.parquet）保留天数；0 表示不自动清理（默认永久保留）。
+# 想启用自动清理就在 .env / 环境变量里把 RESULT_RETENTION_DAYS 设成 >0 的天数；
+# 启用后：启动时以及每次新上传前都会触发一次过期回收。
+RESULT_RETENTION_DAYS = int(os.environ.get("RESULT_RETENTION_DAYS", "0"))
+
+# 上传前检查 UPLOAD_DIR 所在磁盘剩余空间；低于该阈值（MB）则拒绝新上传。
+# 默认 2GB。设为 0 表示不检查。
+MIN_FREE_DISK_MB = int(os.environ.get("MIN_FREE_DISK_MB", "2048"))
 
 # 协议库配置
 PROTOCOL_EXCEL_EXTENSIONS = {".xlsx", ".xls"}

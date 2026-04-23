@@ -18,6 +18,7 @@ import {
   Alert,
   Radio,
   Tooltip,
+  Switch,
   message,
 } from 'antd'
 import {
@@ -122,6 +123,7 @@ function normalizeLabel(l) {
     label_oct: String(src.label_oct || '').trim(),
     label_dec: src.label_dec ?? octToDec(src.label_oct),
     name: src.name || '',
+    cn: src.cn || '',
     direction: src.direction || '',
     sources: Array.isArray(src.sources) ? src.sources : [],
     sdi: src.sdi ?? null,
@@ -130,7 +132,16 @@ function normalizeLabel(l) {
     unit: src.unit || '',
     range_desc: src.range_desc || '',
     resolution: src.resolution ?? null,
-    reserved_bits: src.reserved_bits || '',
+    // reserved_bits 支持两种格式：string "10,11" 或 number[] [10, 11]
+    // 编辑器内部统一用 number[]；保存时按需还原。
+    reserved_bits: Array.isArray(src.reserved_bits)
+      ? src.reserved_bits.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n))
+      : typeof src.reserved_bits === 'string' && src.reserved_bits
+      ? src.reserved_bits
+          .split(/[,，\s]+/)
+          .map((s) => parseInt(s, 10))
+          .filter((n) => !isNaN(n))
+      : [],
     notes: src.notes || '',
     discrete_bits: { ...(src.discrete_bits || {}) },
     special_fields: Array.isArray(src.special_fields) ? src.special_fields.map((s) => ({ ...s })) : [],
@@ -482,7 +493,16 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
     if (initialType === 'single') {
       const rawValue = (label?.discrete_bits || {})[bitNum]
       const { name, desc } = readDiscreteBit(rawValue)
-      form.setFieldsValue({ single_name: name, single_desc: desc })
+      const valuesObj =
+        rawValue && typeof rawValue === 'object' && rawValue.values ? rawValue.values : {}
+      const valuesStr = Object.entries(valuesObj)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', ')
+      form.setFieldsValue({
+        single_name: name,
+        single_desc: desc,
+        single_values: valuesStr,
+      })
     } else if (initialType === 'multi') {
       const sf = (label?.special_fields || []).find((x) => {
         const b = x?.data_bits || x?.bits
@@ -521,6 +541,10 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
           bnr_encoding: bf.encoding || 'bnr',
           bnr_sign_bit: bf.sign_bit ?? undefined,
           bnr_sign_style: bf.sign_style || 'bit29_sign_magnitude',
+          bnr_signed:
+            typeof bf.signed === 'boolean'
+              ? bf.signed
+              : !!(bf.sign_bit || bf.sign_style === 'twos_complement' || bf.sign_style === 'in_field_sign'),
           bnr_resolution: bf.resolution ?? undefined,
           bnr_unit: bf.unit || '',
         })
@@ -530,6 +554,7 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
           bnr_bit_hi: bitNum,
           bnr_encoding: 'bnr',
           bnr_sign_style: 'bit29_sign_magnitude',
+          bnr_signed: false,
         })
       }
     }
@@ -599,14 +624,21 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
           <Form.Item name="single_name" label="字段名称" rules={[{ required: true, message: '请输入字段名' }]}>
             <Input placeholder="如：脚蹬状态" />
           </Form.Item>
-          <Form.Item name="single_desc" label="含义说明">
-            <Input placeholder="如：1=解除, 0=正常" />
+          <Form.Item name="single_desc" label="中文含义 (cn)">
+            <Input placeholder="如：脚蹬状态" />
+          </Form.Item>
+          <Form.Item
+            name="single_values"
+            label="值映射 (values)"
+            tooltip="parser 从 bundle 读这个表生成 *_enum 列。支持 = / ＝ / - / : / ： 分隔，逗号/分号/换行分隔多项。例：0=接地, 1=开路 或 0-电压正常，1-电压异常"
+          >
+            <Input placeholder="0=接地, 1=开路   或   0-电压正常, 1-电压异常" />
           </Form.Item>
           <Alert
             type="info"
             showIcon
             style={{ padding: '4px 10px', fontSize: 12 }}
-            message={`保存后写入 discrete_bits[${bitNum}]。已有的结构化 dict（name/cn/values）在显示时会被兼容读取，编辑后统一存为 "字段名: 含义说明"。`}
+            message={`保存后写入 discrete_bits[${bitNum}] = { name, cn, values }。空的 values 表示暂未覆盖，parser 不会生成 _enum 列。`}
           />
         </Form>
       )}
@@ -631,7 +663,7 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
           <Form.Item
             name="multi_values"
             label="枚举值定义（二进制=含义，逗号分隔）"
-            tooltip="如 00=无效, 01=有效, 10=故障, 11=正常"
+            tooltip="支持 = / ＝ / - / : / ： 等分隔符；逗号/分号/换行分多项。如 00=无效, 01=有效, 10=故障, 11=正常；也可 0-起飞, 1-巡航, 2-着陆"
           >
             <Input placeholder="00=无效, 01=有效, 10=故障, 11=正常" />
           </Form.Item>
@@ -663,13 +695,22 @@ function BitEditModal({ open, bitNum, label, onCancel, onSave, onDelete }) {
               ]}
             />
           </Form.Item>
-          <Form.Item name="bnr_sign_bit" label="符号位（可选，有符号数填写 9-29）">
+          <Form.Item
+            name="bnr_signed"
+            label="有符号数 (signed)"
+            tooltip="未勾选：按无符号整数 × resolution 解码；勾选：按下方 sign_style 处理符号位"
+            valuePropName="checked"
+            initialValue={false}
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item name="bnr_sign_bit" label="符号位（in_field_sign 时指定 9-29）">
             <InputNumber min={9} max={29} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item
             name="bnr_sign_style"
             label="符号风格（sign_style）"
-            tooltip="标准 ARINC-429 用 Bit29 sign/magnitude；XPDR 等少量设备用段内补码"
+            tooltip="bit29_sign_magnitude：标准 ARINC-429 Bit29 符号位；twos_complement：段内二补码（XPDR 坐标等）；in_field_sign：段内最高位作符号位"
             initialValue="bit29_sign_magnitude"
           >
             <Select options={SIGN_STYLES} />
@@ -830,19 +871,75 @@ function clearRangeInLabel(label, lo, hi) {
 }
 
 
+/**
+ * 把一个 "key<SEP>value" 片段按首次出现的分隔符拆成 [key, value]。
+ * 支持 = / ＝ / - / ： / : / — / － / → / ⇒ 以及 "key<space>value"（限纯数字 key）。
+ * 遇到 value 里含同种分隔符时只切最前面一次（避免 "0-电压-正常" 被二次拆分）。
+ */
+function _splitKv(pair) {
+  const s = pair.trim()
+  if (!s) return null
+  // 优先级：= → ＝ → ： → : → → → ⇒ → — → － → -
+  const seps = ['=', '＝', '：', ':', '→', '⇒', '—', '－', '-']
+  let idx = -1
+  let sep = ''
+  for (const c of seps) {
+    const i = s.indexOf(c)
+    if (i > 0 && (idx < 0 || i < idx)) {
+      idx = i
+      sep = c
+    }
+  }
+  if (idx < 0) {
+    // 兜底：纯数字 key + 空格 + 任意内容，如 "0 接地"
+    const m = s.match(/^(0x[0-9a-fA-F]+|-?\d+|[01]+)\s+(.+)$/)
+    if (m) return [m[1], m[2].trim()]
+    return null
+  }
+  return [s.slice(0, idx).trim(), s.slice(idx + sep.length).trim()]
+}
+
+/**
+ * 解析 "0=接地, 1=开路" / "0-电压正常，1-电压异常" / "0：无效；1：有效" 这种键值字符串到 {"0": "接地", ...}。
+ * 支持：
+ *   - 对分隔符：`,` / `，` / `;` / `；` / 换行
+ *   - 键值分隔符：`=` / `＝` / `-` / `:` / `：` / `→` / `⇒` / `—`
+ *   - key 支持 10 进制、0x 16 进制、纯二进制（由 parseMultiValues 处理）
+ */
+function parseKvString(str) {
+  const out = {}
+  if (!str) return out
+  String(str)
+    .split(/[,，;；\n]/)
+    .forEach((pair) => {
+      const kv = _splitKv(pair)
+      if (!kv) return
+      const [keyRaw, value] = kv
+      const key = keyRaw.replace(/[（(].*?[）)]$/, '').trim()
+      if (!key || !value) return
+      let n = NaN
+      if (/^0x[0-9a-fA-F]+$/.test(key)) n = parseInt(key, 16)
+      else if (/^-?\d+$/.test(key)) n = parseInt(key, 10)
+      if (!isNaN(n)) out[String(n)] = value
+      else out[key] = value
+    })
+  return out
+}
+
 function parseMultiValues(str, nBits) {
   const out = {}
   if (!str) return out
   String(str)
-    .split(/[,，]/)
+    .split(/[,，;；\n]/)
     .forEach((pair) => {
-      const parts = pair.split(/[=＝]/)
-      if (parts.length < 2) return
-      const key = parts[0].trim()
-      const value = parts.slice(1).join('=').trim()
+      const kv = _splitKv(pair)
+      if (!kv) return
+      const [key, value] = kv
       if (!key || !value) return
       if (/^[01]+$/.test(key)) {
         out[parseInt(key, 2)] = value
+      } else if (/^0x[0-9a-fA-F]+$/.test(key)) {
+        out[parseInt(key, 16)] = value
       } else {
         const n = parseInt(key, 10)
         if (!isNaN(n)) out[n] = value
@@ -852,13 +949,556 @@ function parseMultiValues(str, nBits) {
 }
 
 
-// ════════════════════════ 高级字段只读预览 ════════════════════════
+// ════════════════════════ Phase 5b 高级字段可视化编辑器 ════════════════════════
+
+/**
+ * BCD 数位模板编辑：一行一位数，{name, data_bits: [lo, hi], weight, mask}
+ * 外加一个 sign_from_ssm 键值表（SSM 值 → 正/负号乘数）。
+ */
+function BcdPatternEditor({ value, onChange, readOnly }) {
+  const pattern = value || {}
+  const digits = Array.isArray(pattern.digits) ? pattern.digits : []
+  const signFromSsm = pattern.sign_from_ssm || {}
+
+  const emit = (next) => {
+    if (readOnly) return
+    const cleaned = { ...next }
+    if (!Array.isArray(cleaned.digits)) cleaned.digits = []
+    onChange?.(cleaned)
+  }
+
+  const updateDigit = (idx, patch) => {
+    const nextDigits = digits.map((d, i) => (i === idx ? { ...d, ...patch } : d))
+    emit({ ...pattern, digits: nextDigits })
+  }
+  const addDigit = () => {
+    emit({
+      ...pattern,
+      digits: [...digits, { name: '', data_bits: [9, 12], weight: 1, mask: '' }],
+    })
+  }
+  const removeDigit = (idx) => {
+    emit({ ...pattern, digits: digits.filter((_, i) => i !== idx) })
+  }
+
+  const columns = [
+    {
+      title: '名称',
+      dataIndex: 'name',
+      width: 120,
+      render: (v, _row, idx) => (
+        <Input
+          size="small"
+          disabled={readOnly}
+          value={v}
+          onChange={(e) => updateDigit(idx, { name: e.target.value })}
+          placeholder="如 units"
+        />
+      ),
+    },
+    {
+      title: 'bit 范围',
+      width: 160,
+      render: (_, row, idx) => {
+        const [lo = 9, hi = 9] = row.data_bits || []
+        return (
+          <Space>
+            <InputNumber
+              size="small"
+              min={9}
+              max={29}
+              disabled={readOnly}
+              value={lo}
+              onChange={(val) => updateDigit(idx, { data_bits: [val, hi] })}
+              style={{ width: 64 }}
+            />
+            <span>-</span>
+            <InputNumber
+              size="small"
+              min={9}
+              max={29}
+              disabled={readOnly}
+              value={hi}
+              onChange={(val) => updateDigit(idx, { data_bits: [lo, val] })}
+              style={{ width: 64 }}
+            />
+          </Space>
+        )
+      },
+    },
+    {
+      title: 'weight',
+      dataIndex: 'weight',
+      width: 100,
+      render: (v, _row, idx) => (
+        <InputNumber
+          size="small"
+          disabled={readOnly}
+          value={v}
+          onChange={(val) => updateDigit(idx, { weight: val })}
+          style={{ width: '100%' }}
+        />
+      ),
+    },
+    {
+      title: 'mask（可选）',
+      dataIndex: 'mask',
+      width: 110,
+      render: (v, _row, idx) => (
+        <Input
+          size="small"
+          disabled={readOnly}
+          value={v || ''}
+          placeholder="0x07"
+          onChange={(e) => updateDigit(idx, { mask: e.target.value })}
+        />
+      ),
+    },
+    {
+      title: '',
+      width: 50,
+      render: (_, __, idx) =>
+        readOnly ? null : (
+          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removeDigit(idx)} />
+        ),
+    },
+  ]
+
+  const signFromSsmStr = useMemo(
+    () =>
+      Object.entries(signFromSsm || {})
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', '),
+    [signFromSsm],
+  )
+
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Table
+        size="small"
+        pagination={false}
+        rowKey={(_, idx) => idx}
+        dataSource={digits}
+        columns={columns}
+        locale={{ emptyText: readOnly ? '无 BCD 数位' : '点击下方「新增数位」开始定义' }}
+      />
+      {!readOnly && (
+        <Button size="small" icon={<PlusOutlined />} onClick={addDigit}>
+          新增数位
+        </Button>
+      )}
+      <div>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          sign_from_ssm（SSM 值 → 符号乘数，如 3=-1 表示 SSM=3 取负）
+        </Text>
+        <Input
+          size="small"
+          disabled={readOnly}
+          value={signFromSsmStr}
+          placeholder="3=-1"
+          onChange={(e) => {
+            const raw = parseKvString(e.target.value)
+            const converted = {}
+            Object.entries(raw).forEach(([k, v]) => {
+              const n = parseInt(v, 10)
+              if (!isNaN(n)) converted[k] = n
+            })
+            emit({ ...pattern, sign_from_ssm: converted })
+          }}
+          style={{ marginTop: 4 }}
+        />
+      </div>
+    </Space>
+  )
+}
+
+/**
+ * SSM 语义编辑：4 行固定（SSM=0/1/2/3），每行一个文本框。
+ */
+function SsmSemanticsEditor({ value, onChange, readOnly }) {
+  const v = value || {}
+  const rows = [0, 1, 2, 3]
+  const hasAny = Object.values(v || {}).some((x) => String(x || '').trim())
+  return (
+    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+      <Alert
+        type="warning"
+        showIcon
+        style={{ padding: '4px 10px' }}
+        message={
+          <Text style={{ fontSize: 12 }}>
+            填入后将 <b>覆盖</b> 通用 SSM 文案（"故障告警 / 无计算数据 / 功能测试 / 正常工作"）。
+            仅当该 label 的 SSM 与协议通用定义不同（如 L165 BCD 高度 SSM 编码符号"正/负"）时才配置；
+            通常应留空。
+          </Text>
+        }
+      />
+      {hasAny && !readOnly && (
+        <Button size="small" type="link" danger onClick={() => onChange?.({})}>
+          清空全部（恢复使用通用 SSM 文案）
+        </Button>
+      )}
+      {rows.map((ssm) => (
+        <Row key={ssm} gutter={8} align="middle">
+          <Col span={3}>
+            <Tag color="blue">SSM={ssm}</Tag>
+          </Col>
+          <Col span={21}>
+            <Input
+              size="small"
+              disabled={readOnly}
+              value={v[String(ssm)] || ''}
+              placeholder={`SSM=${ssm} 对应业务语义，如：负 / 无效 / 正常`}
+              onChange={(e) => {
+                const next = { ...v }
+                const t = e.target.value
+                if (t) next[String(ssm)] = t
+                else delete next[String(ssm)]
+                onChange?.(next)
+              }}
+            />
+          </Col>
+        </Row>
+      ))}
+    </Space>
+  )
+}
+
+/**
+ * discrete_bit_groups 编辑：一段 bit 对应一个枚举字典。
+ */
+function DiscreteBitGroupsEditor({ value, onChange, readOnly }) {
+  const groups = Array.isArray(value) ? value : []
+  const emit = (next) => onChange?.(next)
+  const updateGroup = (idx, patch) => {
+    emit(groups.map((g, i) => (i === idx ? { ...g, ...patch } : g)))
+  }
+  const addGroup = () => emit([...groups, { name: '', cn: '', bits: [11, 13], values: {} }])
+  const addRawDump = () => {
+    // 传统 parser 经常把 bit 11-29 原始整数作为一个列输出（如 RA L270.discrete / L350.bit_status）。
+    // 这里给个一键模板：name 可用户再改。如果已有同名 group 则不追加。
+    const exists = groups.some((g) => (g.name || '').toLowerCase() === 'discrete')
+    if (exists) return
+    emit([...groups, { name: 'discrete', cn: '原始数据区 (Bit 11-29 整数)', bits: [11, 29], values: {} }])
+  }
+  const removeGroup = (idx) => emit(groups.filter((_, i) => i !== idx))
+
+  const columns = [
+    {
+      title: '名称',
+      dataIndex: 'name',
+      width: 130,
+      render: (v, _row, idx) => (
+        <Input
+          size="small"
+          disabled={readOnly}
+          value={v || ''}
+          onChange={(e) => updateGroup(idx, { name: e.target.value })}
+          placeholder="如 flap_status"
+        />
+      ),
+    },
+    {
+      title: '中文含义',
+      dataIndex: 'cn',
+      width: 120,
+      render: (v, _row, idx) => (
+        <Input
+          size="small"
+          disabled={readOnly}
+          value={v || ''}
+          onChange={(e) => updateGroup(idx, { cn: e.target.value })}
+          placeholder="如 襟翼状态"
+        />
+      ),
+    },
+    {
+      title: 'bit 范围',
+      width: 150,
+      render: (_, row, idx) => {
+        const [lo = 11, hi = 13] = row.bits || []
+        return (
+          <Space>
+            <InputNumber
+              size="small"
+              min={9}
+              max={29}
+              disabled={readOnly}
+              value={lo}
+              onChange={(val) => updateGroup(idx, { bits: [val, hi] })}
+              style={{ width: 64 }}
+            />
+            <span>-</span>
+            <InputNumber
+              size="small"
+              min={9}
+              max={29}
+              disabled={readOnly}
+              value={hi}
+              onChange={(val) => updateGroup(idx, { bits: [lo, val] })}
+              style={{ width: 64 }}
+            />
+          </Space>
+        )
+      },
+    },
+    {
+      title: (
+        <Tooltip title="支持 = / - / : / ： 分隔（docx 常见 '0-电压正常，1-电压异常'），留空则只输出整数列不生成 _enum">
+          values (0=起飞,1=巡航,...)
+        </Tooltip>
+      ),
+      render: (_, row, idx) => {
+        const s = Object.entries(row.values || {})
+          .map(([k, vv]) => `${k}=${vv}`)
+          .join(', ')
+        return (
+          <Input
+            size="small"
+            disabled={readOnly}
+            value={s}
+            onChange={(e) => updateGroup(idx, { values: parseKvString(e.target.value) })}
+            placeholder="0=起飞, 1=巡航, 2=着陆"
+          />
+        )
+      },
+    },
+    {
+      title: '',
+      width: 50,
+      render: (_, __, idx) =>
+        readOnly ? null : (
+          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removeGroup(idx)} />
+        ),
+    },
+  ]
+
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Table
+        size="small"
+        pagination={false}
+        rowKey={(_, idx) => idx}
+        dataSource={groups}
+        columns={columns}
+        locale={{ emptyText: readOnly ? '无位段定义' : '点击下方「新增位段」' }}
+      />
+      {!readOnly && (
+        <Space>
+          <Button size="small" icon={<PlusOutlined />} onClick={addGroup}>
+            新增位段
+          </Button>
+          <Tooltip title="一键添加 name=discrete、bits=[11,29]、values 为空的原始整数列；用于重现传统 parser 的 .discrete / .bit_status 这类聚合列。">
+            <Button size="small" onClick={addRawDump}>
+              + 原始数据区 (11-29)
+            </Button>
+          </Tooltip>
+        </Space>
+      )}
+    </Space>
+  )
+}
+
+/**
+ * 端口级覆盖：port → {col, resolution, unit}。
+ */
+function PortOverridesEditor({ value, onChange, readOnly }) {
+  const obj = value && typeof value === 'object' ? value : {}
+  const rows = Object.entries(obj).map(([port, cfg]) => ({
+    port,
+    col: cfg?.col || '',
+    resolution: cfg?.resolution ?? null,
+    unit: cfg?.unit || '',
+  }))
+
+  const emit = (next) => {
+    const result = {}
+    next.forEach((r) => {
+      const key = String(r.port || '').trim()
+      if (!key) return
+      const cfg = {}
+      if (r.col) cfg.col = r.col
+      if (r.resolution != null && r.resolution !== '') cfg.resolution = r.resolution
+      if (r.unit) cfg.unit = r.unit
+      if (Object.keys(cfg).length > 0) result[key] = cfg
+    })
+    onChange?.(result)
+  }
+
+  const update = (idx, patch) => {
+    emit(rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+  }
+  const add = () => emit([...rows, { port: '', col: '', resolution: null, unit: '' }])
+  const remove = (idx) => emit(rows.filter((_, i) => i !== idx))
+
+  const columns = [
+    {
+      title: 'port',
+      width: 110,
+      render: (_, row, idx) => (
+        <Input
+          size="small"
+          disabled={readOnly}
+          value={row.port}
+          onChange={(e) => update(idx, { port: e.target.value })}
+          placeholder="如 50001"
+        />
+      ),
+    },
+    {
+      title: '输出列名 col',
+      render: (_, row, idx) => (
+        <Input
+          size="small"
+          disabled={readOnly}
+          value={row.col}
+          onChange={(e) => update(idx, { col: e.target.value })}
+          placeholder="如 brake_pressure_down"
+        />
+      ),
+    },
+    {
+      title: 'resolution',
+      width: 130,
+      render: (_, row, idx) => (
+        <InputNumber
+          size="small"
+          disabled={readOnly}
+          value={row.resolution}
+          onChange={(val) => update(idx, { resolution: val })}
+          step={0.000001}
+          style={{ width: '100%' }}
+        />
+      ),
+    },
+    {
+      title: 'unit',
+      width: 100,
+      render: (_, row, idx) => (
+        <Input
+          size="small"
+          disabled={readOnly}
+          value={row.unit}
+          onChange={(e) => update(idx, { unit: e.target.value })}
+          placeholder="如 psi"
+        />
+      ),
+    },
+    {
+      title: '',
+      width: 50,
+      render: (_, __, idx) =>
+        readOnly ? null : (
+          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => remove(idx)} />
+        ),
+    },
+  ]
+
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Table
+        size="small"
+        pagination={false}
+        rowKey={(r) => r.port || Math.random()}
+        dataSource={rows}
+        columns={columns}
+        locale={{ emptyText: readOnly ? '无端口覆盖' : '点击下方「新增端口」' }}
+      />
+      {!readOnly && (
+        <Button size="small" icon={<PlusOutlined />} onClick={add}>
+          新增端口
+        </Button>
+      )}
+    </Space>
+  )
+}
+
+/**
+ * 合并入口：4 个高级字段编辑器。由详情页 card 容器展示；每一节都带"去掉"按钮
+ * 以便在不使用该能力时彻底清空。
+ */
+function AdvancedFieldsEditor({ label, onPatch, readOnly }) {
+  const patch = (k, v) => onPatch?.({ [k]: v })
+  const clear = (k) => {
+    Modal.confirm({
+      title: `清空 ${k}？`,
+      onOk: () => patch(k, k === 'discrete_bit_groups' ? [] : null),
+    })
+  }
+  return (
+    <Card
+      size="small"
+      title="高级字段（bundle-driven 解码必填项）"
+      extra={
+        <Tooltip title="编辑器里的所有字段会原样写进 bundle，解析器运行时读取。零 Python 代码改动。">
+          <Tag color="green">可视化编辑</Tag>
+        </Tooltip>
+      }
+    >
+      <Space direction="vertical" size={18} style={{ width: '100%' }}>
+        <div>
+          <Space style={{ marginBottom: 6 }}>
+            <Text strong>BCD 数位模板（bcd_pattern）</Text>
+            {!readOnly && label?.bcd_pattern && (
+              <Button size="small" danger type="link" onClick={() => clear('bcd_pattern')}>
+                清空
+              </Button>
+            )}
+          </Space>
+          <BcdPatternEditor
+            value={label?.bcd_pattern}
+            readOnly={readOnly}
+            onChange={(v) => patch('bcd_pattern', v)}
+          />
+        </div>
+
+        <div>
+          <Text strong>SSM 语义映射（ssm_semantics）</Text>
+          <div style={{ marginTop: 6 }}>
+            <SsmSemanticsEditor
+              value={label?.ssm_semantics}
+              readOnly={readOnly}
+              onChange={(v) =>
+                patch('ssm_semantics', Object.keys(v || {}).length === 0 ? null : v)
+              }
+            />
+          </div>
+        </div>
+
+        <div>
+          <Text strong>离散位段（discrete_bit_groups）</Text>
+          <div style={{ marginTop: 6 }}>
+            <DiscreteBitGroupsEditor
+              value={label?.discrete_bit_groups}
+              readOnly={readOnly}
+              onChange={(v) => patch('discrete_bit_groups', v)}
+            />
+          </div>
+        </div>
+
+        <div>
+          <Text strong>端口级覆盖（port_overrides）</Text>
+          <div style={{ marginTop: 6 }}>
+            <PortOverridesEditor
+              value={label?.port_overrides}
+              readOnly={readOnly}
+              onChange={(v) =>
+                patch('port_overrides', Object.keys(v || {}).length === 0 ? null : v)
+              }
+            />
+          </div>
+        </div>
+      </Space>
+    </Card>
+  )
+}
+
+
+// ════════════════════════ 高级字段只读预览（保留作兜底） ════════════════════════
 
 
 /**
- * Label 级高级字段（bcd_pattern / port_overrides / ssm_semantics / discrete_bit_groups）
- * 目前不提供可视化编辑表单，仅做只读 JSON 预览 + 说明；数据由后端导入脚本或
- * 直接编辑 spec_json 维护。normalizeLabel 里已确保编辑过程不会丢这些字段。
+ * 旧的只读预览，仅在 readOnly 时兜底显示。正常编辑路径使用 AdvancedFieldsEditor。
  */
 function AdvancedFieldsReadOnly({ label }) {
   const entries = useMemo(() => {
@@ -938,151 +1578,10 @@ function AdvancedFieldsReadOnly({ label }) {
 }
 
 
-/**
- * 顶层 port_routing 编辑器（协议级）
- * 表格：端口 | Labels（逗号分隔的八进制列表）| 删除
- * 同时支持添加新端口
- */
-function PortRoutingEditor({ routing, onChange, readOnly }) {
-  const [addingPort, setAddingPort] = useState('')
-  const [addingLabels, setAddingLabels] = useState('')
-
-  const safeRouting = routing && typeof routing === 'object' ? routing : {}
-  const rows = Object.entries(safeRouting).map(([port, labs]) => ({
-    key: port,
-    port,
-    labels: Array.isArray(labs) ? labs.join(', ') : '',
-    count: Array.isArray(labs) ? labs.length : 0,
-  }))
-
-  const setPortLabels = (port, labelsStr) => {
-    const labs = String(labelsStr || '')
-      .split(/[,，]/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-    onChange({ ...safeRouting, [port]: labs })
-  }
-
-  const deletePort = (port) => {
-    const next = { ...safeRouting }
-    delete next[port]
-    onChange(next)
-  }
-
-  const addPort = () => {
-    const p = String(addingPort || '').trim()
-    if (!p) {
-      message.warning('请输入端口号')
-      return
-    }
-    if (safeRouting[p]) {
-      message.warning(`端口 ${p} 已存在`)
-      return
-    }
-    const labs = String(addingLabels || '')
-      .split(/[,，]/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-    onChange({ ...safeRouting, [p]: labs })
-    setAddingPort('')
-    setAddingLabels('')
-  }
-
-  return (
-    <Card
-      size="small"
-      title={
-        <Space>
-          <span>端口路由（port_routing）</span>
-          <Tag>{rows.length} 个端口</Tag>
-        </Space>
-      }
-      extra={
-        <Tooltip title="承载 parser 的 _PORT_LABELS：声明每个 UDP 端口应该监听哪些 label。与其在 parser 代码里硬编码，不如在 bundle 里声明。">
-          <Tag color="blue">bundle-first 依赖</Tag>
-        </Tooltip>
-      }
-      style={{ marginBottom: 12 }}
-    >
-      {rows.length === 0 && (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 8, padding: '4px 10px' }}
-          message={
-            <Text style={{ fontSize: 12 }}>
-              暂未声明端口路由。未配置时将 fallback 到 parser 硬编码的 _PORT_LABELS。
-            </Text>
-          }
-        />
-      )}
-      {rows.length > 0 && (
-        <Table
-          size="small"
-          pagination={false}
-          rowKey="key"
-          dataSource={rows}
-          columns={[
-            { title: '端口', dataIndex: 'port', width: 90 },
-            {
-              title: 'Labels（八进制，逗号分隔）',
-              dataIndex: 'labels',
-              render: (v, r) =>
-                readOnly ? (
-                  <Text code style={{ fontSize: 12 }}>{v || '(空)'}</Text>
-                ) : (
-                  <Input
-                    size="small"
-                    value={v}
-                    onChange={(e) => setPortLabels(r.port, e.target.value)}
-                    placeholder="001, 003, 005"
-                  />
-                ),
-            },
-            { title: '数量', dataIndex: 'count', width: 64 },
-            !readOnly && {
-              title: '',
-              key: 'op',
-              width: 60,
-              render: (_, r) => (
-                <Popconfirm
-                  title={`删除端口 ${r.port} 的路由？`}
-                  okText="删除"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                  onConfirm={() => deletePort(r.port)}
-                >
-                  <Button size="small" danger icon={<DeleteOutlined />} />
-                </Popconfirm>
-              ),
-            },
-          ].filter(Boolean)}
-        />
-      )}
-      {!readOnly && (
-        <Space style={{ marginTop: 8 }} wrap>
-          <Input
-            size="small"
-            placeholder="端口号 如 7001"
-            value={addingPort}
-            onChange={(e) => setAddingPort(e.target.value)}
-            style={{ width: 140 }}
-          />
-          <Input
-            size="small"
-            placeholder="labels 如 001, 003, 005"
-            value={addingLabels}
-            onChange={(e) => setAddingLabels(e.target.value)}
-            style={{ width: 260 }}
-          />
-          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={addPort}>
-            添加端口
-          </Button>
-        </Space>
-      )}
-    </Card>
-  )
-}
+// 注：端口路由（port_routing，UDP 端口 → labels）归属 TSN 网络配置
+// （BundlePort.arinc_labels），不属于设备 ICD，因此在设备协议编辑器中不再提供
+// 相关编辑入口；旧 spec_json 里残留的 port_routing 字段会在后端 normalize_spec
+// 阶段被静默丢弃。
 
 
 // ════════════════════════ 主组件 ════════════════════════
@@ -1212,10 +1711,6 @@ export default function Arinc429SpecEditor({
     emit(labels, next)
   }
 
-  const updatePortRouting = (nextRouting) => {
-    emit(labels, meta, { port_routing: nextRouting })
-  }
-
   const updateSelected = (patch) => {
     if (!selected) return
     const next = labels.map((l) => (l.label_oct === selected.label_oct ? { ...l, ...patch } : l))
@@ -1299,21 +1794,23 @@ export default function Arinc429SpecEditor({
     if (type === 'single') {
       const name = (values.single_name || '').trim()
       const desc = (values.single_desc || '').trim()
+      const valuesMap = parseKvString(values.single_values || '')
       next.discrete_bits = next.discrete_bits || {}
-      // 如果原值是结构化 dict（带 values 枚举映射），保留 values，仅更新 name/cn；
-      // 否则存成 "name: desc" 字符串（向后兼容）
       const original = (selected?.discrete_bits || {})[bitNum]
       if (
-        original &&
-        typeof original === 'object' &&
-        original.values &&
-        Object.keys(original.values).length > 0
+        Object.keys(valuesMap).length > 0 ||
+        (original && typeof original === 'object' && original.values)
       ) {
-        next.discrete_bits[bitNum] = {
-          ...original,
+        // 结构化格式：bundle 可直接消费，parser 据此生成 *_enum 列
+        const merged = {
+          ...(typeof original === 'object' ? original : {}),
           name,
           cn: desc,
+          values: valuesMap,
         }
+        // 清掉空 values（避免 bundle 里出现 {} 占位）
+        if (!Object.keys(merged.values || {}).length) delete merged.values
+        next.discrete_bits[bitNum] = merged
       } else {
         next.discrete_bits[bitNum] = desc ? `${name}: ${desc}` : name
       }
@@ -1342,12 +1839,14 @@ export default function Arinc429SpecEditor({
       const signBit = values.bnr_sign_bit ? Number(values.bnr_sign_bit) : null
       if (signBit) next = deleteFieldAtBit(next, signBit)
       next.bnr_fields = next.bnr_fields || []
+      const isSigned = !!values.bnr_signed
       next.bnr_fields.push({
         name,
         data_bits: [lo, hi],
         encoding: values.bnr_encoding || 'bnr',
-        sign_bit: signBit || null,
-        sign_style: values.bnr_sign_style || 'bit29_sign_magnitude',
+        signed: isSigned,
+        sign_bit: isSigned ? (signBit || null) : null,
+        sign_style: isSigned ? (values.bnr_sign_style || 'bit29_sign_magnitude') : 'bit29_sign_magnitude',
         resolution: values.bnr_resolution ?? null,
         unit: values.bnr_unit || '',
       })
@@ -1435,14 +1934,6 @@ export default function Arinc429SpecEditor({
             </Col>
           </Row>
         </Card>
-      )}
-
-      {mode === 'list' && (
-        <PortRoutingEditor
-          routing={value?.port_routing}
-          onChange={updatePortRouting}
-          readOnly={readOnly}
-        />
       )}
 
       {mode === 'list' ? (
@@ -1569,10 +2060,42 @@ export default function Arinc429SpecEditor({
               <Card size="small" title="基本信息">
                 <Row gutter={12}>
                   <Col span={8}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>名称</Text>
-                    <Input size="small" disabled={readOnly} value={selected.name} onChange={(e) => updateSelected({ name: e.target.value })} style={{ marginTop: 4 }} />
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      <Tooltip title="parser 会把这个字段当作输出列名（如 alt_bnr / qnh_report）。必须是英文/数字/下划线，勿写中文，中文请放到右边的「中文名称 cn」">
+                        英文列名 (name)
+                      </Tooltip>
+                    </Text>
+                    <Input
+                      size="small"
+                      disabled={readOnly}
+                      value={selected.name}
+                      onChange={(e) => updateSelected({ name: e.target.value })}
+                      status={/[\u4e00-\u9fff]/.test(selected.name || '') ? 'warning' : ''}
+                      placeholder="如 alt_bnr / qnh_report"
+                      style={{ marginTop: 4 }}
+                    />
+                    {/[\u4e00-\u9fff]/.test(selected.name || '') && (
+                      <Text type="warning" style={{ fontSize: 11 }}>
+                        ⚠ 含中文，BCD/输出列名不宜用中文；建议放到「中文名称」
+                      </Text>
+                    )}
                   </Col>
-                  <Col span={6}>
+                  <Col span={8}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      <Tooltip title="供 UI 显示用的中文名（docx 里「信号名称」那一行）；parser 不会把它作为列名">
+                        中文名称 (cn)
+                      </Tooltip>
+                    </Text>
+                    <Input
+                      size="small"
+                      disabled={readOnly}
+                      value={selected.cn || ''}
+                      onChange={(e) => updateSelected({ cn: e.target.value })}
+                      placeholder="如 高度数据字 / 装订气压QNH回报"
+                      style={{ marginTop: 4 }}
+                    />
+                  </Col>
+                  <Col span={4}>
                     <Text type="secondary" style={{ fontSize: 12 }}>方向</Text>
                     <Select
                       size="small"
@@ -1584,11 +2107,11 @@ export default function Arinc429SpecEditor({
                       allowClear
                     />
                   </Col>
-                  <Col span={5}>
+                  <Col span={4}>
                     <Text type="secondary" style={{ fontSize: 12 }}>SSM 类型</Text>
                     <Select size="small" disabled={readOnly} value={selected.ssm_type} onChange={(v) => updateSelected({ ssm_type: v })} options={SSM_TYPES} style={{ width: '100%', marginTop: 4 }} />
                   </Col>
-                  <Col span={5}>
+                  <Col span={4} style={{ marginTop: 8 }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>单位</Text>
                     <Input size="small" disabled={readOnly} value={selected.unit} onChange={(e) => updateSelected({ unit: e.target.value })} style={{ marginTop: 4 }} />
                   </Col>
@@ -1609,6 +2132,63 @@ export default function Arinc429SpecEditor({
                   <Col span={8} style={{ marginTop: 8 }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>range_desc</Text>
                     <Input size="small" disabled={readOnly} value={selected.range_desc} onChange={(e) => updateSelected({ range_desc: e.target.value })} style={{ marginTop: 4 }} />
+                  </Col>
+                  <Col span={6} style={{ marginTop: 8 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>SDI</Text>
+                    <Select
+                      size="small"
+                      disabled={readOnly}
+                      value={selected.sdi ?? null}
+                      onChange={(v) => updateSelected({ sdi: v })}
+                      options={[
+                        { value: null, label: '（不限）' },
+                        { value: 0, label: '0' },
+                        { value: 1, label: '1' },
+                        { value: 2, label: '2' },
+                        { value: 3, label: '3' },
+                      ]}
+                      style={{ width: '100%', marginTop: 4 }}
+                      allowClear
+                    />
+                  </Col>
+                  <Col span={6} style={{ marginTop: 8 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      <Tooltip title="Label 级默认分辨率；若 bnr_fields[0].resolution 为空，解析器会用此值兜底">
+                        分辨率 (resolution)
+                      </Tooltip>
+                    </Text>
+                    <InputNumber
+                      size="small"
+                      disabled={readOnly}
+                      value={selected.resolution ?? null}
+                      onChange={(v) => updateSelected({ resolution: v })}
+                      step={0.000001}
+                      style={{ width: '100%', marginTop: 4 }}
+                    />
+                  </Col>
+                  <Col span={12} style={{ marginTop: 8 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      <Tooltip title="Label 中明确标记为预留/保留的 bit 列表，逗号分隔；供校验器校对占用，不影响解码">
+                        保留位 (reserved_bits)
+                      </Tooltip>
+                    </Text>
+                    <Input
+                      size="small"
+                      disabled={readOnly}
+                      value={(selected.reserved_bits || []).join(', ')}
+                      onChange={(e) =>
+                        updateSelected({
+                          reserved_bits: e.target.value
+                            .split(',')
+                            .map((s) => s.trim())
+                            .filter(Boolean)
+                            .map((s) => parseInt(s, 10))
+                            .filter((n) => !isNaN(n)),
+                        })
+                      }
+                      placeholder="如 10, 11, 15"
+                      style={{ marginTop: 4 }}
+                    />
                   </Col>
                   <Col span={24} style={{ marginTop: 8 }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>备注</Text>
@@ -1647,7 +2227,15 @@ export default function Arinc429SpecEditor({
                 />
               </Card>
 
-              <AdvancedFieldsReadOnly label={selected} />
+              {readOnly ? (
+                <AdvancedFieldsReadOnly label={selected} />
+              ) : (
+                <AdvancedFieldsEditor
+                  label={selected}
+                  readOnly={false}
+                  onPatch={(patch) => updateSelected(patch)}
+                />
+              )}
             </>
           )}
         </Space>
@@ -1688,8 +2276,19 @@ function NewLabelModal({ open, onCancel, onOk }) {
         <Form.Item name="label_oct" label="Label (八进制, 0-7 数字)" rules={[{ required: true, pattern: /^[0-7]+$/, message: '请输入合法八进制' }]}>
           <Input placeholder="如 076" />
         </Form.Item>
-        <Form.Item name="name" label="名称" rules={[{ required: true }]}>
-          <Input placeholder="如 GNSS_Altitude" />
+        <Form.Item
+          name="name"
+          label="英文列名 (name)"
+          tooltip="parser 直接拿它当输出列名，必须英文/数字/下划线；中文显示名放到下面 cn 字段"
+          rules={[
+            { required: true, message: '请输入英文列名' },
+            { pattern: /^[A-Za-z_][A-Za-z0-9_]*$/, message: '仅允许英文字母、数字、下划线，不能以数字开头' },
+          ]}
+        >
+          <Input placeholder="如 gnss_altitude" />
+        </Form.Item>
+        <Form.Item name="cn" label="中文名称 (cn，可选)">
+          <Input placeholder="如 GNSS 高度数据字" />
         </Form.Item>
         <Form.Item name="direction" label="方向">
           <Select options={DIRECTIONS} allowClear />

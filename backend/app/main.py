@@ -35,11 +35,17 @@ async def lifespan(app: FastAPI):
     # 启动时初始化数据库
     await init_db()
     
-    # 初始化内置数据（用户、解析版本配置等）并清理过期平台共享 TSN
+    # 初始化内置数据（用户、解析版本配置等）并清理过期平台共享 TSN + 过期解析结果
     async with async_session() as db:
         await init_all_data(db)
         from .services.shared_tsn_service import purge_expired_shared_files
+        from .services.disk_maintenance import purge_expired_results, free_disk_mb
+
         await purge_expired_shared_files(db)
+        await purge_expired_results(db)
+        mb = free_disk_mb()
+        if mb >= 0:
+            print(f"[DiskMaint] 启动体检: UPLOAD_DIR 剩余 {mb} MB")
     
     # 确保目录存在
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

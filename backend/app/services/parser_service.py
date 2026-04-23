@@ -24,6 +24,7 @@ from .protocol_service import ProtocolService
 from .parsers import ParserRegistry, BaseParser, FieldLayout
 from .fcc_context_service import build_fcc_irs_context
 from .bundle import BundleNotFoundError, load_bundle
+from .device_bundle import try_load_device_bundle
 from .bundle import generator as bundle_generator
 
 # ATG 端口：仅与 IRS 核对，不做 RTK 时间核对（ICD：8050/8052 对应 IRS 流）
@@ -71,11 +72,13 @@ class ParserService:
         device_parser_map: Dict[str, int] = None,
         protocol_version_id: int = None,
         selected_ports: List[int] = None,
-        selected_devices: List[str] = None
+        selected_devices: List[str] = None,
+        device_protocol_version_map: Optional[Dict[str, int]] = None,
     ) -> ParseTask:
         """创建解析任务
-        
+
         仅新模式: device_parser_map = {"设备名": parser_profile_id, ...}
+        device_protocol_version_map = {"parser_family": device_protocol_version_id}
         """
         if not device_parser_map:
             raise ValueError("已禁用旧模式，create_task 必须提供 device_parser_map")
@@ -86,7 +89,8 @@ class ParserService:
             protocol_version_id=protocol_version_id,
             selected_ports=selected_ports,
             selected_devices=selected_devices,
-            status="pending"
+            status="pending",
+            device_protocol_version_map=device_protocol_version_map or None,
         )
         self.db.add(task)
         await self.db.commit()
@@ -671,6 +675,49 @@ class ParserService:
                         print(f"[Parser] Bundle v{task.protocol_version_id} 无法生成: {exc}")
                         runtime_bundle = None
 
+            # 设备协议 Bundle 加载（按 parser_family 分组，来自 ParseTask.device_protocol_version_map）
+            # 老任务（或用户没选）时回落到「取该 parser_family 的最新 Available 版本」
+            device_bundle_by_family: Dict[str, Any] = {}
+            dpv_map_raw: Dict[str, int] = dict(task.device_protocol_version_map or {})
+            device_families_needed: set = set()
+            for pid in set(int(v) for v in task.device_parser_map.values() if v is not None):
+                profile_dv = await self.get_parser_profile(pid)
+                if profile_dv and profile_dv.protocol_family:
+                    device_families_needed.add(profile_dv.protocol_family)
+
+            if device_families_needed:
+                from .device_protocol_service import (
+                    get_active_device_version_by_parser_family,
+                )
+
+                for fam in device_families_needed:
+                    dv_id = dpv_map_raw.get(fam)
+                    if dv_id is None:
+                        fallback = await get_active_device_version_by_parser_family(
+                            self.db, fam
+                        )
+                        if fallback is not None:
+                            dv_id = fallback.id
+                            print(
+                                f"[Parser] device_bundle 回落：parser_family={fam} "
+                                f"→ version_id={dv_id}（最新 Available）"
+                            )
+                    if dv_id is None:
+                        continue
+                    b = try_load_device_bundle(int(dv_id))
+                    if b is not None:
+                        device_bundle_by_family[fam] = b
+                        print(
+                            f"[Parser] 已加载 device_bundle family={fam} "
+                            f"v{dv_id} (labels={len(b.labels)})"
+                        )
+                    else:
+                        print(
+                            f"[Parser] device_bundle 加载失败 family={fam} "
+                            f"v{dv_id} — 该 family 的 429 word 将整体跳过 "
+                            f"（bundle 为 ARINC429 解析唯一来源）"
+                        )
+
             # 获取所有端口定义
             port_device_map: Dict[int, str] = {}
             if task.protocol_version_id:
@@ -719,6 +766,18 @@ class ParserService:
                         parser.set_bundle(runtime_bundle)
                     except Exception as exc:
                         print(f"[Parser]   警告: {profile.parser_key} set_bundle 失败: {exc}")
+                    # TSN 对齐：按 parser_family 注入设备协议 bundle（供 arinc429 parser _get_label_def 消费）
+                    dev_b = device_bundle_by_family.get(profile.protocol_family or "")
+                    if dev_b is not None:
+                        set_dev = getattr(parser, "set_device_bundle", None)
+                        if callable(set_dev):
+                            try:
+                                set_dev(dev_b)
+                            except Exception as exc:  # noqa: BLE001
+                                print(
+                                    f"[Parser]   警告: {profile.parser_key} "
+                                    f"set_device_bundle 失败: {exc}"
+                                )
                     merged_plan[pid] = (parser, set(), [], profile.name)
                 
                 merged_plan[pid][1].update(dev_ports)

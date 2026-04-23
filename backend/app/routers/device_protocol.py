@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi.responses import FileResponse
+
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import DEVICE_PROTOCOL_FAMILIES, User
@@ -291,12 +293,164 @@ async def deprecate_version_route(
 @router.get("/versions/{version_id}/activation-report")
 async def get_version_activation_report(
     version_id: int,
+    ensure: bool = Query(default=True, description="缓存缺失时是否自动跑 pipeline"),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        return await dps.get_activation_report(db, version_id)
+        return await dps.get_activation_report(db, version_id, ensure=bool(ensure))
     except DeviceProtocolError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/versions/{version_id}/activation-report/refresh")
+async def refresh_version_activation_report(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """强制重新跑激活流水线（重新生成 bundle + 体检）。
+    对齐 TSN ``POST /network-config/versions/{id}/activation-report/refresh``。
+    """
+    _require_device_write(user)
+    try:
+        return await dps.get_activation_report(db, version_id, refresh=True)
+    except DeviceProtocolError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/versions/{version_id}/bundle/meta")
+async def get_version_bundle_meta(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """设备 Bundle 元信息（给前端 ActivationPanel / 详情页用）。
+
+    bundle 不存在也 200 返回 ``{exists: false}``，避免前端报 404。
+    """
+    v = await dps.get_version(db, version_id)
+    if v is None:
+        raise HTTPException(status_code=404, detail="设备协议版本不存在")
+
+    from ..services.device_bundle import (
+        device_bundle_cache_stats,
+        device_bundle_path_for,
+        try_load_device_bundle,
+        verify_device_bundle,
+    )
+
+    path = device_bundle_path_for(version_id)
+    if not path.is_file():
+        return {
+            "version_id": version_id,
+            "exists": False,
+            "path": f"backend/app/services/generated_device/v{version_id}/bundle.json",
+        }
+
+    bundle = try_load_device_bundle(version_id)
+    stats = None
+    sha256 = None
+    generated_at = None
+    if bundle is not None:
+        stats = {
+            "schema_version": bundle.schema_version,
+            "device_id": bundle.device_id,
+            "device_name": bundle.device_name,
+            "parser_family": bundle.parser_family,
+            "labels": len(bundle.labels),
+            "bnr_fields": sum(len(l.bnr_fields) for l in bundle.labels.values()),
+            "discrete_bits": sum(len(l.discrete_bits) for l in bundle.labels.values()),
+            "discrete_bit_groups": sum(
+                len(l.discrete_bit_groups) for l in bundle.labels.values()
+            ),
+            "bcd_pattern_count": sum(
+                1 for l in bundle.labels.values() if l.bcd_pattern is not None
+            ),
+            "port_override_count": sum(
+                len(l.port_overrides) for l in bundle.labels.values()
+            ),
+            "ssm_semantics_count": sum(
+                1 for l in bundle.labels.values() if l.ssm_semantics
+            ),
+        }
+        generated_at = (
+            bundle.generated_at.isoformat() + "Z"
+            if bundle.generated_at is not None
+            else None
+        )
+
+    # sha256：取同目录 bundle.sha256 文件第一个 token
+    from ..services.device_bundle.loader import device_sha256_path_for
+
+    sha_path = device_sha256_path_for(version_id)
+    if sha_path.is_file():
+        try:
+            sha256 = sha_path.read_text(encoding="utf-8").strip().split()[0]
+        except OSError:
+            sha256 = None
+
+    return {
+        "version_id": version_id,
+        "exists": True,
+        "path": f"backend/app/services/generated_device/v{version_id}/bundle.json",
+        "abs_path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": sha256,
+        "generated_at": generated_at,
+        "integrity_ok": verify_device_bundle(version_id),
+        "stats": stats,
+        "cache": device_bundle_cache_stats(),
+    }
+
+
+@router.get("/versions/{version_id}/bundle/download")
+async def download_version_bundle(
+    version_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """下载设备 Bundle JSON 原文件。"""
+    v = await dps.get_version(db, version_id)
+    if v is None:
+        raise HTTPException(status_code=404, detail="设备协议版本不存在")
+
+    from ..services.device_bundle import device_bundle_path_for
+
+    path = device_bundle_path_for(version_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="bundle 尚未生成")
+    return FileResponse(
+        path,
+        media_type="application/json",
+        filename=f"device_bundle_v{version_id}.json",
+    )
+
+
+# ═════════════════════════ Available 列表（供用户在上传页下拉使用）═════════════════════════
+
+
+@router.get("/versions/available")
+async def list_available_versions(
+    parser_family: Optional[str] = Query(default=None, description="parser_family_hints 过滤"),
+    ata: Optional[str] = Query(default=None, description="ATA 码过滤（例如 ata32）"),
+    protocol_family: Optional[str] = Query(
+        default=None, description="协议族过滤（arinc429 / can / rs422）"
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """仅返回 ``availability_status=Available`` 的扁平版本列表。
+
+    按 ``activated_at DESC`` 排序；供上传页按 parser_family 拉下拉框。
+    对齐 TSN 的 ``GET /api/protocols/versions``。
+    """
+    try:
+        items = await dps.list_available_versions(
+            db,
+            parser_family=parser_family,
+            ata=ata,
+            protocol_family=protocol_family,
+        )
+    except DeviceProtocolError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"total": len(items), "items": items}
 
 
 # ═════════════════════════ Draft ═════════════════════════

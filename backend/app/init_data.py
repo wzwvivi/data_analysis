@@ -612,7 +612,7 @@ async def init_parser_profiles(db: AsyncSession):
                 protocol_family="bpcu_empc",
                 parser_key="bpcu_empc_v1",
                 is_active=True,
-                description="CE-25A电源系统配电盘箱CAN总线ICD A.06解析器。覆盖LBPCU(7050/7051)、RBPCU(7052/7053)、EMPC(7054/7055)及下行灯控(8035/8042)端口，解码电源状态参数、SSPC负载状态、故障信息等。",
+                description="电源系统配电盘箱CAN总线ICD A.06解析器。覆盖LBPCU(7050/7051)、RBPCU(7052/7053)、EMPC(7054/7055)及下行灯控(8035/8042)端口，解码电源状态参数、SSPC负载状态、故障信息等。",
                 supported_ports=_BPCU_PORTS,
                 output_fields='["timestamp","source_port","can_id_hex","msg_name"]',
             )
@@ -637,7 +637,7 @@ async def init_parser_profiles(db: AsyncSession):
                 protocol_family="mcu",
                 parser_key="mcu_v6.0",
                 is_active=True,
-                description="CE25A电推-电驱CAN通信协议草案V6.0解析器。覆盖MCU相关8个TSN端口（7014/7016/7091-7096），支持指令帧与状态/信息/数据帧解析。",
+                description="电推-电驱CAN通信协议草案V6.0解析器。覆盖MCU相关8个TSN端口（7014/7016/7091-7096），支持指令帧与状态/信息/数据帧解析。",
                 supported_ports="7014,7016,7091,7092,7093,7094,7095,7096",
                 output_fields='["timestamp","source_port","can_id_hex","msg_name","msg_type"]',
             )

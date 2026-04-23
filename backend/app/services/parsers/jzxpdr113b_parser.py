@@ -423,7 +423,7 @@ class JZXPDR113BParser(Arinc429Mixin, BaseParser):
 
     _LABEL_DEFS = _LABEL_DEFS
     _FIELD_NAME_TO_LABEL = _FIELD_NAME_TO_LABEL
-    _PORT_LABELS = None
+    # 端口 → labels 路由由 TSN 网络配置承载。
 
     # ---- 输入标号 ----
     LABEL_WORK_STATUS = 0o306
@@ -638,6 +638,11 @@ class JZXPDR113BParser(Arinc429Mixin, BaseParser):
         return record
 
     def _decode_word(self, record: Dict[str, Any], word: int, label: int) -> None:
+        """JZXPDR113B 输出扁平列名（非 ``label_XXX.field`` 前缀），与通用
+        ``_decode_with_bundle`` 的 ``{pfx}.{name}`` 约定不兼容，因此这条
+        支线在 parser 内完成字段解码。device_bundle 仅用于编辑器展示
+        bit 语义 / values 枚举，运行期列布局由本方法直接写出。
+        """
         decoded = self._decode_label(label, word)
 
         ssm = self.decoder.extract_ssm(word)

@@ -369,7 +369,7 @@ function AircraftConfigPanel() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="一个飞机构型（如 CE-25A 0号机 VA）= 一个 TSN/ICD 协议版本 + 一组设备协议版本。架次绑定该构型后，所有协议配置即冻结。"
+        message="一个飞机构型（如 0号机 VA）= 一个 TSN/ICD 协议版本 + 一组设备协议版本。架次绑定该构型后，所有协议配置即冻结。"
       />
       <Space style={{ marginBottom: 12 }}>
         <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
@@ -396,7 +396,7 @@ function AircraftConfigPanel() {
         <Form form={form} layout="vertical">
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0 16px' }}>
             <Form.Item name="name" label="构型名称" rules={[{ required: true }]}>
-              <Input placeholder="例如 CE-25A 0号机 VA" />
+              <Input placeholder="例如 0号机 VA" />
             </Form.Item>
             <Form.Item name="version" label="版本号">
               <Input placeholder="例如 VA" />

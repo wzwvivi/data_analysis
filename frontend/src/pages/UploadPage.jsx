@@ -6,7 +6,7 @@ import {
 import {
   InboxOutlined, CloudUploadOutlined, ApiOutlined, DesktopOutlined, SettingOutlined,
 } from '@ant-design/icons'
-import { parseApi, protocolApi, sharedTsnApi } from '../services/api'
+import { parseApi, protocolApi, sharedTsnApi, deviceProtocolApi } from '../services/api'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 
 const { Dragger } = Upload
@@ -67,6 +67,12 @@ function UploadPage() {
 
   // { deviceName: parserProfileId }
   const [deviceParserMap, setDeviceParserMap] = useState({})
+
+  // 设备协议版本选择（按 parser_family 分组）。key=parser_family, value=device_protocol_version_id
+  const [deviceProtocolVersionMap, setDeviceProtocolVersionMap] = useState({})
+  // { parser_family: [ {id, device_name, version_name, activated_at, has_bundle, ...}, ... ] }
+  const [availableDeviceVersionsByFamily, setAvailableDeviceVersionsByFamily] = useState({})
+  const [deviceVersionsLoading, setDeviceVersionsLoading] = useState(false)
 
   const [fileList, setFileList] = useState([])
   const [dataSource, setDataSource] = useState('platform') // platform 优先；local | platform
@@ -209,6 +215,64 @@ function UploadPage() {
     return s
   }, [selectedDevices, devices])
 
+  // 按需拉取每个已选 parser_family 的 Available 设备协议版本，默认选最新
+  useEffect(() => {
+    const families = Array.from(selectedFamilies)
+    if (families.length === 0) {
+      setAvailableDeviceVersionsByFamily({})
+      setDeviceProtocolVersionMap({})
+      return
+    }
+
+    let cancelled = false
+    const needed = families.filter(f => !(f in availableDeviceVersionsByFamily))
+    if (needed.length === 0) {
+      // 清理已废弃 family 的映射
+      setDeviceProtocolVersionMap(prev => {
+        const next = {}
+        families.forEach(f => { if (prev[f] != null) next[f] = prev[f] })
+        return next
+      })
+      return
+    }
+
+    setDeviceVersionsLoading(true)
+    Promise.all(
+      needed.map(f =>
+        deviceProtocolApi.listAvailableVersions({ parserFamily: f })
+          .then(res => [f, res.data?.items || []])
+          .catch(() => [f, []])
+      )
+    ).then(results => {
+      if (cancelled) return
+      setAvailableDeviceVersionsByFamily(prev => {
+        const next = { ...prev }
+        results.forEach(([f, items]) => { next[f] = items })
+        return next
+      })
+      setDeviceProtocolVersionMap(prev => {
+        const next = { ...prev }
+        results.forEach(([f, items]) => {
+          if (next[f] == null && items.length > 0) {
+            next[f] = items[0].id  // activated_at DESC 排序，第 0 个是最新
+          }
+        })
+        // 清理已废弃 family
+        Object.keys(next).forEach(k => {
+          if (!families.includes(k)) delete next[k]
+        })
+        return next
+      })
+    }).finally(() => {
+      if (!cancelled) setDeviceVersionsLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [selectedFamilies, availableDeviceVersionsByFamily])
+
+  const handleDeviceProtocolVersionChange = (parserFamily, versionId) => {
+    setDeviceProtocolVersionMap(prev => ({ ...prev, [parserFamily]: versionId }))
+  }
+
   const atgRequiredFamilies = ['irs', 'rtk', 'fcc']
   const atgFamilyCoverage = useMemo(() => {
     const m = {}
@@ -245,6 +309,12 @@ function UploadPage() {
       formData.append('shared_tsn_id', String(platformFileId))
     }
     formData.append('device_parser_map', JSON.stringify(deviceParserMap))
+    if (Object.keys(deviceProtocolVersionMap).length > 0) {
+      formData.append(
+        'device_protocol_version_map',
+        JSON.stringify(deviceProtocolVersionMap),
+      )
+    }
     if (selectedVersion) formData.append('protocol_version_id', selectedVersion)
     if (selectedDevices.length > 0) formData.append('selected_devices', selectedDevices.join(','))
     if (selectedPorts.length > 0) formData.append('selected_ports', selectedPorts.join(','))
@@ -583,6 +653,57 @@ function UploadPage() {
                     />
                   </Form.Item>
                 </>
+              )}
+
+              {/* 3b. 设备协议版本选择（按 parser_family 分组） */}
+              {Array.from(selectedFamilies).length > 0 && (
+                <Form.Item
+                  label={
+                    <Space>
+                      <SettingOutlined style={{ color: '#a78bfa' }} />
+                      <span>设备协议版本</span>
+                      <Tag style={{ background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa' }}>
+                        运行期 parser 从此 bundle 读取 label 定义
+                      </Tag>
+                    </Space>
+                  }
+                >
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    {Array.from(selectedFamilies).map((family) => {
+                      const items = availableDeviceVersionsByFamily[family] || []
+                      const currentId = deviceProtocolVersionMap[family]
+                      const latestId = items[0]?.id
+                      return (
+                        <Space key={family} size={8} wrap>
+                          <Tag style={{ background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa', minWidth: 80, textAlign: 'center' }}>
+                            {FAMILY_LABELS[family] || family}
+                          </Tag>
+                          <Select
+                            style={{ width: 280 }}
+                            size="small"
+                            placeholder={deviceVersionsLoading ? '加载中…' : '选择设备协议版本'}
+                            value={currentId}
+                            loading={deviceVersionsLoading}
+                            notFoundContent={items.length === 0 ? '无 Available 版本' : null}
+                            onChange={(val) => handleDeviceProtocolVersionChange(family, val)}
+                            options={items.map(v => ({
+                              value: v.id,
+                              label: `${v.device_name} · ${v.version_name}${v.has_bundle ? '' : ' (bundle 缺失)'}`,
+                            }))}
+                          />
+                          {currentId && currentId === latestId && (
+                            <Tag style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>最新</Tag>
+                          )}
+                          {items.length === 0 && (
+                            <Tag style={{ background: 'rgba(161, 161, 170, 0.1)', borderColor: '#52525b', color: '#a1a1aa' }}>
+                              暂无 Available 版本 · 将回落到运行期默认 bundle
+                            </Tag>
+                          )}
+                        </Space>
+                      )
+                    })}
+                  </Space>
+                </Form.Item>
               )}
 
               {/* 解析摘要 */}

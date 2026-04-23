@@ -27,6 +27,7 @@ import DeviceChangeRequestPage from './pages/device-protocol/ChangeRequestPage'
 import DeviceVersionViewerPage from './pages/device-protocol/VersionViewerPage'
 import DashboardPage from './pages/DashboardPage'
 import WorkbenchPage from './pages/WorkbenchPage'
+import WorkbenchComparePage from './pages/WorkbenchComparePage'
 import { Result } from 'antd'
 
 function PrivateRoute({ children }) {
@@ -105,6 +106,7 @@ function AppRoutes() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<PermissionRoute requiredPage="dashboard"><DashboardPage /></PermissionRoute>} />
         <Route path="workbench" element={<PermissionRoute requiredPage="workbench"><WorkbenchPage /></PermissionRoute>} />
+        <Route path="workbench/compare" element={<PermissionRoute requiredPage="workbench"><WorkbenchComparePage /></PermissionRoute>} />
         <Route path="workbench/:sortieId" element={<PermissionRoute requiredPage="workbench"><WorkbenchPage /></PermissionRoute>} />
         <Route path="upload" element={<PermissionRoute requiredPage="upload"><UploadPage /></PermissionRoute>} />
         <Route path="tasks" element={<PermissionRoute requiredPage="tasks"><TaskListPage /></PermissionRoute>} />

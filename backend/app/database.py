@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """数据库配置"""
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 
@@ -10,6 +11,28 @@ engine = create_async_engine(
     echo=False,
     connect_args={"timeout": 30},
 )
+
+
+# SQLite 并发优化：每次建立连接时打开 WAL + 等锁 30s + 适度放松 fsync。
+# - journal_mode=WAL: 允许"一读多写"真正并发, 避免 "database is locked"
+# - synchronous=NORMAL: WAL 模式下 fsync 频率降低, 写吞吐显著提升, 断电最多丢失最近一次事务
+# - busy_timeout=30000: 拿锁冲突时 SQLite 内部最多等 30s, 而不是立刻报错
+# - temp_store=MEMORY: 临时表/索引放内存, 小代价换速度
+# - mmap_size=256MB: 允许用 mmap 读文件, 大查询更快
+# 只对底层 sqlite 驱动生效；非 sqlite 后端请删掉此钩子。
+@event.listens_for(engine.sync_engine, "connect")
+def _apply_sqlite_pragmas(dbapi_connection, _connection_record):
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.execute("PRAGMA mmap_size=268435456")  # 256 MB
+    finally:
+        cursor.close()
+
+
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()
@@ -60,6 +83,8 @@ async def init_db():
                     'stage': 'VARCHAR(50)',
                     'cancel_requested': 'INTEGER DEFAULT 0',
                     'started_at': 'DATETIME',
+                    # 设备协议版本映射（TSN 对齐：用户上传时选择的 device_protocol_version）
+                    'device_protocol_version_map': 'JSON',
                 }
                 for col_name, col_type in cols_to_add.items():
                     if col_name not in existing_cols:

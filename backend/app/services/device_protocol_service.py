@@ -9,9 +9,12 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -932,7 +935,103 @@ def _build_activation_report(
         "checked_at": datetime.utcnow().isoformat() + "Z",
         "checked_by": actor,
         "summary": handler.summarize_spec(spec_json or {}),
+        "artifacts": [],
     }
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  激活流水线（对齐 TSN services/protocol_activation_service.refresh_activation_pipeline）
+# ─────────────────────────────────────────────────────────────────────
+
+# 哪些 family 当前支持 device_bundle 投影（CAN/RS422 的 schema 尚未扩展，先白名单放行 arinc429）
+_BUNDLE_ENABLED_FAMILIES = frozenset({"arinc429"})
+
+
+async def refresh_device_activation_pipeline(
+    db: AsyncSession,
+    version_id: int,
+    *,
+    actor: Optional[str] = None,
+    persist: bool = True,
+) -> Dict[str, Any]:
+    """publish / activate / 手动刷新 都走这一条流水线。
+
+    步骤：
+      1) 对支持的 family 生成 device_bundle（落盘 + sha256），失败记 warnings
+      2) 跑 handler.validate_spec 构建体检报告
+      3) 组合 artifacts（device_bundle 等）写回 activation_report_json
+
+    设计对齐 TSN 侧：bundle 生成与体检报告共享同一个 pipeline，
+    发布阶段就产出"激活闸门"的全部素材；激活按钮只是状态跃迁。
+    """
+    version = await get_version(db, version_id)
+    if version is None:
+        raise DeviceProtocolError(f"设备协议版本 {version_id} 不存在")
+
+    spec_res = await db.execute(
+        select(DeviceProtocolSpec).where(DeviceProtocolSpec.id == version.spec_id)
+    )
+    spec = spec_res.scalar_one_or_none()
+    if spec is None:
+        raise DeviceProtocolError(f"设备协议 {version.spec_id} 不存在")
+
+    artifacts: List[Dict[str, Any]] = []
+    artifact_warnings: List[str] = []
+
+    # Step 1：device_bundle（仅支持的 family）
+    if spec.protocol_family in _BUNDLE_ENABLED_FAMILIES:
+        try:
+            from .device_bundle import generate_device_bundle
+
+            meta = await generate_device_bundle(db, version.id)
+            artifacts.append(
+                {
+                    "kind": "device_bundle",
+                    "path": meta.get("path"),
+                    "abs_path": meta.get("abs_path"),
+                    "sha256": meta.get("sha256"),
+                    "bytes": meta.get("bytes_written"),
+                    "stats": meta.get("stats") or {},
+                    "generated_at": meta.get("generated_at"),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            artifact_warnings.append(f"device_bundle 生成失败: {exc}")
+            logger.warning(
+                "[DeviceBundle] pipeline 生成失败 version_id=%s: %s",
+                version.id,
+                exc,
+            )
+    else:
+        artifact_warnings.append(
+            f"protocol_family={spec.protocol_family} 暂不支持 device_bundle 投影"
+        )
+
+    # Step 2：体检报告
+    handler = get_family_handler(spec.protocol_family)
+    report = _build_activation_report(
+        handler,
+        version.spec_json,
+        forced=False,
+        reason=None,
+        actor=actor,
+    )
+
+    # Step 3：合并 artifacts 和 warnings
+    report["artifacts"] = artifacts
+    if artifact_warnings:
+        report.setdefault("warnings", []).extend(artifact_warnings)
+        report["warning_count"] = len(report["warnings"])
+
+    # 注：ARINC429 legacy/bundle 双路径对拍已在切换为 bundle-only 后移除。
+    # device_bundle 现为 ARINC429 解析的唯一来源，体检只保留 validate_spec
+    # 产出的 warnings 和 artifacts，不再做 legacy vs bundle 双跑。
+
+    if persist:
+        version.activation_report_json = report
+        await db.flush()
+
+    return report
 
 
 async def activate_version(
@@ -987,6 +1086,12 @@ async def activate_version(
     if force and not (reason or "").strip():
         raise DeviceProtocolError("强制激活必须填写理由")
 
+    # 保留 publish 阶段 pipeline 已写入的 artifacts（若已存在），把体检结论更新为本次激活所用
+    existing_report = version.activation_report_json or {}
+    existing_artifacts = existing_report.get("artifacts") if isinstance(existing_report, dict) else None
+    if existing_artifacts and not report.get("artifacts"):
+        report["artifacts"] = existing_artifacts
+
     version.availability_status = AVAILABILITY_AVAILABLE
     version.activated_at = datetime.utcnow()
     version.activated_by = user
@@ -995,6 +1100,27 @@ async def activate_version(
 
     await db.commit()
     await db.refresh(version)
+
+    # 激活后：
+    # - 清掉 loader 进程级缓存（下一次 parser 访问强制重读落盘的 bundle）
+    # - 若 publish 阶段 pipeline 失败、当时没有 artifacts，这里兜底再跑一次 pipeline
+    try:
+        from .device_bundle import invalidate_device_bundle_cache
+
+        invalidate_device_bundle_cache(version.id)
+        if not (report.get("artifacts") or []):
+            await refresh_device_activation_pipeline(
+                db, version.id, actor=user, persist=True
+            )
+            await db.commit()
+            await db.refresh(version)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[DevicePipeline] activate 后 invalidate/pipeline 失败 version_id=%s: %s",
+            version.id,
+            exc,
+        )
+
     return version
 
 
@@ -1027,12 +1153,33 @@ async def deprecate_version(
 
 
 async def get_activation_report(
-    db: AsyncSession, version_id: int
+    db: AsyncSession,
+    version_id: int,
+    *,
+    refresh: bool = False,
+    ensure: bool = True,
 ) -> Dict[str, Any]:
-    """返回缓存的激活报告；若缺失则按当前 spec 重新生成（不持久化）。"""
+    """读激活报告（对齐 TSN 的 GET /network-config/versions/{id}/activation-report）。
+
+    :param refresh: True 时无条件重新跑 pipeline 并持久化
+    :param ensure: True 时缓存缺失则自动跑 pipeline 并持久化；False 时缺失直接返回空
+    """
     version = await get_version(db, version_id)
     if version is None:
         raise DeviceProtocolError(f"设备协议版本 {version_id} 不存在")
+
+    if refresh:
+        report = await refresh_device_activation_pipeline(
+            db, version.id, actor=None, persist=True
+        )
+        await db.commit()
+        await db.refresh(version)
+        return {
+            "version_id": version.id,
+            "availability_status": version.availability_status,
+            "report": report,
+            "cached": False,
+        }
 
     cached = getattr(version, "activation_report_json", None)
     if cached:
@@ -1043,31 +1190,123 @@ async def get_activation_report(
             "cached": True,
         }
 
-    spec_res = await db.execute(
-        select(DeviceProtocolSpec).where(DeviceProtocolSpec.id == version.spec_id)
-    )
-    spec = spec_res.scalar_one_or_none()
-    handler = get_family_handler(spec.protocol_family) if spec else None
-    if handler is None:
+    if not ensure:
         return {
             "version_id": version.id,
             "availability_status": version.availability_status,
             "report": None,
             "cached": False,
         }
-    report = _build_activation_report(
-        handler,
-        version.spec_json,
-        forced=False,
-        reason=None,
-        actor=None,
+
+    # 缓存缺失 → 自动跑 pipeline 并持久化
+    report = await refresh_device_activation_pipeline(
+        db, version.id, actor=None, persist=True
     )
+    await db.commit()
+    await db.refresh(version)
     return {
         "version_id": version.id,
         "availability_status": version.availability_status,
         "report": report,
         "cached": False,
     }
+
+
+# ═════════════════════════ Available 版本查询（供用户上传页 + ParserService）═════════════════════════
+
+
+async def list_available_versions(
+    db: AsyncSession,
+    *,
+    parser_family: Optional[str] = None,
+    ata: Optional[str] = None,
+    protocol_family: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """列出所有 ``availability_status=Available`` 的设备协议版本（扁平）。
+
+    过滤：
+    - ``parser_family``：匹配 ``DeviceProtocolSpec.parser_family_hints`` 任一元素
+    - ``ata``：按 ``ata_code`` 精确匹配
+    - ``protocol_family``：按 ``protocol_family`` 精确匹配
+    排序：``activated_at DESC``（未激活的放最后，按 created_at DESC 兜底）。
+    """
+    stmt = (
+        select(DeviceProtocolVersion, DeviceProtocolSpec)
+        .join(
+            DeviceProtocolSpec,
+            DeviceProtocolSpec.id == DeviceProtocolVersion.spec_id,
+        )
+        .where(DeviceProtocolVersion.availability_status == AVAILABILITY_AVAILABLE)
+    )
+    if protocol_family:
+        stmt = stmt.where(DeviceProtocolSpec.protocol_family == protocol_family)
+    if ata:
+        stmt = stmt.where(DeviceProtocolSpec.ata_code == ata)
+    stmt = stmt.order_by(
+        DeviceProtocolVersion.activated_at.desc().nullslast(),
+        DeviceProtocolVersion.created_at.desc(),
+    )
+    res = await db.execute(stmt)
+    rows = res.all()
+
+    from .device_bundle import device_bundle_exists
+
+    items: List[Dict[str, Any]] = []
+    pf_key = (parser_family or "").strip() or None
+    for v, s in rows:
+        hints = list(s.parser_family_hints or [])
+        if pf_key and pf_key not in hints:
+            continue
+        items.append(
+            {
+                "id": v.id,
+                "spec_id": v.spec_id,
+                "device_id": s.device_id,
+                "device_name": s.device_name,
+                "protocol_family": s.protocol_family,
+                "parser_family_hints": hints,
+                "ata_code": s.ata_code,
+                "version_name": v.version_name,
+                "version_seq": v.version_seq,
+                "activated_at": v.activated_at,
+                "activated_by": v.activated_by,
+                "has_bundle": device_bundle_exists(v.id),
+            }
+        )
+    return items
+
+
+async def get_active_device_version_by_parser_family(
+    db: AsyncSession, parser_family: str
+) -> Optional[DeviceProtocolVersion]:
+    """按 ``parser_family_hints`` 取对应设备的最新 Available 版本。
+
+    用于 ParserService 老任务兜底（ParseTask.device_protocol_version_map 为空时）。
+    """
+    pf = (parser_family or "").strip()
+    if not pf:
+        return None
+    stmt = (
+        select(DeviceProtocolVersion)
+        .join(
+            DeviceProtocolSpec,
+            DeviceProtocolSpec.id == DeviceProtocolVersion.spec_id,
+        )
+        .where(DeviceProtocolVersion.availability_status == AVAILABILITY_AVAILABLE)
+        .order_by(
+            DeviceProtocolVersion.activated_at.desc().nullslast(),
+            DeviceProtocolVersion.created_at.desc(),
+        )
+    )
+    res = await db.execute(stmt)
+    for v in res.scalars().all():
+        spec_res = await db.execute(
+            select(DeviceProtocolSpec).where(DeviceProtocolSpec.id == v.spec_id)
+        )
+        s = spec_res.scalar_one_or_none()
+        if s and pf in (s.parser_family_hints or []):
+            return v
+    return None
 
 
 # ═════════════════════════ Draft CRUD ═════════════════════════
@@ -1581,13 +1820,38 @@ class DeviceDraftHandler:
             version.git_exported_at = datetime.utcnow()
 
         await db.flush()
+
+        # 6) 激活闸门素材：对齐 TSN 的 refresh_activation_pipeline
+        #    PendingCode 阶段就把 device_bundle 生成 + 体检报告跑完，
+        #    把 artifacts 写进 activation_report_json，管理员点激活按钮只是状态跃迁。
+        report: Optional[Dict[str, Any]] = None
+        try:
+            report = await refresh_device_activation_pipeline(
+                db, version.id, actor=admin_username, persist=True
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[DevicePipeline] publish 后 pipeline 失败 version_id=%s: %s",
+                version.id,
+                exc,
+            )
+
+        extra: Dict[str, Any] = {
+            "spec_id": spec.id,
+            "git_export_status": version.git_export_status,
+        }
+        if report:
+            extra["activation_report"] = {
+                "ok": report.get("ok"),
+                "error_count": report.get("error_count", 0),
+                "warning_count": report.get("warning_count", 0),
+                "artifacts": report.get("artifacts") or [],
+            }
+
         return PublishedOutcome(
             version_id=version.id,
             display_version=f"{spec.device_id} {version.version_name}",
-            extra={
-                "spec_id": spec.id,
-                "git_export_status": version.git_export_status,
-            },
+            extra=extra,
         )
 
     def draft_label(self, draft: DeviceProtocolDraft) -> str:

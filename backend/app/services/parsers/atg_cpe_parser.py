@@ -161,7 +161,7 @@ class ATGCPEParser(Arinc429Mixin, BaseParser):
 
     _LABEL_DEFS = _LABEL_DEFS
     _FIELD_NAME_TO_LABEL = _FIELD_NAME_TO_LABEL
-    _PORT_LABELS = None
+    # 端口 → labels 路由由 TSN 网络配置承载。
 
     LABEL_TRACK_ANGLE = _LABEL_MAP["132"]
     LABEL_GROUND_SPEED = _LABEL_MAP["175"]
@@ -304,6 +304,11 @@ class ATGCPEParser(Arinc429Mixin, BaseParser):
         return ""
 
     def _decode_word(self, record: Dict[str, Any], word: int, label: int) -> None:
+        """ATG (CPE) 输出扁平列名（如 ``true_track_angle_deg``），与通用
+        ``_decode_with_bundle`` 的 ``{pfx}.{name}`` 约定不兼容，因此这条
+        支线在 parser 内完成字段解码。device_bundle 仍用于编辑器展示
+        bit 语义 / SSM 说明，但运行期列布局由下方代码直接写出。
+        """
         if label == self.LABEL_TRACK_ANGLE:
             record["true_track_angle_deg"] = self._decode_signed_value(word, 0.0054931640625, 14, 28)
         elif label == self.LABEL_GROUND_SPEED:

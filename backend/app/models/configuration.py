@@ -77,7 +77,7 @@ class AircraftConfiguration(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(200), nullable=False, comment="名称，如 'CE-25A 0号机 VA'")
+    name = Column(String(200), nullable=False, comment="名称，如 '0号机 VA'")
     version = Column(String(50), nullable=True, comment="版本号，如 'VA'")
     description = Column(Text, nullable=True)
 

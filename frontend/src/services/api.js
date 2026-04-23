@@ -182,6 +182,14 @@ export const deviceProtocolApi = {
       params: availabilityStatus ? { availability_status: availabilityStatus } : {},
     }),
   getVersion: (versionId) => api.get(`/device-protocol/versions/${versionId}`),
+  /** 仅返回 availability_status=Available 的扁平版本列表（上传页按 parser_family 拉下拉） */
+  listAvailableVersions: ({ parserFamily = null, ata = null, protocolFamily = null } = {}) => {
+    const params = {}
+    if (parserFamily) params.parser_family = parserFamily
+    if (ata) params.ata = ata
+    if (protocolFamily) params.protocol_family = protocolFamily
+    return api.get('/device-protocol/versions/available', { params })
+  },
   compareVersions: (specId, versionAId, versionBId) =>
     api.get(`/device-protocol/specs/${specId}/compare`, {
       params: { version_a_id: versionAId, version_b_id: versionBId },
@@ -592,6 +600,11 @@ export const configurationApi = {
 /** 试验工作台（按架次） */
 export const workbenchApi = {
   getSortie: (sortieId) => api.get(`/workbench/sorties/${sortieId}`),
+  listMatchedTasks: (sortieId) => api.get(`/workbench/sorties/${sortieId}/matched-tasks`),
+  getOverview: (sortieId, parseTaskId) =>
+    api.get(`/workbench/sorties/${sortieId}/overview`, { params: { parse_task_id: parseTaskId } }),
+  getEventsSummary: (sortieId, parseTaskId) =>
+    api.get(`/workbench/sorties/${sortieId}/events-summary`, { params: { parse_task_id: parseTaskId } }),
 }
 
 export default api

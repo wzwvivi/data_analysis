@@ -21,6 +21,7 @@ from ..models import ParseTask
 from ..services import FmsEventAnalysisService
 from ..services import shared_tsn_service as shared_tsn_svc
 from ..config import UPLOAD_DIR, MAX_UPLOAD_SIZE, ALLOWED_EXTENSIONS
+from ..services.disk_maintenance import InsufficientDiskSpace, ensure_free_disk
 from ..background_jobs import (
     run_fms_event_analysis_task_job,
     run_standalone_fms_event_analysis_task_job,
@@ -376,6 +377,11 @@ async def upload_standalone_pcap(
             status_code=400,
             detail=f"不支持的文件类型，允许: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
+
+    try:
+        ensure_free_disk(UPLOAD_DIR)
+    except InsufficientDiskSpace as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
     data = await file.read()
     if len(data) > MAX_UPLOAD_SIZE:

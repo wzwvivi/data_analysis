@@ -6,7 +6,7 @@ import os
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import (
     APIRouter, Body, Depends, HTTPException, UploadFile, File, Form,
@@ -19,6 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE
+from ..services.disk_maintenance import (
+    InsufficientDiskSpace,
+    ensure_free_disk,
+    purge_expired_results,
+)
 from ..deps import (
     get_current_user,
     ensure_port_visible_or_403,
@@ -161,6 +166,37 @@ async def _validate_parse_profiles(
     return dpm, profile_names
 
 
+def _parse_device_protocol_version_map(
+    raw: Optional[str],
+) -> Optional[Dict[str, int]]:
+    """解析上传表单里的 device_protocol_version_map（JSON 字符串）。
+
+    返回 ``{parser_family: device_protocol_version_id}``，或 None（缺失/空对象）。
+    """
+    import json as _json
+
+    if not raw:
+        return None
+    try:
+        data = _json.loads(raw)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"device_protocol_version_map JSON 解析失败: {e}")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="device_protocol_version_map 必须是对象")
+    cleaned: Dict[str, int] = {}
+    for k, v in data.items():
+        if v is None:
+            continue
+        try:
+            cleaned[str(k)] = int(v)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"device_protocol_version_map.{k} 必须是整数版本 id",
+            )
+    return cleaned or None
+
+
 def _resolve_ports_devices(
     selected_ports: Optional[str],
     selected_devices: Optional[str],
@@ -286,6 +322,7 @@ async def upload_and_parse(
     protocol_version_id: int = Form(None),
     selected_ports: str = Form(None),
     selected_devices: str = Form(None),
+    device_protocol_version_map: str = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     """上传文件并创建解析任务（仅设备映射新模式）。"""
@@ -296,12 +333,24 @@ async def upload_and_parse(
             detail=f"不支持的文件类型，只支持: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
+    # 新上传前先回收一次过期结果，再检查剩余磁盘；空间不足直接 413，避免写一半崩盘
+    try:
+        await purge_expired_results(db)
+    except Exception as exc:  # 清理失败不阻塞上传
+        import logging
+        logging.getLogger(__name__).warning("purge_expired_results 失败: %s", exc)
+    try:
+        ensure_free_disk(UPLOAD_DIR)
+    except InsufficientDiskSpace as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+
     service = ParserService(db)
     dpm, profile_names = await _validate_parse_profiles(
         service,
         device_parser_map=device_parser_map,
         protocol_version_id=protocol_version_id,
     )
+    dpv_map = _parse_device_protocol_version_map(device_protocol_version_map)
 
     upload_path = UPLOAD_DIR / "pcap"
     upload_path.mkdir(parents=True, exist_ok=True)
@@ -320,6 +369,7 @@ async def upload_and_parse(
         protocol_version_id=protocol_version_id,
         selected_ports=ports,
         selected_devices=devices,
+        device_protocol_version_map=dpv_map,
     )
     await _set_task_file_size(db, task.id, size=size)
     background_tasks.add_task(submit_parse_job, run_parse_task_job, task.id)
@@ -339,6 +389,7 @@ async def upload_from_shared_pcap(
     protocol_version_id: int = Form(None),
     selected_ports: str = Form(None),
     selected_devices: str = Form(None),
+    device_protocol_version_map: str = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     """使用管理员上传的平台共享 TSN 文件创建解析任务（直接复用共享文件）。"""
@@ -356,6 +407,7 @@ async def upload_from_shared_pcap(
         device_parser_map=device_parser_map,
         protocol_version_id=protocol_version_id,
     )
+    dpv_map = _parse_device_protocol_version_map(device_protocol_version_map)
 
     src = Path(row.file_path)
     if not src.is_file():
@@ -369,6 +421,7 @@ async def upload_from_shared_pcap(
         protocol_version_id=protocol_version_id,
         selected_ports=ports,
         selected_devices=devices,
+        device_protocol_version_map=dpv_map,
     )
     await _set_task_file_size(db, task.id, size=row.file_size)
     background_tasks.add_task(submit_parse_job, run_parse_task_job, task.id)

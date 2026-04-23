@@ -13,7 +13,6 @@ import {
   SafetyCertificateOutlined,
   BellOutlined,
   CheckOutlined,
-  ApartmentOutlined,
   DashboardOutlined,
   AimOutlined,
   SettingOutlined,
@@ -108,7 +107,6 @@ function MainLayout() {
     if (hasPageAccess('upload')) networkChildren.push({ key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' })
     if (hasPageAccess('tasks')) networkChildren.push({ key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' })
     if (hasPageAccess('network-config')) networkChildren.push({ key: '/network-config', icon: <SafetyCertificateOutlined />, label: 'TSN 网络配置' })
-    if (hasPageAccess('device-protocol')) networkChildren.push({ key: '/device-protocol', icon: <ApartmentOutlined />, label: '设备协议管理' })
 
     const eventChildren = []
     if (hasPageAccess('fms-event-analysis') || hasPageAccess('event-analysis')) eventChildren.push({ key: '/fms-event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' })
@@ -145,7 +143,7 @@ function MainLayout() {
       items.push({ type: 'group', label: '飞行助手分析', children: flightAssistantChildren })
     }
 
-    // 系统配置（仅管理员，不含协议管理 —— 已挪至"网络数据分析"）
+    // 系统配置（仅管理员）
     if (isAdmin) {
       items.push({ type: 'divider' })
       items.push({
@@ -185,7 +183,7 @@ function MainLayout() {
     if (path.startsWith('/workbench')) return '/workbench'
     if (path.startsWith('/tasks/')) return '/tasks'
     if (path.startsWith('/network-config')) return '/network-config'
-    if (path.startsWith('/device-protocol')) return '/device-protocol'
+    if (path.startsWith('/device-protocol')) return null
     if (path.startsWith('/compare')) return '/compare'
     if (path.startsWith('/auto-flight-analysis')) return '/auto-flight-analysis'
     if (path.startsWith('/fcc-event-analysis')) return '/fcc-event-analysis'
@@ -293,6 +291,7 @@ function MainLayout() {
     }
   }
 
+  const sideMenuSelectedKey = getSelectedKey()
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider
@@ -366,7 +365,7 @@ function MainLayout() {
         </div>
         <Menu
           mode="inline"
-          selectedKeys={[getSelectedKey()]}
+          selectedKeys={sideMenuSelectedKey != null ? [sideMenuSelectedKey] : []}
           openKeys={collapsed ? [] : openKeys}
           onOpenChange={(keys) => setOpenKeys(keys)}
           items={menuItems}

@@ -3,10 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   Card, Row, Col, Select, Button, Space, Typography, Spin, Alert, InputNumber,
   Form, Radio, Table, Tag, Empty, message, Tabs, Slider, Switch, Tooltip,
+  Statistic, Collapse, Badge, Divider,
 } from 'antd'
 import {
   AimOutlined, LeftOutlined, FullscreenOutlined, FullscreenExitOutlined,
-  ReloadOutlined, DatabaseOutlined,
+  ReloadOutlined, DatabaseOutlined, RightOutlined, SwapOutlined,
+  CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, PlayCircleOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
@@ -370,10 +372,58 @@ function resolveNorthVelocityColumn(columns) {
   return hit || null
 }
 
+/** 前端兜底：列名匹配 pitch */
+function resolvePitchColumn(columns) {
+  if (!columns?.length) return null
+  const low = columns.map((c) => String(c).toLowerCase())
+  const i = low.findIndex((c) => c === 'pitch')
+  if (i >= 0) return columns[i]
+  const kw = /pitch|俯仰|ptch/i
+  return columns.find((c) => kw.test(String(c))) || null
+}
+
+/** 前端兜底：列名匹配 roll */
+function resolveRollColumn(columns) {
+  if (!columns?.length) return null
+  const low = columns.map((c) => String(c).toLowerCase())
+  const i = low.findIndex((c) => c === 'roll')
+  if (i >= 0) return columns[i]
+  const kw = /roll|滚转|bank/i
+  return (
+    columns.find((c) => {
+      const s = String(c).toLowerCase()
+      return kw.test(String(c)) && !s.includes('rate')
+    }) || null
+  )
+}
+
+/** 前端兜底：列名匹配 yaw/heading */
+function resolveYawColumn(columns) {
+  if (!columns?.length) return null
+  const low = columns.map((c) => String(c).toLowerCase())
+  const i = low.findIndex((c) => c === 'heading' || c === 'yaw' || c === 'psi' || c === 'hdg')
+  if (i >= 0) return columns[i]
+  const kw = /yaw|heading|航向|偏航|psi|hdg/i
+  return columns.find((c) => kw.test(String(c))) || null
+}
+
+const QUALITY_COLOR = {
+  Good: 'success',
+  'Minor Issues': 'processing',
+  Warning: 'warning',
+  Critical: 'error',
+}
+
+function QualityBadge({ quality }) {
+  const status = QUALITY_COLOR[quality] || 'default'
+  return <Badge status={status} text={<Text strong>质量：{quality || '未知'}</Text>} />
+}
+
 function WorkbenchPicker() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [tree, setTree] = useState([])
+  const [selectedKeys, setSelectedKeys] = useState([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -420,14 +470,31 @@ function WorkbenchPicker() {
     },
   ]
 
+  const goCompare = () => {
+    if (!selectedKeys.length) return
+    navigate(`/workbench/compare?sortieIds=${selectedKeys.join(',')}`)
+  }
+
   return (
     <div className="fade-in">
       <Card
         title={<><AimOutlined style={{ marginRight: 8 }} />试验工作台</>}
-        extra={<Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新架次</Button>}
+        extra={(
+          <Space>
+            <Button
+              icon={<SwapOutlined />}
+              disabled={selectedKeys.length < 2}
+              onClick={goCompare}
+            >
+              对比所选架次（{selectedKeys.length}）
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新架次</Button>
+          </Space>
+        )}
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-          选择一个<strong>试验架次</strong>进入工作台：查看惯导经纬度轨迹、架次内视频，并配置各数据源相对时间对齐偏移。
+          选择一个<strong>试验架次</strong>进入工作台查看总览/轨迹/视频/事件分析；
+          在表格左侧勾选多行后点击<strong>对比所选架次</strong>可进入跨架次对比页。
           经纬度轨迹需先在「任务列表」中完成与本试验相关的<strong>解析任务</strong>（包含惯导端口）。
         </Text>
         <Table
@@ -436,6 +503,10 @@ function WorkbenchPicker() {
           loading={loading}
           columns={columns}
           dataSource={rows}
+          rowSelection={{
+            selectedRowKeys: selectedKeys,
+            onChange: (keys) => setSelectedKeys(keys),
+          }}
           pagination={{ pageSize: 12 }}
           locale={{ emptyText: '暂无试验架次，请管理员在「平台共享数据」中新建架次并上传数据' }}
         />
@@ -456,6 +527,11 @@ function WorkbenchDetail({ sortieId }) {
   const [trajDataRaw, setTrajDataRaw] = useState(null)
   const [omitZeroOrigin, setOmitZeroOrigin] = useState(false)
   const [selectedTrajIdx, setSelectedTrajIdx] = useState(null)
+  const [matched, setMatched] = useState(null)
+  const [overview, setOverview] = useState(null)
+  const [overviewLoading, setOverviewLoading] = useState(false)
+  const [eventsSummary, setEventsSummary] = useState(null)
+  const [eventsLoading, setEventsLoading] = useState(false)
 
   const leadingZeroOriginCount = useMemo(() => {
     if (!trajDataRaw?.path?.length) return 0
@@ -527,8 +603,58 @@ function WorkbenchDetail({ sortieId }) {
     }
   }, [])
 
+  const loadMatched = useCallback(async () => {
+    if (!sortieId) return
+    try {
+      const res = await workbenchApi.listMatchedTasks(sortieId)
+      setMatched(res.data || null)
+    } catch {
+      setMatched(null)
+    }
+  }, [sortieId])
+
   useEffect(() => { loadDetail() }, [loadDetail])
   useEffect(() => { loadTasks() }, [loadTasks])
+  useEffect(() => { loadMatched() }, [loadMatched])
+
+  useEffect(() => {
+    if (!taskId && matched?.parse_tasks?.length) {
+      const first = matched.parse_tasks[0]?.parse_task_id
+      if (first) setTaskId(first)
+    }
+  }, [matched, taskId])
+
+  const loadOverview = useCallback(async (tid) => {
+    if (!tid) { setOverview(null); return }
+    setOverviewLoading(true)
+    try {
+      const res = await workbenchApi.getOverview(sortieId, tid)
+      setOverview(res.data || null)
+    } catch {
+      setOverview(null)
+      message.error('加载架次总览失败')
+    } finally {
+      setOverviewLoading(false)
+    }
+  }, [sortieId])
+
+  const loadEventsSummary = useCallback(async (tid) => {
+    if (!tid) { setEventsSummary(null); return }
+    setEventsLoading(true)
+    try {
+      const res = await workbenchApi.getEventsSummary(sortieId, tid)
+      setEventsSummary(res.data || null)
+    } catch {
+      setEventsSummary(null)
+    } finally {
+      setEventsLoading(false)
+    }
+  }, [sortieId])
+
+  useEffect(() => {
+    loadOverview(taskId)
+    loadEventsSummary(taskId)
+  }, [taskId, loadOverview, loadEventsSummary])
 
   useEffect(() => {
     setAlign(loadAlignment(sortieId))
@@ -582,9 +708,16 @@ function WorkbenchDetail({ sortieId }) {
       return
     }
     if (!irsKey || !irsOptions.some((o) => o.value === irsKey)) {
-      setIrsKey(irsOptions[0].value)
+      const primary = overview?.primary_irs
+      const preferred = primary
+        ? irsOptions.find((o) => (
+            o.raw?.port_number === primary.port
+              && (primary.parser_id == null || o.raw?.parser_profile_id === primary.parser_id)
+          ))
+        : null
+      setIrsKey((preferred || irsOptions[0]).value)
     }
-  }, [irsOptions, irsKey])
+  }, [irsOptions, irsKey, overview])
 
   const loadTrajectory = useCallback(async () => {
     if (!taskId || !irsKey) return
@@ -842,6 +975,110 @@ function WorkbenchDetail({ sortieId }) {
     }
   }, [trajData])
 
+  const attitudeChart = useMemo(() => {
+    const series = overview?.attitude_series
+    if (!series?.time?.length) return null
+    const t = series.time
+    const fields = [
+      { key: 'pitch', label: 'Pitch (°)', shortName: 'Pitch', color: '#60a5fa' },
+      { key: 'roll', label: 'Roll (°)', shortName: 'Roll', color: '#34d399' },
+      { key: 'yaw', label: 'Yaw (°)', shortName: 'Yaw', color: '#fbbf24' },
+    ].filter((f) => Array.isArray(series[f.key]) && series[f.key].some((v) => v != null && Number.isFinite(v)))
+    if (!fields.length) return null
+
+    const markLine = (() => {
+      if (selectedTrajIdx == null || !trajData?.tSec?.[selectedTrajIdx]) return undefined
+      const tSel = trajData.tSec[selectedTrajIdx] - (align.parseOffsetMs || 0) / 1000
+      return {
+        symbol: 'none',
+        label: { formatter: '选中', color: '#facc15', fontSize: 10, distance: 8 },
+        lineStyle: { color: '#facc15', type: 'dashed' },
+        data: [{ xAxis: tSel }],
+      }
+    })()
+
+    const n = fields.length
+    const padTop = 12
+    const padBottom = 40
+    const rowGap = 44
+    const rowInner = 148
+    const leftPx = 88
+    const rightPx = 28
+    const chartHeight = padTop + n * rowInner + Math.max(0, n - 1) * rowGap + padBottom
+
+    const grids = fields.map((_, i) => ({
+      left: leftPx,
+      right: rightPx,
+      top: padTop + i * (rowInner + rowGap),
+      height: rowInner,
+      containLabel: false,
+    }))
+
+    const axisLabelStyle = { color: '#9393a1', fontSize: 11 }
+    const splitStyle = { lineStyle: { color: '#27272a' } }
+
+    const option = {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        confine: true,
+        appendToBody: true,
+      },
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      grid: grids,
+      xAxis: fields.map((_, i) => {
+        const isBottom = i === fields.length - 1
+        return {
+          type: 'value',
+          gridIndex: i,
+          name: isBottom ? '时间 (s)' : '',
+          nameLocation: 'middle',
+          nameGap: 30,
+          nameTextStyle: { color: '#9ca3af', fontSize: 11, padding: [10, 0, 0, 0] },
+          scale: true,
+          axisLine: { show: true, lineStyle: { color: '#3f3f46' } },
+          axisTick: { show: isBottom },
+          axisLabel: {
+            show: isBottom,
+            ...axisLabelStyle,
+            margin: 10,
+            formatter: (v) => Number(v).toFixed(0),
+          },
+          splitLine: { show: true, ...splitStyle },
+        }
+      }),
+      yAxis: fields.map((f, i) => ({
+        type: 'value',
+        gridIndex: i,
+        name: f.shortName,
+        nameLocation: 'middle',
+        nameRotate: 90,
+        nameGap: 52,
+        nameTextStyle: { color: '#9ca3af', fontSize: 11, align: 'center' },
+        scale: true,
+        axisLine: { show: true, lineStyle: { color: '#3f3f46' } },
+        axisTick: { show: true },
+        axisLabel: { ...axisLabelStyle, margin: 10 },
+        splitLine: { show: true, ...splitStyle },
+        splitNumber: 5,
+      })),
+      series: fields.map((f, i) => ({
+        name: f.label,
+        type: 'line',
+        xAxisIndex: i,
+        yAxisIndex: i,
+        showSymbol: false,
+        sampling: 'lttb',
+        lineStyle: { color: f.color, width: 1.3 },
+        data: t.map((x, k) => [x, series[f.key][k]]).filter((p) => p[1] != null && Number.isFinite(p[1])),
+        markLine,
+      })),
+    }
+
+    return { option, chartHeight }
+  }, [overview, selectedTrajIdx, trajData, align.parseOffsetMs])
+
   const videos = useMemo(() => {
     const files = detail?.files || []
     return files.filter((f) => (f.asset_type || '').startsWith('video_'))
@@ -1017,6 +1254,15 @@ function WorkbenchDetail({ sortieId }) {
     window.open(`/tasks/${taskId}?${qs}`, '_blank', 'noopener,noreferrer')
   }, [selectedTrajIdx, taskId, navParseMeta, trajData, align.parseOffsetMs])
 
+  const openParseTableAtEvent = useCallback((ev) => {
+    if (!taskId || !ev) return
+    const qs = new URLSearchParams()
+    if (ev.parse_ts != null && Number.isFinite(ev.parse_ts)) qs.set('parse_ts', String(ev.parse_ts))
+    if (ev.port != null) qs.set('port', String(ev.port))
+    if (ev.parser_id != null) qs.set('parser_id', String(ev.parser_id))
+    window.open(`/tasks/${taskId}?${qs.toString()}`, '_blank', 'noopener,noreferrer')
+  }, [taskId])
+
   const onVideoTabsEdit = (targetKey, action) => {
     if (action === 'add') {
       const newKey = `v_${Date.now()}`
@@ -1091,6 +1337,49 @@ function WorkbenchDetail({ sortieId }) {
         <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>{detail.remarks}</Text>
       )}
 
+      <Card
+        size="small"
+        title={<><DatabaseOutlined style={{ marginRight: 6 }} />解析任务</>}
+        style={{ marginBottom: 16 }}
+      >
+        <Space wrap size="middle">
+          <Text type="secondary">选择该架次的解析任务，总览/事件分析以此为数据来源：</Text>
+          <Select
+            style={{ minWidth: 320 }}
+            placeholder="选择已完成的解析任务"
+            value={taskId}
+            onChange={setTaskId}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            options={(() => {
+              const inSortie = new Set((matched?.parse_tasks || []).map((t) => t.parse_task_id))
+              const all = tasks.map((t) => ({
+                value: t.id,
+                label: `${inSortie.has(t.id) ? '★ ' : ''}#${t.id} ${t.filename || ''} (${t.status})`,
+              }))
+              all.sort((a, b) => (b.label.startsWith('★') ? 1 : 0) - (a.label.startsWith('★') ? 1 : 0))
+              return all
+            })()}
+          />
+          {matched?.parse_tasks?.length ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              ★ 为本架次文件直接匹配到的解析任务（共 {matched.parse_tasks.length} 个）
+            </Text>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              未匹配到直接关联的解析任务，可从全部已完成任务中手动选择
+            </Text>
+          )}
+        </Space>
+      </Card>
+
+      <WorkbenchOverviewCard
+        overview={overview}
+        loading={overviewLoading}
+        taskId={taskId}
+      />
+
       <Card title="时间对齐（本地保存）" style={{ marginBottom: 16 }} size="small">
         <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
           解析任务时间戳统一加偏移（毫秒），用于与视频等外源对齐；设置保存在本机浏览器。
@@ -1163,21 +1452,7 @@ function WorkbenchDetail({ sortieId }) {
             )}
           >
             <Space wrap style={{ marginBottom: 12 }}>
-              <Text type="secondary">解析任务</Text>
-              <Select
-                style={{ minWidth: 260 }}
-                placeholder="选择已完成的解析任务"
-                value={taskId}
-                onChange={setTaskId}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                options={tasks.map((t) => ({
-                  value: t.id,
-                  label: `#${t.id} ${t.filename || ''} (${t.status})`,
-                }))}
-              />
-              <Text type="secondary">惯导源</Text>
+              <Text type="secondary">惯导源（仅驱动地图/姿态/视频同步）</Text>
               <Select
                 style={{ minWidth: 320 }}
                 placeholder="选择惯导端口"
@@ -1525,7 +1800,315 @@ function WorkbenchDetail({ sortieId }) {
           </Card>
         </Col>
       </Row>
+
+      {attitudeChart && (
+        <Card title="姿态时序（pitch / roll / yaw，IRS 数据源）" size="small" style={{ marginTop: 16 }}>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+            与地图选点联动：在地图上选中采样点后，各子图会显示对应时刻的参考线（黄色虚线）。
+          </Text>
+          <ReactECharts
+            option={attitudeChart.option}
+            style={{ height: attitudeChart.chartHeight, minHeight: 320 }}
+            notMerge
+            lazyUpdate
+            theme="dark"
+          />
+        </Card>
+      )}
+
+      <WorkbenchEventsCard
+        summary={eventsSummary}
+        loading={eventsLoading}
+        taskId={taskId}
+        onOpenEvent={openParseTableAtEvent}
+      />
     </div>
+  )
+}
+
+function WorkbenchOverviewCard({ overview, loading, taskId }) {
+  if (!taskId) {
+    return (
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Empty description="请在上方选择一个解析任务以加载架次总览" />
+      </Card>
+    )
+  }
+  if (loading) {
+    return (
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <div style={{ textAlign: 'center', padding: 24 }}><Spin /> 加载总览…</div>
+      </Card>
+    )
+  }
+  if (!overview || overview.error) {
+    return (
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Alert type="warning" showIcon message={overview?.error || '未能加载架次总览'} />
+      </Card>
+    )
+  }
+  const { flight_info: info = {}, flight_profile: profile = {}, attitude = {}, phases = [], anomalies = [], quality, narrative, primary_irs, primary_adc } = overview
+  return (
+    <Card
+      size="small"
+      title={(
+        <Space size="middle" wrap>
+          <span>架次总览</span>
+          <QualityBadge quality={quality} />
+          {info?.has_flight === false && <Tag color="default">地面/滑行</Tag>}
+          {primary_irs && <Tag color="blue">IRS 端口 {primary_irs.port}</Tag>}
+          {primary_adc && <Tag color="cyan">ADC 端口 {primary_adc.port}</Tag>}
+        </Space>
+      )}
+      style={{ marginBottom: 16 }}
+    >
+      <Row gutter={[16, 16]}>
+        <Col xs={12} sm={8} md={6} lg={4}>
+          <Statistic title="时长" value={info.duration || 'N/A'} />
+        </Col>
+        <Col xs={12} sm={8} md={6} lg={5}>
+          <Statistic title="时间范围" value={`${info.start_time || 'N/A'} → ${info.end_time || 'N/A'}`} valueStyle={{ fontSize: 14 }} />
+        </Col>
+        <Col xs={12} sm={8} md={6} lg={4}>
+          <Statistic title="最大高度 (m)" value={profile.max_altitude_m ?? '—'} />
+        </Col>
+        <Col xs={12} sm={8} md={6} lg={4}>
+          <Statistic title="最大地速 (m/s)" value={profile.max_ground_speed ?? '—'} />
+        </Col>
+        <Col xs={12} sm={8} md={6} lg={4}>
+          <Statistic title="最大空速 (m/s)" value={profile.max_airspeed ?? '—'} />
+        </Col>
+        <Col xs={12} sm={8} md={6} lg={3}>
+          <Statistic title="最大马赫" value={profile.max_mach ?? '—'} />
+        </Col>
+        <Col xs={12} sm={8} md={6} lg={4}>
+          <Statistic title="解析端口数" value={info.dataset_count ?? 0} />
+        </Col>
+        <Col xs={12} sm={8} md={6} lg={4}>
+          <Statistic title="飞行阶段数" value={phases.length} />
+        </Col>
+        <Col xs={12} sm={8} md={6} lg={4}>
+          <Statistic title="异常条数" value={anomalies.length} valueStyle={{ color: anomalies.length > 0 ? '#faad14' : undefined }} />
+        </Col>
+      </Row>
+
+      {narrative && (
+        <>
+          <Divider style={{ margin: '16px 0 8px' }} orientation="left" plain>自然语言叙述</Divider>
+          <div style={{ whiteSpace: 'pre-line', lineHeight: 1.8, color: '#d4d4d8' }}>{narrative}</div>
+        </>
+      )}
+
+      <Divider style={{ margin: '16px 0 8px' }} orientation="left" plain>详情</Divider>
+      <Collapse
+        size="small"
+        items={[
+          {
+            key: 'phases',
+            label: `飞行阶段（${phases.length}）`,
+            children: phases.length === 0 ? (
+              <Empty description="未识别出飞行阶段" />
+            ) : (
+              <Table
+                size="small"
+                pagination={false}
+                rowKey={(_, i) => i}
+                dataSource={phases}
+                columns={[
+                  { title: '阶段', dataIndex: 'phase', width: 110 },
+                  { title: '开始', dataIndex: 'start', width: 120 },
+                  { title: '结束', dataIndex: 'end', width: 120 },
+                  { title: '时长', dataIndex: 'duration', width: 100 },
+                ]}
+              />
+            ),
+          },
+          {
+            key: 'attitude',
+            label: `姿态摘要（${Object.keys(attitude).length} 项）`,
+            children: !Object.keys(attitude).length ? (
+              <Empty description="无姿态数据" />
+            ) : (
+              <Table
+                size="small"
+                pagination={false}
+                rowKey="name"
+                dataSource={['pitch', 'roll', 'heading']
+                  .filter((k) => attitude[k])
+                  .map((k) => ({ name: k, ...attitude[k] }))}
+                columns={[
+                  { title: '名称', dataIndex: 'name', width: 100 },
+                  { title: '最小 (°)', dataIndex: 'min', width: 100 },
+                  { title: '最大 (°)', dataIndex: 'max', width: 100 },
+                  { title: '均值 (°)', dataIndex: 'mean', width: 100 },
+                  { title: '样本数', dataIndex: 'count', width: 100 },
+                ]}
+              />
+            ),
+          },
+          {
+            key: 'anomalies',
+            label: `异常（${anomalies.length}）`,
+            children: anomalies.length === 0 ? (
+              <Empty description="未检测到物理异常" />
+            ) : (
+              <Table
+                size="small"
+                pagination={{ pageSize: 10 }}
+                rowKey={(_, i) => i}
+                dataSource={anomalies}
+                columns={[
+                  { title: '时间', dataIndex: 'time', width: 120 },
+                  {
+                    title: '严重度',
+                    dataIndex: 'severity',
+                    width: 90,
+                    render: (s) => (
+                      <Tag color={s === 'critical' ? 'red' : s === 'warning' ? 'orange' : 'blue'}>{s || 'info'}</Tag>
+                    ),
+                  },
+                  { title: '类型', dataIndex: 'type', width: 180 },
+                  { title: '描述', dataIndex: 'detail', ellipsis: true },
+                  { title: '来源', dataIndex: 'source', width: 140 },
+                ]}
+              />
+            ),
+          },
+        ]}
+      />
+    </Card>
+  )
+}
+
+const MODULE_ROUTE = {
+  fms: '/fms-event-analysis/task/',
+  fcc: '/fcc-event-analysis/task/',
+  auto_flight: '/auto-flight-analysis/task/',
+  compare: '/compare/',
+}
+
+const MODULE_RUN_ROUTE = {
+  fms: '/fms-event-analysis',
+  fcc: '/fcc-event-analysis',
+  auto_flight: '/auto-flight-analysis',
+  compare: '/compare',
+}
+
+function statusTag(status) {
+  if (status === 'completed') return <Tag color="success" icon={<CheckCircleOutlined />}>已完成</Tag>
+  if (status === 'processing') return <Tag color="processing" icon={<PlayCircleOutlined />}>进行中</Tag>
+  if (status === 'failed') return <Tag color="error" icon={<CloseCircleOutlined />}>失败</Tag>
+  if (status === 'pending') return <Tag color="warning" icon={<WarningOutlined />}>待运行</Tag>
+  if (status === 'not_run') return <Tag color="default">未运行</Tag>
+  return <Tag>{status || '—'}</Tag>
+}
+
+function WorkbenchEventsCard({ summary, loading, taskId, onOpenEvent }) {
+  const navigate = useNavigate()
+
+  if (!taskId) return null
+  if (loading) {
+    return (
+      <Card size="small" style={{ marginTop: 16 }}>
+        <div style={{ textAlign: 'center', padding: 24 }}><Spin /> 加载事件分析总结…</div>
+      </Card>
+    )
+  }
+  const modules = summary?.modules || []
+
+  return (
+    <Card
+      size="small"
+      title="事件分析总结（按解析任务聚合）"
+      style={{ marginTop: 16 }}
+    >
+      <Row gutter={[16, 16]}>
+        {modules.map((m) => (
+          <Col xs={24} md={12} xl={12} key={m.module}>
+            <Card
+              size="small"
+              type="inner"
+              title={(
+                <Space>
+                  <span>{m.name}</span>
+                  {statusTag(m.status)}
+                </Space>
+              )}
+              extra={(
+                m.task_id ? (
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<RightOutlined />}
+                    onClick={() => navigate(`${MODULE_ROUTE[m.module]}${m.task_id}`)}
+                  >进入该模块</Button>
+                ) : (
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<PlayCircleOutlined />}
+                    onClick={() => navigate(MODULE_RUN_ROUTE[m.module])}
+                  >前往运行</Button>
+                )
+              )}
+            >
+              {m.status === 'not_run' ? (
+                <Empty description="尚未运行该模块分析" />
+              ) : (
+                <>
+                  <Space wrap size="middle" style={{ marginBottom: 8 }}>
+                    {Object.entries(m.counts || {}).map(([k, v]) => (
+                      <Tag key={k} color="blue">{k}: {v}</Tag>
+                    ))}
+                    {m.overall_result && (
+                      <Tag color={m.overall_result === 'pass' ? 'success' : m.overall_result === 'warning' ? 'warning' : 'error'}>
+                        综合: {m.overall_result}
+                      </Tag>
+                    )}
+                  </Space>
+                  {(m.top_events || []).length === 0 ? (
+                    <Empty description="暂无 top 事件" />
+                  ) : (
+                    <Table
+                      size="small"
+                      pagination={false}
+                      rowKey={(_, i) => `${m.module}-${i}`}
+                      dataSource={m.top_events}
+                      columns={[
+                        {
+                          title: '时间',
+                          dataIndex: 'time_str',
+                          width: 120,
+                          render: (v, r) => v || (r.ts != null ? Number(r.ts).toFixed(2) : '—'),
+                        },
+                        { title: '端口', dataIndex: 'port', width: 80, render: (v) => v ?? '—' },
+                        { title: '事件', dataIndex: 'title', ellipsis: true },
+                        {
+                          title: '操作',
+                          width: 110,
+                          render: (_, r) => (
+                            <Button
+                              size="small"
+                              type="link"
+                              icon={<DatabaseOutlined />}
+                              disabled={r.parse_ts == null}
+                              onClick={() => onOpenEvent(r)}
+                            >
+                              定位数据
+                            </Button>
+                          ),
+                        },
+                      ]}
+                    />
+                  )}
+                </>
+              )}
+            </Card>
+          </Col>
+        ))}
+      </Row>
+    </Card>
   )
 }
 

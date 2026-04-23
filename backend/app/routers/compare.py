@@ -14,6 +14,7 @@ from datetime import datetime
 from ..database import get_db
 from ..deps import get_current_user
 from ..config import UPLOAD_DIR, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE
+from ..services.disk_maintenance import InsufficientDiskSpace, ensure_free_disk
 from ..services import CompareService
 from ..services import shared_tsn_service as shared_tsn_svc
 from ..background_jobs import run_compare_task_job
@@ -242,6 +243,11 @@ async def upload_and_compare(
     version = await service.protocol_service.get_version(protocol_version_id)
     if not version:
         raise HTTPException(status_code=400, detail="网络配置版本不存在")
+
+    try:
+        ensure_free_disk(UPLOAD_DIR)
+    except InsufficientDiskSpace as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
     upload_path = UPLOAD_DIR / "compare"
     upload_path.mkdir(parents=True, exist_ok=True)
