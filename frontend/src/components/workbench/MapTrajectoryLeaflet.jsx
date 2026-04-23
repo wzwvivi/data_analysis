@@ -188,11 +188,14 @@ function MapClickSelect({ path, maxPickDeg, onSelect }) {
   return null
 }
 
-/** 悬停到轨迹附近时，在鼠标旁展示最近采样点的经纬度与 ENU 速度、地速 */
+/** 悬停到轨迹附近时，在鼠标旁展示最近采样点的经纬度、ENU 速度、地速及姿态 */
 function TrajectoryHoverReadout({
   path,
   eastVals,
   northVals,
+  pitchVals,
+  rollVals,
+  yawVals,
   groundSpeedVals,
   beijingTimeStrs,
   maxPickDeg,
@@ -250,6 +253,9 @@ function TrajectoryHoverReadout({
   const lat = path[tip.idx][1]
   const ve = eastVals?.[tip.idx]
   const vn = northVals?.[tip.idx]
+  const pitch = pitchVals?.[tip.idx]
+  const roll = rollVals?.[tip.idx]
+  const yaw = yawVals?.[tip.idx]
   let gs = groundSpeedVals?.[tip.idx]
   if (gs == null && ve != null && vn != null && Number.isFinite(ve) && Number.isFinite(vn)) {
     gs = Math.sqrt(ve * ve + vn * vn)
@@ -259,6 +265,7 @@ function TrajectoryHoverReadout({
     if (v == null || !Number.isFinite(Number(v))) return '—'
     return Number(v).toFixed(decimals)
   }
+  const hasAttitude = [pitch, roll, yaw].some((v) => v != null && Number.isFinite(Number(v)))
 
   const panel = (
     <div
@@ -289,6 +296,14 @@ function TrajectoryHoverReadout({
       <div>东向速度 {fmt(ve)} m/s</div>
       <div>北向速度 {fmt(vn)} m/s</div>
       <div>地速 √(东²+北²) {fmt(gs)} m/s</div>
+      {hasAttitude && (
+        <>
+          <div style={{ height: 4 }} />
+          <div>Pitch (俯仰) {fmt(pitch, 3)}°</div>
+          <div>Roll (滚转) {fmt(roll, 3)}°</div>
+          <div>Yaw (航向) {fmt(yaw, 3)}°</div>
+        </>
+      )}
     </div>
   )
 
@@ -314,6 +329,9 @@ export default function MapTrajectoryLeaflet({
   groundSpeedVals,
   eastVals,
   northVals,
+  pitchVals,
+  rollVals,
+  yawVals,
   beijingTimeStrs,
   selectedTrajIdx,
   onSelectIdx,
@@ -397,6 +415,9 @@ export default function MapTrajectoryLeaflet({
           path={path}
           eastVals={eastVals}
           northVals={northVals}
+          pitchVals={pitchVals}
+          rollVals={rollVals}
+          yawVals={yawVals}
           groundSpeedVals={groundSpeedVals}
           beijingTimeStrs={beijingTimeStrs}
           maxPickDeg={maxPickDeg}

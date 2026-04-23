@@ -9,6 +9,7 @@ import {
   AimOutlined, LeftOutlined, FullscreenOutlined, FullscreenExitOutlined,
   ReloadOutlined, DatabaseOutlined, RightOutlined, SwapOutlined,
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, PlayCircleOutlined,
+  LineChartOutlined, AppstoreOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
@@ -171,6 +172,148 @@ function parseSeriesNumber(v) {
   return Number.isFinite(x) ? x : null
 }
 
+/**
+ * 给定"毫秒时间戳"（Date 可构造）返回 Asia/Shanghai 的 HH:MM:SS。
+ * 用于图表坐标轴时间刻度显示；越界/非数值返回空串。
+ */
+function beijingHmsFromMs(ms) {
+  if (!Number.isFinite(ms)) return ''
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+/** 与解析结果页图表一致的 dataZoom（内置缩放 + 底部滑块） */
+const WORKBENCH_CHART_DATA_ZOOM = [
+  { type: 'inside', start: 0, end: 100 },
+  {
+    type: 'slider',
+    start: 0,
+    end: 100,
+    height: 20,
+    bottom: 8,
+    borderColor: '#27272a',
+    backgroundColor: '#0f0f12',
+    fillerColor: 'rgba(139, 92, 246, 0.2)',
+    handleStyle: { color: '#8b5cf6' },
+    textStyle: { color: '#a1a1aa' },
+  },
+]
+
+function computeWorkbenchAttitudeYRange(seriesArrays) {
+  const vals = []
+  seriesArrays.forEach((arr) => {
+    (arr || []).forEach((v) => {
+      if (v != null && Number.isFinite(Number(v))) vals.push(Number(v))
+    })
+  })
+  if (!vals.length) return { min: undefined, max: undefined }
+  const lo = Math.min(...vals)
+  const hi = Math.max(...vals)
+  const span = hi - lo
+  const pad = span > 0 ? span * 0.05 : Math.max(Math.abs(lo) * 0.05, 1)
+  return { min: lo - pad, max: hi + pad }
+}
+
+/** 按时间轴像素值（ms）找最近轨迹采样索引 */
+function nearestTrajIndexFromAxisMs(tSec, tMs) {
+  let bestI = 0
+  let bestD = Infinity
+  for (let i = 0; i < tSec.length; i += 1) {
+    const tv = tSec[i]
+    if (!Number.isFinite(tv)) continue
+    const d = Math.abs(tv * 1000 - tMs)
+    if (d < bestD) {
+      bestD = d
+      bestI = i
+    }
+  }
+  return { idx: bestI, distMs: bestD }
+}
+
+/** 在姿态降采样序列上找与 tMs 最近的点下标 */
+function nearestAttitudeIndexFromAxisMs(tMs, toX, len) {
+  let bestK = 0
+  let bestD = Infinity
+  for (let k = 0; k < len; k += 1) {
+    const x = toX(k)
+    if (x == null || !Number.isFinite(x)) continue
+    const d = Math.abs(x - tMs)
+    if (d < bestD) {
+      bestD = d
+      bestK = k
+    }
+  }
+  return bestK
+}
+
+/** 总览姿态序列 + 与轨迹对齐的 toX（ms）；无 epoch 时返回 null */
+function getAttitudeTooltipContext(overview, align) {
+  const series = overview?.attitude_series
+  if (!series?.time?.length) return null
+  const fields = [
+    { key: 'pitch', shortName: 'pitch', label: 'Pitch (°)', unit: '°' },
+    { key: 'roll', shortName: 'roll', label: 'Roll (°)', unit: '°' },
+    { key: 'yaw', shortName: 'yaw', label: 'Yaw (°)', unit: '°' },
+  ].filter((f) => Array.isArray(series[f.key]) && series[f.key].some((v) => v != null && Number.isFinite(v)))
+  if (!fields.length) return null
+  const epoch = series.time_epoch
+  const useEpoch = Array.isArray(epoch) && epoch.length === series.time.length && epoch.some((v) => Number.isFinite(Number(v)))
+  if (!useEpoch) return null
+  const offSec = (align?.parseOffsetMs || 0) / 1000
+  const toX = (idx) => {
+    const v = epoch[idx]
+    return Number.isFinite(v) ? (v + offSec) * 1000 : null
+  }
+  return { series, fields, toX }
+}
+
+/**
+ * 剖面 / 姿态 共用悬停读数：北京时间、累计航程、经纬度、高度、各姿态角（轨迹点按时间最近，姿态点按降采样最近）
+ */
+function formatWorkbenchProfileAttitudeTooltipHtml(tMs, trajData, altColumn, attitudeSeries, attitudeFields, toX) {
+  const { distM, altVals, tSec, path } = trajData
+  const { idx: i } = nearestTrajIndexFromAxisMs(tSec, tMs)
+  const bjFull = Number.isFinite(tSec[i])
+    ? (numericToBeijingWallClock(tSec[i] * 1000) || '—')
+    : '—'
+  const km = distM?.[i] != null ? (distM[i] / 1000).toFixed(3) : '—'
+  const lo = path[i]?.[0]
+  const la = path[i]?.[1]
+  const alt = altVals?.[i]
+  const altStr = alt != null && Number.isFinite(alt) ? Number(alt).toFixed(2) : '—'
+  const loStr = lo != null ? Number(lo).toFixed(6) : '—'
+  const laStr = la != null ? Number(la).toFixed(6) : '—'
+
+  const parts = [
+    `<div style="font-weight:600;margin-bottom:6px;color:#fef08a">时间（北京） ${bjFull}</div>`,
+    `<div>累计航程 <strong>${km}</strong> km</div>`,
+    `<div>经度 <strong>${loStr}</strong>°　纬度 <strong>${laStr}</strong>°</div>`,
+  ]
+  if (altColumn) {
+    parts.push(`<div>${altColumn} <strong>${altStr}</strong></div>`)
+  }
+
+  if (attitudeSeries && attitudeFields?.length && toX) {
+    const len = attitudeSeries.time?.length || 0
+    const k = nearestAttitudeIndexFromAxisMs(tMs, toX, len)
+    attitudeFields.forEach((f) => {
+      const arr = attitudeSeries[f.key]
+      const v = arr?.[k]
+      const unit = f.unit || '°'
+      parts.push(`<div>${f.shortName} <strong>${v != null && Number.isFinite(v) ? Number(v).toFixed(3) : '—'}</strong> ${unit}</div>`)
+    })
+  }
+
+  return parts.join('')
+}
+
 /** 将 Unix 秒或毫秒转为 Asia/Shanghai 本地化时间字符串 */
 function numericToBeijingWallClock(v) {
   if (!Number.isFinite(v)) return null
@@ -280,6 +423,9 @@ function stripLeadingZeroOriginTraj(traj) {
     altVals: rest(traj.altVals),
     eastVals: traj.eastVals ? rest(traj.eastVals) : undefined,
     northVals: traj.northVals ? rest(traj.northVals) : undefined,
+    pitchVals: traj.pitchVals ? rest(traj.pitchVals) : undefined,
+    rollVals: traj.rollVals ? rest(traj.rollVals) : undefined,
+    yawVals: traj.yawVals ? rest(traj.yawVals) : undefined,
     groundSpeedVals: traj.groundSpeedVals ? rest(traj.groundSpeedVals) : undefined,
     beijingTimeStrs: traj.beijingTimeStrs ? rest(traj.beijingTimeStrs) : undefined,
     distM: recomputeTrajectoryDistM(path2),
@@ -568,11 +714,22 @@ function WorkbenchDetail({ sortieId }) {
     return '1'
   })
   const [fs, setFs] = useState(false)
+  /** 姿态时序：与解析结果页一致的「叠加 / 并列」布局 */
+  const [attitudeChartLayout, setAttitudeChartLayout] = useState('overlay')
   const wrapRef = useRef(null)
   const videoElsRef = useRef({})
   /** 每个 fileId 对应 stable ref，避免每次 render 新建函数导致 <video> 反复挂载并死循环 */
   const videoRefCallbacks = useRef(new Map())
   const trajAltChartRef = useRef(null)
+  const attitudeChartRef = useRef(null)
+  /** 垂直剖面 + 姿态叠加合并为一张图时使用 */
+  const mergedProfileAttitudeRef = useRef(null)
+  /** 架次总览「物理异常」行点击后滚动定位到页面底部「事件分析总结」 */
+  const eventsSummarySectionRef = useRef(null)
+
+  useEffect(() => {
+    setAttitudeChartLayout('overlay')
+  }, [taskId])
 
   useEffect(() => {
     setSelectedTrajIdx(null)
@@ -741,12 +898,16 @@ function WorkbenchDetail({ sortieId }) {
       const eastVelCol = resolveEastVelocityColumn(columns)
       const northVelCol = resolveNorthVelocityColumn(columns)
       const beijingWallCol = resolveBeijingWallClockColumn(columns)
+      const pitchCol = resolvePitchColumn(columns)
+      const rollCol = resolveRollColumn(columns)
+      const yawCol = resolveYawColumn(columns)
 
       const params = { max_points: 8000 }
       if (parserId != null) params.parser_id = parserId
 
       const uniqueVarCols = [...new Set([
         speedCol, altCol, eastVelCol, northVelCol, beijingWallCol,
+        pitchCol, rollCol, yawCol,
       ].filter(Boolean))]
       const seriesReq = [
         parseApi.getTimeSeries(taskId, port, 'latitude', { params: { ...params } }),
@@ -767,6 +928,9 @@ function WorkbenchDetail({ sortieId }) {
       const eastR = eastVelCol ? varByCol[eastVelCol] : null
       const northR = northVelCol ? varByCol[northVelCol] : null
       const bjR = beijingWallCol ? varByCol[beijingWallCol] : null
+      const pitchR = pitchCol ? varByCol[pitchCol] : null
+      const rollR = rollCol ? varByCol[rollCol] : null
+      const yawR = yawCol ? varByCol[yawCol] : null
 
       const ts = latR.data.timestamps || []
       const lat = latR.data.values || []
@@ -776,6 +940,9 @@ function WorkbenchDetail({ sortieId }) {
       const eastRaw = eastR ? (eastR.data.values || []) : []
       const northRaw = northR ? (northR.data.values || []) : []
       const bjRaw = bjR ? (bjR.data.values || []) : []
+      const pitchRaw = pitchR ? (pitchR.data.values || []) : []
+      const rollRaw = rollR ? (rollR.data.values || []) : []
+      const yawRaw = yawR ? (yawR.data.values || []) : []
 
       const lens = [ts.length, lat.length, lon.length]
       uniqueVarCols.forEach((col) => {
@@ -792,6 +959,9 @@ function WorkbenchDetail({ sortieId }) {
       const altVals = []
       const eastVals = []
       const northVals = []
+      const pitchVals = []
+      const rollVals = []
+      const yawVals = []
       const parserGroundSpeedVals = []
       const beijingTimeStrs = []
       const distM = []
@@ -824,6 +994,9 @@ function WorkbenchDetail({ sortieId }) {
         }
         eastVals.push(ve)
         northVals.push(vn)
+        pitchVals.push(pitchCol ? parseSeriesNumber(pitchRaw[i]) : null)
+        rollVals.push(rollCol ? parseSeriesNumber(rollRaw[i]) : null)
+        yawVals.push(yawCol ? parseSeriesNumber(yawRaw[i]) : null)
         parserGroundSpeedVals.push(gs)
         const rawBj = beijingWallCol ? bjRaw[i] : null
         beijingTimeStrs.push(formatSampleBeijingTime(rawBj, tv))
@@ -840,6 +1013,9 @@ function WorkbenchDetail({ sortieId }) {
         altVals,
         eastVals,
         northVals,
+        pitchVals,
+        rollVals,
+        yawVals,
         groundSpeedVals,
         beijingTimeStrs,
         distM,
@@ -848,6 +1024,9 @@ function WorkbenchDetail({ sortieId }) {
         eastVelocityColumn: eastVelCol,
         northVelocityColumn: northVelCol,
         beijingWallClockColumn: beijingWallCol,
+        pitchColumn: pitchCol,
+        rollColumn: rollCol,
+        yawColumn: yawCol,
       } : null)
     } catch {
       message.error('加载惯导轨迹失败')
@@ -866,20 +1045,21 @@ function WorkbenchDetail({ sortieId }) {
   const trajAltOption = useMemo(() => {
     if (!trajData?.path?.length || !trajData.altColumn) return null
     const { distM, altVals, altColumn, tSec, path } = trajData
-    if (!distM?.length || !altVals?.some((a) => a != null && Number.isFinite(a))) return null
+    if (!tSec?.length || !altVals?.some((a) => a != null && Number.isFinite(a))) return null
+    // x = 北京时间（基于 UTC epoch 秒转 ms），y = 高度
     const pts = []
     for (let i = 0; i < path.length; i += 1) {
       const a = altVals[i]
-      if (a == null || !Number.isFinite(a)) continue
-      pts.push([distM[i] / 1000, a, i])
+      const tv = tSec[i]
+      if (a == null || !Number.isFinite(a) || !Number.isFinite(tv)) continue
+      pts.push([tv * 1000, a, i])
     }
     if (!pts.length) return null
-    const dKmMax = Math.max(...distM) / 1000
     const finAlts = altVals.filter((x) => x != null && Number.isFinite(x))
     const aMin = Math.min(...finAlts)
     const aMax = Math.max(...finAlts)
-    const xSel = selectedTrajIdx != null && distM[selectedTrajIdx] != null
-      ? distM[selectedTrajIdx] / 1000
+    const xSel = selectedTrajIdx != null && Number.isFinite(tSec[selectedTrajIdx])
+      ? tSec[selectedTrajIdx] * 1000
       : null
     const markLine = xSel != null
       ? {
@@ -892,7 +1072,7 @@ function WorkbenchDetail({ sortieId }) {
     return {
       backgroundColor: 'transparent',
       title: {
-        text: `垂直剖面：${altColumn} — 累计航程（数据来自解析结果列）`,
+        text: `垂直剖面：${altColumn} — 时间（北京）`,
         left: 'center',
         top: 4,
         textStyle: { fontSize: 12, color: '#9ca3af', fontWeight: 'normal' },
@@ -906,27 +1086,50 @@ function WorkbenchDetail({ sortieId }) {
           const idx = Array.isArray(row) ? row[2] : it.dataIndex
           const i = typeof idx === 'number' ? idx : 0
           const t = tSec[i]
+          const tMs = Number.isFinite(t) ? t * 1000 : null
+          const attCtx = getAttitudeTooltipContext(overview, align)
+          if (tMs != null && attCtx) {
+            return formatWorkbenchProfileAttitudeTooltipHtml(
+              tMs,
+              trajData,
+              altColumn,
+              attCtx.series,
+              attCtx.fields,
+              attCtx.toX,
+            )
+          }
           const lo = path[i]?.[0]
           const la = path[i]?.[1]
           const alt = altVals[i]
-          return `累计航程 ${it.axisValueLabel != null ? `${Number(it.axisValueLabel).toFixed(3)} km` : ''}<br/>${altColumn}: ${alt != null ? Number(alt).toFixed(2) : '—'}<br/>时间 ${t != null ? Number(t).toFixed(3) : '—'} s<br/>经度 ${lo != null ? Number(lo).toFixed(6) : '—'}° 纬度 ${la != null ? Number(la).toFixed(6) : '—'}°`
+          const km = distM?.[i] != null ? (distM[i] / 1000).toFixed(3) : '—'
+          const bjFull = numericToBeijingWallClock(t * 1000) || '—'
+          return `时间 ${bjFull}<br/>${altColumn}: ${alt != null ? Number(alt).toFixed(2) : '—'}<br/>累计航程 ${km} km<br/>经度 ${lo != null ? Number(lo).toFixed(6) : '—'}° 纬度 ${la != null ? Number(la).toFixed(6) : '—'}°`
         },
       },
-      grid: { left: 56, right: 18, top: 40, bottom: 36 },
+      grid: { left: 56, right: 18, top: 40, bottom: 64 },
       xAxis: {
-        type: 'value',
-        name: '累计航程 (km)',
-        min: 0,
-        max: dKmMax,
-        axisLabel: { color: '#9393a1', formatter: (v) => Number(v).toFixed(2) },
+        type: 'time',
+        name: '时间（北京）',
+        axisPointer: { snap: true },
+        axisLabel: {
+          color: '#a1a1aa',
+          hideOverlap: true,
+          rotate: 30,
+          formatter: (v) => beijingHmsFromMs(v),
+        },
+        axisLine: { lineStyle: { color: '#27272a' } },
+        splitLine: { show: false },
       },
       yAxis: {
         type: 'value',
         name: altColumn,
         min: aMin,
         max: aMax,
-        axisLabel: { color: '#9393a1' },
+        axisLabel: { color: '#a1a1aa' },
+        axisLine: { lineStyle: { color: '#27272a' } },
+        splitLine: { lineStyle: { color: '#27272a' } },
       },
+      dataZoom: WORKBENCH_CHART_DATA_ZOOM,
       series: [{
         type: 'line',
         name: altColumn,
@@ -937,69 +1140,301 @@ function WorkbenchDetail({ sortieId }) {
         markLine,
       }],
     }
-  }, [trajData, selectedTrajIdx])
-
-  useEffect(() => {
-    if (!trajData?.distM?.length || !trajData?.altColumn) return undefined
-    if (!trajData.altVals?.some((a) => a != null && Number.isFinite(a))) return undefined
-    const bind = { zr: null, handler: null }
-    const tid = window.setTimeout(() => {
-      const chart = trajAltChartRef.current?.getEchartsInstance?.()
-      if (!chart) return
-      const { distM } = trajData
-      const dMaxM = Math.max(...distM)
-      const maxPickKm = Math.max((dMaxM / 1000) * 0.02, 1e-6)
-      bind.zr = chart.getZr()
-      bind.handler = (ev) => {
-        const coord = chart.convertFromPixel({ gridIndex: 0 }, [ev.offsetX, ev.offsetY])
-        if (!coord || !Number.isFinite(coord[0])) return
-        const clickKm = coord[0]
-        let best = 0
-        let bestD = Infinity
-        for (let i = 0; i < distM.length; i += 1) {
-          const km = distM[i] / 1000
-          const d = Math.abs(km - clickKm)
-          if (d < bestD) {
-            bestD = d
-            best = i
-          }
-        }
-        if (bestD > maxPickKm) return
-        setSelectedTrajIdx(best)
-      }
-      bind.zr.on('click', bind.handler)
-    }, 0)
-    return () => {
-      window.clearTimeout(tid)
-      if (bind.zr && bind.handler) bind.zr.off('click', bind.handler)
-    }
-  }, [trajData])
+  }, [trajData, selectedTrajIdx, overview, align])
 
   const attitudeChart = useMemo(() => {
     const series = overview?.attitude_series
     if (!series?.time?.length) return null
-    const t = series.time
-    const fields = [
-      { key: 'pitch', label: 'Pitch (°)', shortName: 'Pitch', color: '#60a5fa' },
-      { key: 'roll', label: 'Roll (°)', shortName: 'Roll', color: '#34d399' },
-      { key: 'yaw', label: 'Yaw (°)', shortName: 'Yaw', color: '#fbbf24' },
+    const baseFields = [
+      { key: 'pitch', label: 'Pitch (°)', shortName: 'pitch', color: '#60a5fa', unit: '°', source: 'attitude' },
+      { key: 'roll', label: 'Roll (°)', shortName: 'roll', color: '#34d399', unit: '°', source: 'attitude' },
+      { key: 'yaw', label: 'Yaw (°)', shortName: 'yaw', color: '#fbbf24', unit: '°', source: 'attitude' },
     ].filter((f) => Array.isArray(series[f.key]) && series[f.key].some((v) => v != null && Number.isFinite(v)))
+    const hasTrajAltitude = !!(
+      trajData?.altColumn
+      && trajData?.tSec?.length
+      && trajData?.altVals?.some((v) => v != null && Number.isFinite(v))
+    )
+    const altitudeField = hasTrajAltitude
+      ? { key: '_traj_altitude', label: `${trajData.altColumn} (m)`, shortName: 'altitude', color: '#f97316', unit: 'm', source: 'trajectory' }
+      : null
+    const fields = altitudeField ? [...baseFields, altitudeField] : baseFields
     if (!fields.length) return null
 
+    const epoch = series.time_epoch
+    const useEpoch = Array.isArray(epoch) && epoch.length === series.time.length && epoch.some((v) => Number.isFinite(v))
+    // 与垂直剖面 / 地图轨迹一致：X 轴使用「解析 UTC + 本页时间对齐偏移」，与 trajData.tSec 同口径
+    const offSec = (align.parseOffsetMs || 0) / 1000
+    const toX = (i) => {
+      if (useEpoch) {
+        const v = epoch[i]
+        return Number.isFinite(v) ? (v + offSec) * 1000 : null
+      }
+      const v = series.time[i]
+      return Number.isFinite(v) ? v : null
+    }
+    const fieldPoints = (f) => {
+      if (f.source === 'trajectory') {
+        if (!trajData?.tSec?.length || !trajData?.altVals?.length) return []
+        const pts = []
+        for (let i = 0; i < trajData.tSec.length; i += 1) {
+          const tv = trajData.tSec[i]
+          const av = trajData.altVals[i]
+          if (!Number.isFinite(tv) || av == null || !Number.isFinite(av)) continue
+          pts.push([tv * 1000, av])
+        }
+        return pts
+      }
+      return series[f.key]
+        .map((v, k) => [toX(k), v])
+        .filter((p) => p[0] != null && p[1] != null && Number.isFinite(p[1]))
+    }
+
     const markLine = (() => {
-      if (selectedTrajIdx == null || !trajData?.tSec?.[selectedTrajIdx]) return undefined
-      const tSel = trajData.tSec[selectedTrajIdx] - (align.parseOffsetMs || 0) / 1000
+      if (selectedTrajIdx == null || !Number.isFinite(trajData?.tSec?.[selectedTrajIdx])) return undefined
+      if (!useEpoch) return undefined
+      const xVal = trajData.tSec[selectedTrajIdx] * 1000
       return {
         symbol: 'none',
         label: { formatter: '选中', color: '#facc15', fontSize: 10, distance: 8 },
         lineStyle: { color: '#facc15', type: 'dashed' },
-        data: [{ xAxis: tSel }],
+        data: [{ xAxis: xVal }],
       }
     })()
 
+    const fmtYTick = (value) => {
+      const n = Number(value)
+      if (!Number.isFinite(n)) return String(value ?? '')
+      const v3 = n.toFixed(3)
+      return v3.endsWith('0') ? n.toFixed(2) : v3
+    }
+
+    const xAxisBase = {
+      type: useEpoch ? 'time' : 'value',
+      axisPointer: useEpoch ? { snap: true } : {},
+      axisLabel: {
+        color: '#a1a1aa',
+        hideOverlap: true,
+        rotate: 30,
+        formatter: (v) => (useEpoch ? beijingHmsFromMs(v) : Number(v).toFixed(0)),
+      },
+      axisLine: { lineStyle: { color: '#27272a' } },
+      splitLine: { show: false },
+    }
+
+    const canToggleLayout = fields.length >= 2
+
+    if (attitudeChartLayout === 'overlay') {
+      const pointsByField = {}
+      fields.forEach((f) => {
+        pointsByField[f.key] = fieldPoints(f)
+      })
+
+      const attitudeOnlyFields = fields.filter((f) => f.source !== 'trajectory')
+      const altitudeOnlyField = fields.find((f) => f.source === 'trajectory')
+      const hasAltitudeSeries = !!altitudeOnlyField
+      let yAxis
+      let chartSeries
+      if (hasAltitudeSeries && !attitudeOnlyFields.length) {
+        const altNums = trajData.altVals.filter((v) => v != null && Number.isFinite(v))
+        const altMin = Math.min(...altNums)
+        const altMax = Math.max(...altNums)
+        yAxis = {
+          type: 'value',
+          name: altitudeOnlyField.shortName,
+          min: altMin,
+          max: altMax,
+          nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+          axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { lineStyle: { color: '#27272a' } },
+        }
+        chartSeries = fields.map((f, i) => ({
+          name: f.shortName,
+          type: 'line',
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          smooth: true,
+          showSymbol: false,
+          sampling: 'lttb',
+          lineStyle: { width: 1.5, color: f.color },
+          itemStyle: { color: f.color },
+          emphasis: { focus: 'series', lineStyle: { width: 2.5 } },
+          data: pointsByField[f.key],
+          markLine: i === 0 ? markLine : undefined,
+        }))
+      } else if (hasAltitudeSeries && attitudeOnlyFields.length) {
+        const rAtt = computeWorkbenchAttitudeYRange(attitudeOnlyFields.map((f) => series[f.key]))
+        const altNums = trajData.altVals.filter((v) => v != null && Number.isFinite(v))
+        const altMin = Math.min(...altNums)
+        const altMax = Math.max(...altNums)
+        yAxis = [
+          {
+            type: 'value',
+            name: 'attitude (°)',
+            min: rAtt.min,
+            max: rAtt.max,
+            position: 'left',
+            nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+            axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+            axisLine: { lineStyle: { color: '#27272a' } },
+            splitLine: { lineStyle: { color: '#27272a' } },
+          },
+          {
+            type: 'value',
+            name: altitudeOnlyField.shortName,
+            min: altMin,
+            max: altMax,
+            position: 'right',
+            nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+            axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+            axisLine: { lineStyle: { color: '#27272a' } },
+            splitLine: { show: false },
+          },
+        ]
+        chartSeries = fields.map((f, i) => ({
+          name: f.shortName,
+          type: 'line',
+          xAxisIndex: 0,
+          yAxisIndex: f.source === 'trajectory' ? 1 : 0,
+          smooth: true,
+          showSymbol: false,
+          sampling: 'lttb',
+          lineStyle: { width: 1.5, color: f.color },
+          itemStyle: { color: f.color },
+          emphasis: { focus: 'series', lineStyle: { width: 2.5 } },
+          data: pointsByField[f.key],
+          markLine: i === 0 ? markLine : undefined,
+        }))
+      } else if (fields.length === 2) {
+        const f0 = fields[0]
+        const f1 = fields[1]
+        const r0 = computeWorkbenchAttitudeYRange([series[f0.key]])
+        const r1 = computeWorkbenchAttitudeYRange([series[f1.key]])
+        yAxis = [
+          {
+            type: 'value',
+            name: f0.shortName,
+            min: r0.min,
+            max: r0.max,
+            position: 'left',
+            nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+            axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+            axisLine: { lineStyle: { color: '#27272a' } },
+            splitLine: { lineStyle: { color: '#27272a' } },
+          },
+          {
+            type: 'value',
+            name: f1.shortName,
+            min: r1.min,
+            max: r1.max,
+            position: 'right',
+            nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+            axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+            axisLine: { lineStyle: { color: '#27272a' } },
+            splitLine: { show: false },
+          },
+        ]
+        chartSeries = fields.map((f, i) => ({
+          name: f.shortName,
+          type: 'line',
+          xAxisIndex: 0,
+          yAxisIndex: i,
+          smooth: true,
+          showSymbol: false,
+          sampling: 'lttb',
+          lineStyle: { width: 1.5, color: f.color },
+          itemStyle: { color: f.color },
+          emphasis: { focus: 'series', lineStyle: { width: 2.5 } },
+          data: pointsByField[f.key],
+          markLine: i === 0 ? markLine : undefined,
+        }))
+      } else {
+        const rAll = computeWorkbenchAttitudeYRange(fields.map((f) => series[f.key]))
+        yAxis = {
+          type: 'value',
+          name: fields.length > 1 ? '°' : fields[0].shortName,
+          min: rAll.min,
+          max: rAll.max,
+          nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+          axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { lineStyle: { color: '#27272a' } },
+        }
+        chartSeries = fields.map((f, i) => ({
+          name: f.shortName,
+          type: 'line',
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          smooth: true,
+          showSymbol: false,
+          sampling: 'lttb',
+          lineStyle: { width: 1.5, color: f.color },
+          itemStyle: { color: f.color },
+          emphasis: { focus: 'series', lineStyle: { width: 2.5 } },
+          data: pointsByField[f.key],
+          markLine: i === 0 ? markLine : undefined,
+        }))
+      }
+
+      const rightPad = Array.isArray(yAxis) ? 52 : 22
+      const option = {
+        backgroundColor: 'transparent',
+        legend: {
+          data: fields.map((f) => f.shortName),
+          textStyle: { color: '#a1a1aa' },
+          top: 6,
+        },
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: '#0f0f12',
+          borderColor: '#27272a',
+          textStyle: { color: '#e4e4e7' },
+          confine: true,
+          appendToBody: true,
+          axisPointer: {
+            type: 'cross',
+            snap: !!useEpoch,
+            crossStyle: { color: '#a1a1aa' },
+            lineStyle: { color: '#8b5cf6', type: 'dashed' },
+            label: { backgroundColor: '#18181b', color: '#e4e4e7' },
+          },
+          formatter: (items) => {
+            if (!items?.length) return ''
+            const ax = items[0].axisValue
+            if (useEpoch && trajData?.tSec?.length && trajData.altColumn) {
+              return formatWorkbenchProfileAttitudeTooltipHtml(
+                Number(ax),
+                trajData,
+                trajData.altColumn,
+                series,
+                fields,
+                toX,
+              )
+            }
+            const head = useEpoch
+              ? (numericToBeijingWallClock(Number(ax)) || beijingHmsFromMs(ax))
+              : `时间 ${Number(ax).toFixed(3)} s`
+            const body = items.map((it) => {
+              const v = Array.isArray(it.data) ? it.data[1] : it.value
+              return `${it.marker}${it.seriesName}: ${v != null && Number.isFinite(v) ? Number(v).toFixed(3) : '—'}`
+            }).join('<br/>')
+            return `${head}<br/>${body}`
+          },
+        },
+        grid: { left: 58, right: rightPad, top: 40, bottom: 64 },
+        xAxis: { ...xAxisBase },
+        yAxis,
+        series: chartSeries,
+        dataZoom: WORKBENCH_CHART_DATA_ZOOM,
+      }
+      return { option, chartHeight: 320, canToggleLayout }
+    }
+
+    // 并列：多子图 + 底部滑块联动所有 X 轴
     const n = fields.length
     const padTop = 12
-    const padBottom = 40
+    const padBottom = 56
     const rowGap = 44
     const rowInner = 148
     const leftPx = 88
@@ -1014,36 +1449,89 @@ function WorkbenchDetail({ sortieId }) {
       containLabel: false,
     }))
 
-    const axisLabelStyle = { color: '#9393a1', fontSize: 11 }
+    const axisLabelStyle = { color: '#a1a1aa', fontSize: 11 }
     const splitStyle = { lineStyle: { color: '#27272a' } }
+    const xAxisIndices = fields.map((_, i) => i)
 
     const option = {
       backgroundColor: 'transparent',
+      legend: {
+        data: fields.map((f) => f.shortName),
+        textStyle: { color: '#a1a1aa' },
+        top: 6,
+      },
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'cross' },
+        backgroundColor: '#0f0f12',
+        borderColor: '#27272a',
+        textStyle: { color: '#e4e4e7' },
+        axisPointer: {
+          type: 'cross',
+          snap: !!useEpoch,
+          crossStyle: { color: '#a1a1aa' },
+          lineStyle: { color: '#8b5cf6', type: 'dashed' },
+          label: { backgroundColor: '#18181b', color: '#e4e4e7' },
+        },
         confine: true,
         appendToBody: true,
+        formatter: (items) => {
+          if (!items?.length) return ''
+          const ax = items[0].axisValue
+          if (useEpoch && trajData?.tSec?.length && trajData.altColumn) {
+            return formatWorkbenchProfileAttitudeTooltipHtml(
+              Number(ax),
+              trajData,
+              trajData.altColumn,
+              series,
+              fields,
+              toX,
+            )
+          }
+          const head = useEpoch
+            ? (numericToBeijingWallClock(Number(ax)) || beijingHmsFromMs(ax))
+            : `时间 ${Number(ax).toFixed(3)} s`
+          const body = items.map((it) => {
+            const v = Array.isArray(it.data) ? it.data[1] : it.value
+            return `${it.marker}${it.seriesName}: ${v != null && Number.isFinite(v) ? Number(v).toFixed(3) : '—'}`
+          }).join('<br/>')
+          return `${head}<br/>${body}`
+        },
       },
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
       grid: grids,
+      dataZoom: [
+        { type: 'inside', xAxisIndex: xAxisIndices, start: 0, end: 100 },
+        {
+          type: 'slider',
+          xAxisIndex: xAxisIndices,
+          start: 0,
+          end: 100,
+          height: 20,
+          bottom: 6,
+          borderColor: '#27272a',
+          backgroundColor: '#0f0f12',
+          fillerColor: 'rgba(139, 92, 246, 0.2)',
+          handleStyle: { color: '#8b5cf6' },
+          textStyle: { color: '#a1a1aa' },
+        },
+      ],
       xAxis: fields.map((_, i) => {
         const isBottom = i === fields.length - 1
         return {
-          type: 'value',
+          ...xAxisBase,
           gridIndex: i,
-          name: isBottom ? '时间 (s)' : '',
+          name: isBottom ? (useEpoch ? '时间（北京）' : '时间 (s)') : '',
           nameLocation: 'middle',
           nameGap: 30,
           nameTextStyle: { color: '#9ca3af', fontSize: 11, padding: [10, 0, 0, 0] },
           scale: true,
-          axisLine: { show: true, lineStyle: { color: '#3f3f46' } },
           axisTick: { show: isBottom },
           axisLabel: {
             show: isBottom,
             ...axisLabelStyle,
             margin: 10,
-            formatter: (v) => Number(v).toFixed(0),
+            hideOverlap: true,
+            formatter: (v) => (useEpoch ? beijingHmsFromMs(v) : Number(v).toFixed(0)),
           },
           splitLine: { show: true, ...splitStyle },
         }
@@ -1057,27 +1545,468 @@ function WorkbenchDetail({ sortieId }) {
         nameGap: 52,
         nameTextStyle: { color: '#9ca3af', fontSize: 11, align: 'center' },
         scale: true,
-        axisLine: { show: true, lineStyle: { color: '#3f3f46' } },
+        axisLine: { show: true, lineStyle: { color: '#27272a' } },
         axisTick: { show: true },
-        axisLabel: { ...axisLabelStyle, margin: 10 },
+        axisLabel: { ...axisLabelStyle, margin: 10, formatter: fmtYTick },
         splitLine: { show: true, ...splitStyle },
         splitNumber: 5,
       })),
       series: fields.map((f, i) => ({
-        name: f.label,
+        name: f.shortName,
         type: 'line',
         xAxisIndex: i,
         yAxisIndex: i,
         showSymbol: false,
         sampling: 'lttb',
-        lineStyle: { color: f.color, width: 1.3 },
-        data: t.map((x, k) => [x, series[f.key][k]]).filter((p) => p[1] != null && Number.isFinite(p[1])),
+        smooth: true,
+        lineStyle: { color: f.color, width: 1.5 },
+        data: fieldPoints(f),
         markLine,
       })),
     }
 
-    return { option, chartHeight }
-  }, [overview, selectedTrajIdx, trajData, align.parseOffsetMs])
+    return { option, chartHeight, canToggleLayout }
+  }, [overview, selectedTrajIdx, trajData, align.parseOffsetMs, attitudeChartLayout])
+
+  /** 叠加模式：剖面 + 姿态合并为一张图，共用时间轴与悬停读数 */
+  const mergedProfileAttitudeOption = useMemo(() => {
+    if (attitudeChartLayout !== 'overlay') return null
+    const attCtx = getAttitudeTooltipContext(overview, align)
+    if (!attCtx || !trajData?.path?.length || !trajData.altColumn) return null
+    const { altVals, altColumn, tSec, path } = trajData
+    if (!tSec?.length || !altVals?.some((a) => a != null && Number.isFinite(a))) return null
+
+    const pts = []
+    for (let i = 0; i < path.length; i += 1) {
+      const a = altVals[i]
+      const tv = tSec[i]
+      if (a == null || !Number.isFinite(a) || !Number.isFinite(tv)) continue
+      pts.push([tv * 1000, a, i])
+    }
+    if (!pts.length) return null
+    const finAlts = altVals.filter((x) => x != null && Number.isFinite(x))
+    const aMin = Math.min(...finAlts)
+    const aMax = Math.max(...finAlts)
+
+    const { series, fields, toX } = attCtx
+    const pointsByField = {}
+    fields.forEach((f) => {
+      pointsByField[f.key] = series[f.key]
+        .map((v, k) => [toX(k), v])
+        .filter((p) => p[0] != null && p[1] != null && Number.isFinite(p[1]))
+    })
+
+    const fmtYTick = (value) => {
+      const n = Number(value)
+      if (!Number.isFinite(n)) return String(value ?? '')
+      const v3 = n.toFixed(3)
+      return v3.endsWith('0') ? n.toFixed(2) : v3
+    }
+
+    const xSel = selectedTrajIdx != null && Number.isFinite(tSec[selectedTrajIdx])
+      ? tSec[selectedTrajIdx] * 1000
+      : null
+    const markLine = xSel != null
+      ? {
+        symbol: 'none',
+        label: { formatter: '选中', color: '#facc15', fontSize: 10 },
+        lineStyle: { color: '#facc15', type: 'dashed' },
+        data: [{ xAxis: xSel }],
+      }
+      : undefined
+
+    const nFields = fields.length
+    const attitudeColors = { pitch: '#60a5fa', roll: '#34d399', yaw: '#fbbf24' }
+    let attitudeYAxis
+    let attitudeSeriesArr
+    const attitudeRightPad = nFields === 2 ? 52 : 22
+
+    if (nFields === 2) {
+      const f0 = fields[0]
+      const f1 = fields[1]
+      const r0 = computeWorkbenchAttitudeYRange([series[f0.key]])
+      const r1 = computeWorkbenchAttitudeYRange([series[f1.key]])
+      attitudeYAxis = [
+        {
+          type: 'value',
+          gridIndex: 1,
+          name: f0.shortName,
+          min: r0.min,
+          max: r0.max,
+          position: 'left',
+          nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+          axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { lineStyle: { color: '#27272a' } },
+        },
+        {
+          type: 'value',
+          gridIndex: 1,
+          name: f1.shortName,
+          min: r1.min,
+          max: r1.max,
+          position: 'right',
+          nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+          axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { show: false },
+        },
+      ]
+      attitudeSeriesArr = fields.map((f, i) => ({
+        name: f.shortName,
+        type: 'line',
+        xAxisIndex: 1,
+        yAxisIndex: 1 + i,
+        smooth: true,
+        showSymbol: false,
+        sampling: 'lttb',
+        lineStyle: { width: 1.5, color: attitudeColors[f.key] || '#94a3b8' },
+        itemStyle: { color: attitudeColors[f.key] || '#94a3b8' },
+        emphasis: { focus: 'series', lineStyle: { width: 2.5 } },
+        data: pointsByField[f.key],
+        markLine: i === 0 ? markLine : undefined,
+      }))
+    } else {
+      const rAll = computeWorkbenchAttitudeYRange(fields.map((f) => series[f.key]))
+      attitudeYAxis = {
+        type: 'value',
+        gridIndex: 1,
+        name: nFields > 1 ? '°' : fields[0].shortName,
+        min: rAll.min,
+        max: rAll.max,
+        nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+        axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+        axisLine: { lineStyle: { color: '#27272a' } },
+        splitLine: { lineStyle: { color: '#27272a' } },
+      }
+      attitudeSeriesArr = fields.map((f, i) => ({
+        name: f.shortName,
+        type: 'line',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        smooth: true,
+        showSymbol: false,
+        sampling: 'lttb',
+        lineStyle: { width: 1.5, color: attitudeColors[f.key] || '#94a3b8' },
+        itemStyle: { color: attitudeColors[f.key] || '#94a3b8' },
+        emphasis: { focus: 'series', lineStyle: { width: 2.5 } },
+        data: pointsByField[f.key],
+        markLine: i === 0 ? markLine : undefined,
+      }))
+    }
+
+    const xAxisBase = {
+      type: 'time',
+      axisPointer: { snap: true },
+      axisLabel: {
+        color: '#a1a1aa',
+        hideOverlap: true,
+        rotate: 30,
+        formatter: (v) => beijingHmsFromMs(v),
+      },
+      axisLine: { lineStyle: { color: '#27272a' } },
+      splitLine: { show: false },
+    }
+
+    const option = {
+      backgroundColor: 'transparent',
+      title: {
+        text: '惯导剖面与姿态时序（共用时间轴 · 悬停显示时间 / 航程 / 经纬度 / 高度 / 姿态）',
+        left: 'center',
+        top: 2,
+        textStyle: { fontSize: 12, color: '#9ca3af', fontWeight: 'normal' },
+      },
+      legend: {
+        data: [altColumn, ...fields.map((f) => f.shortName)],
+        textStyle: { color: '#a1a1aa' },
+        top: 26,
+      },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: '#0f0f12',
+        borderColor: '#27272a',
+        textStyle: { color: '#e4e4e7' },
+        confine: true,
+        appendToBody: true,
+        axisPointer: {
+          type: 'cross',
+          snap: true,
+          crossStyle: { color: '#a1a1aa' },
+          lineStyle: { color: '#8b5cf6', type: 'dashed' },
+          label: { backgroundColor: '#18181b', color: '#e4e4e7' },
+        },
+        formatter: (items) => {
+          if (!items?.length) return ''
+          const tMs = items[0].axisValue
+          return formatWorkbenchProfileAttitudeTooltipHtml(
+            tMs,
+            trajData,
+            altColumn,
+            series,
+            fields,
+            toX,
+          )
+        },
+      },
+      axisPointer: { link: [{ xAxisIndex: [0, 1] }] },
+      grid: [
+        { left: 56, right: 22, top: 52, height: '30%' },
+        { left: 56, right: attitudeRightPad, top: '52%', height: '34%' },
+      ],
+      xAxis: [
+        { ...xAxisBase, gridIndex: 0, axisLabel: { ...xAxisBase.axisLabel, show: false } },
+        { ...xAxisBase, gridIndex: 1, name: '时间（北京）', nameLocation: 'middle', nameGap: 28, nameTextStyle: { color: '#9ca3af', fontSize: 11 } },
+      ],
+      yAxis: [
+        {
+          type: 'value',
+          gridIndex: 0,
+          name: altColumn,
+          min: aMin,
+          max: aMax,
+          axisLabel: { color: '#a1a1aa' },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { lineStyle: { color: '#27272a' } },
+        },
+        ...(Array.isArray(attitudeYAxis) ? attitudeYAxis : [attitudeYAxis]),
+      ],
+      dataZoom: [
+        { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
+        {
+          type: 'slider',
+          xAxisIndex: [0, 1],
+          start: 0,
+          end: 100,
+          height: 20,
+          bottom: 6,
+          borderColor: '#27272a',
+          backgroundColor: '#0f0f12',
+          fillerColor: 'rgba(139, 92, 246, 0.2)',
+          handleStyle: { color: '#8b5cf6' },
+          textStyle: { color: '#a1a1aa' },
+        },
+      ],
+      series: [
+        {
+          type: 'line',
+          name: altColumn,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          large: true,
+          showSymbol: false,
+          lineStyle: { color: '#34d399', width: 1.5 },
+          data: pts,
+          markLine,
+        },
+        ...attitudeSeriesArr,
+      ],
+    }
+
+    return { option, chartHeight: 520 }
+  }, [
+    trajData,
+    selectedTrajIdx,
+    overview,
+    align,
+    attitudeChartLayout,
+  ])
+
+  /** 垂直剖面 / 合并图内点击 → 地图选点 */
+  useEffect(() => {
+    if (!trajData?.tSec?.length || !trajData.altColumn) return undefined
+    if (!trajData.altVals?.some((a) => a != null && Number.isFinite(a))) return undefined
+    const bind = { zr: null, handler: null }
+    const tid = window.setTimeout(() => {
+      const useMerged = !!mergedProfileAttitudeOption
+      const chart = useMerged
+        ? mergedProfileAttitudeRef.current?.getEchartsInstance?.()
+        : trajAltChartRef.current?.getEchartsInstance?.()
+      if (!chart) return
+      const { tSec } = trajData
+      const validTs = tSec.filter((v) => Number.isFinite(v))
+      if (!validTs.length) return
+      const tMinMs = Math.min(...validTs) * 1000
+      const tMaxMs = Math.max(...validTs) * 1000
+      const maxPickMs = Math.max((tMaxMs - tMinMs) * 0.02, 500)
+
+      const resolveClickMs = (ox, oy) => {
+        if (!useMerged) {
+          const coord = chart.convertFromPixel({ gridIndex: 0 }, [ox, oy])
+          return coord && Number.isFinite(coord[0]) ? coord[0] : null
+        }
+        const opt = chart.getOption()
+        const gridOpt = opt.grid
+        const nGrids = Array.isArray(gridOpt) ? gridOpt.length : (gridOpt != null ? 1 : 0)
+        for (let gi = 0; gi < nGrids; gi += 1) {
+          try {
+            if (chart.containPixel({ gridIndex: gi }, [ox, oy])) {
+              const coord = chart.convertFromPixel({ gridIndex: gi }, [ox, oy])
+              if (coord && Number.isFinite(coord[0])) return coord[0]
+            }
+          } catch {
+            /* next */
+          }
+        }
+        try {
+          const coord = chart.convertFromPixel({ gridIndex: 0 }, [ox, oy])
+          if (coord && Number.isFinite(coord[0])) return coord[0]
+        } catch {
+          return null
+        }
+        return null
+      }
+
+      bind.zr = chart.getZr()
+      bind.handler = (ev) => {
+        const clickMs = resolveClickMs(ev.offsetX, ev.offsetY)
+        if (clickMs == null || !Number.isFinite(clickMs)) return
+        let best = 0
+        let bestD = Infinity
+        for (let i = 0; i < tSec.length; i += 1) {
+          const tv = tSec[i]
+          if (!Number.isFinite(tv)) continue
+          const d = Math.abs(tv * 1000 - clickMs)
+          if (d < bestD) {
+            bestD = d
+            best = i
+          }
+        }
+        if (bestD > maxPickMs) return
+        setSelectedTrajIdx(best)
+      }
+      bind.zr.on('click', bind.handler)
+    }, 0)
+    return () => {
+      window.clearTimeout(tid)
+      if (bind.zr && bind.handler) bind.zr.off('click', bind.handler)
+    }
+  }, [trajData, mergedProfileAttitudeOption])
+
+  /** 地图/剖面选点后，将姿态图时间轴缩放到包含该时刻（便于看到黄线） */
+  useEffect(() => {
+    if (selectedTrajIdx == null || !trajData?.tSec?.length) return undefined
+    const s = overview?.attitude_series
+    const ep = s?.time_epoch
+    if (!Array.isArray(ep) || !ep.some((v) => Number.isFinite(Number(v)))) return undefined
+    const offMs = align.parseOffsetMs || 0
+    const msList = ep
+      .map((v) => (Number.isFinite(Number(v)) ? Number(v) * 1000 + offMs : null))
+      .filter((x) => x != null)
+    if (!msList.length) return undefined
+    const tMin = Math.min(...msList)
+    const tMax = Math.max(...msList)
+    const tMs = trajData.tSec[selectedTrajIdx] * 1000
+    const nAxes = ['pitch', 'roll', 'yaw'].filter(
+      (k) => Array.isArray(s[k]) && s[k].some((v) => v != null && Number.isFinite(v)),
+    ).length
+    if (!nAxes) return undefined
+    const useMerged = !!mergedProfileAttitudeOption
+    const xAxisIndex = useMerged ? [0, 1] : (attitudeChartLayout === 'overlay' ? 0 : Array.from({ length: nAxes }, (_, i) => i))
+    const tid = window.setTimeout(() => {
+      const inst = useMerged
+        ? mergedProfileAttitudeRef.current?.getEchartsInstance?.()
+        : attitudeChartRef.current?.getEchartsInstance?.()
+      if (!inst) return
+      const full = Math.max(tMax - tMin, 1)
+      const span = Math.min(full * 0.15, 15 * 60 * 1000)
+      let startV = tMs - span / 2
+      let endV = tMs + span / 2
+      if (startV < tMin) {
+        endV += tMin - startV
+        startV = tMin
+      }
+      if (endV > tMax) {
+        startV -= endV - tMax
+        endV = tMax
+      }
+      startV = Math.max(tMin, startV)
+      endV = Math.min(tMax, endV)
+      if (!(endV > startV)) return
+      try {
+        inst.dispatchAction({ type: 'dataZoom', xAxisIndex, startValue: startV, endValue: endV })
+      } catch {
+        /* ignore */
+      }
+    }, 80)
+    return () => window.clearTimeout(tid)
+  }, [
+    selectedTrajIdx,
+    trajData,
+    align.parseOffsetMs,
+    attitudeChartLayout,
+    mergedProfileAttitudeOption,
+    overview?.attitude_series?.time_epoch?.length,
+    overview?.attitude_series?.time?.length,
+  ])
+
+  /** 姿态图点击 → 与地图/剖面共用 selectedTrajIdx（须与 tSec 同为 epoch+偏移 的 time 轴）；合并图时由剖面点击逻辑统一处理 */
+  useEffect(() => {
+    if (mergedProfileAttitudeOption) return undefined
+    const s = overview?.attitude_series
+    const ep = s?.time_epoch
+    const useEpoch = Array.isArray(ep) && ep.length === s?.time?.length && ep.some((v) => Number.isFinite(Number(v)))
+    if (!useEpoch || !trajData?.tSec?.length) return undefined
+
+    const bind = { zr: null, handler: null }
+    const tid = window.setTimeout(() => {
+      const chart = attitudeChartRef.current?.getEchartsInstance?.()
+      if (!chart) return
+      const { tSec } = trajData
+      const validTs = tSec.filter((v) => Number.isFinite(v))
+      if (!validTs.length) return
+      const tMinMs = Math.min(...validTs) * 1000
+      const tMaxMs = Math.max(...validTs) * 1000
+      const maxPickMs = Math.max((tMaxMs - tMinMs) * 0.02, 500)
+
+      const resolveClickMs = (ox, oy) => {
+        const opt = chart.getOption()
+        const gridOpt = opt.grid
+        const nGrids = Array.isArray(gridOpt) ? gridOpt.length : (gridOpt != null ? 1 : 0)
+        if (!nGrids) return null
+        for (let gi = 0; gi < nGrids; gi += 1) {
+          try {
+            if (chart.containPixel({ gridIndex: gi }, [ox, oy])) {
+              const coord = chart.convertFromPixel({ gridIndex: gi }, [ox, oy])
+              if (coord && Number.isFinite(coord[0])) return coord[0]
+            }
+          } catch {
+            /* try next grid */
+          }
+        }
+        try {
+          const coord = chart.convertFromPixel({ gridIndex: 0 }, [ox, oy])
+          if (coord && Number.isFinite(coord[0])) return coord[0]
+        } catch {
+          return null
+        }
+        return null
+      }
+
+      bind.zr = chart.getZr()
+      bind.handler = (ev) => {
+        const clickMs = resolveClickMs(ev.offsetX, ev.offsetY)
+        if (clickMs == null || !Number.isFinite(clickMs)) return
+        let best = 0
+        let bestD = Infinity
+        for (let i = 0; i < tSec.length; i += 1) {
+          const tv = tSec[i]
+          if (!Number.isFinite(tv)) continue
+          const d = Math.abs(tv * 1000 - clickMs)
+          if (d < bestD) {
+            bestD = d
+            best = i
+          }
+        }
+        if (bestD > maxPickMs) return
+        setSelectedTrajIdx(best)
+      }
+      bind.zr.on('click', bind.handler)
+    }, 0)
+    return () => {
+      window.clearTimeout(tid)
+      if (bind.zr && bind.handler) bind.zr.off('click', bind.handler)
+    }
+  }, [trajData, attitudeChartLayout, overview?.attitude_series, mergedProfileAttitudeOption])
 
   const videos = useMemo(() => {
     const files = detail?.files || []
@@ -1263,6 +2192,13 @@ function WorkbenchDetail({ sortieId }) {
     window.open(`/tasks/${taskId}?${qs.toString()}`, '_blank', 'noopener,noreferrer')
   }, [taskId])
 
+  const scrollToEventsSummarySection = useCallback(() => {
+    eventsSummarySectionRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }, [])
+
   const onVideoTabsEdit = (targetKey, action) => {
     if (action === 'add') {
       const newKey = `v_${Date.now()}`
@@ -1378,6 +2314,7 @@ function WorkbenchDetail({ sortieId }) {
         overview={overview}
         loading={overviewLoading}
         taskId={taskId}
+        onScrollToEventsSummary={scrollToEventsSummarySection}
       />
 
       <Card title="时间对齐（本地保存）" style={{ marginBottom: 16 }} size="small">
@@ -1490,6 +2427,9 @@ function WorkbenchDetail({ sortieId }) {
                   groundSpeedVals={trajData.groundSpeedVals}
                   eastVals={trajData.eastVals}
                   northVals={trajData.northVals}
+                  pitchVals={trajData.pitchVals}
+                  rollVals={trajData.rollVals}
+                  yawVals={trajData.yawVals}
                   beijingTimeStrs={trajData.beijingTimeStrs}
                   selectedTrajIdx={selectedTrajIdx}
                   onSelectIdx={setSelectedTrajIdx}
@@ -1598,20 +2538,97 @@ function WorkbenchDetail({ sortieId }) {
               </Space>
             )}
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-              轨迹叠加在 OpenStreetMap 底图上；线段颜色表示地速（由东/北分量计算或解析标量速度列）。垂直剖面与右侧视频仍按解析对齐时间关联选点。
+              轨迹叠加在 OpenStreetMap 底图上；线段颜色表示地速（由东/北分量计算或解析标量速度列）。下方
+              {mergedProfileAttitudeOption ? '垂直剖面与姿态时序合并为一图' : '垂直剖面与姿态时序'}
+              与地图、滑块选点共用同一时间基准（含「解析时间偏移」）；右侧视频仍按该时间关联。
             </Text>
-            {trajAltOption && (
-              <>
-                <Text type="secondary" style={{ display: 'block', marginTop: 12 }}>垂直剖面（与地图同一解析数据源）</Text>
-                <ReactECharts
-                  ref={trajAltChartRef}
-                  option={trajAltOption}
-                  style={{ height: 260 }}
-                  notMerge
-                  lazyUpdate
-                  theme="dark"
-                />
-              </>
+            {(mergedProfileAttitudeOption || trajAltOption || attitudeChart) && (
+              <Row gutter={[0, 20]} style={{ marginTop: 12 }}>
+                {mergedProfileAttitudeOption ? (
+                  <Col span={24}>
+                    <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                      垂直剖面与姿态时序（共用时间轴；悬停显示时间、累计航程、经纬度、高度与各姿态分量；黄线表示当前选点时刻；在图内点击联动地图；点底部缩放条区域无效）
+                    </Text>
+                    {attitudeChart?.canToggleLayout && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                        <Radio.Group
+                          value={attitudeChartLayout}
+                          onChange={(e) => setAttitudeChartLayout(e.target.value)}
+                          size="small"
+                          optionType="button"
+                          buttonStyle="solid"
+                        >
+                          <Radio.Button value="overlay">
+                            <Space size={4}><LineChartOutlined />叠加图</Space>
+                          </Radio.Button>
+                          <Radio.Button value="grid">
+                            <Space size={4}><AppstoreOutlined />并列图</Space>
+                          </Radio.Button>
+                        </Radio.Group>
+                      </div>
+                    )}
+                    <ReactECharts
+                      ref={mergedProfileAttitudeRef}
+                      option={mergedProfileAttitudeOption.option}
+                      style={{ height: mergedProfileAttitudeOption.chartHeight, minHeight: 400 }}
+                      notMerge
+                      lazyUpdate
+                      theme="dark"
+                    />
+                  </Col>
+                ) : (
+                  <>
+                    {trajAltOption && (
+                      <Col span={24}>
+                        <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                          垂直剖面（高度 vs 时间，与地图同源）
+                        </Text>
+                        <ReactECharts
+                          ref={trajAltChartRef}
+                          option={trajAltOption}
+                          style={{ height: 300 }}
+                          notMerge
+                          lazyUpdate
+                          theme="dark"
+                        />
+                      </Col>
+                    )}
+                    {attitudeChart && (
+                      <Col span={24}>
+                        <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                          姿态时序（pitch / roll / yaw，总览 IRS 降采样；黄线表示当前选点时刻）。在图内点击与垂直剖面相同，会联动地图与剖面；点底部缩放条区域无效。
+                        </Text>
+                        {attitudeChart.canToggleLayout && (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                            <Radio.Group
+                              value={attitudeChartLayout}
+                              onChange={(e) => setAttitudeChartLayout(e.target.value)}
+                              size="small"
+                              optionType="button"
+                              buttonStyle="solid"
+                            >
+                              <Radio.Button value="overlay">
+                                <Space size={4}><LineChartOutlined />叠加图</Space>
+                              </Radio.Button>
+                              <Radio.Button value="grid">
+                                <Space size={4}><AppstoreOutlined />并列图</Space>
+                              </Radio.Button>
+                            </Radio.Group>
+                          </div>
+                        )}
+                        <ReactECharts
+                          ref={attitudeChartRef}
+                          option={attitudeChart.option}
+                          style={{ height: attitudeChart.chartHeight, minHeight: 280 }}
+                          notMerge
+                          lazyUpdate
+                          theme="dark"
+                        />
+                      </Col>
+                    )}
+                  </>
+                )}
+              </Row>
             )}
           </Card>
         </Col>
@@ -1801,32 +2818,23 @@ function WorkbenchDetail({ sortieId }) {
         </Col>
       </Row>
 
-      {attitudeChart && (
-        <Card title="姿态时序（pitch / roll / yaw，IRS 数据源）" size="small" style={{ marginTop: 16 }}>
-          <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-            与地图选点联动：在地图上选中采样点后，各子图会显示对应时刻的参考线（黄色虚线）。
-          </Text>
-          <ReactECharts
-            option={attitudeChart.option}
-            style={{ height: attitudeChart.chartHeight, minHeight: 320 }}
-            notMerge
-            lazyUpdate
-            theme="dark"
-          />
-        </Card>
-      )}
-
-      <WorkbenchEventsCard
-        summary={eventsSummary}
-        loading={eventsLoading}
-        taskId={taskId}
-        onOpenEvent={openParseTableAtEvent}
-      />
+      <div
+        ref={eventsSummarySectionRef}
+        id="workbench-events-summary"
+        style={{ scrollMarginTop: 72 }}
+      >
+        <WorkbenchEventsCard
+          summary={eventsSummary}
+          loading={eventsLoading}
+          taskId={taskId}
+          onOpenEvent={openParseTableAtEvent}
+        />
+      </div>
     </div>
   )
 }
 
-function WorkbenchOverviewCard({ overview, loading, taskId }) {
+function WorkbenchOverviewCard({ overview, loading, taskId, onScrollToEventsSummary }) {
   if (!taskId) {
     return (
       <Card size="small" style={{ marginBottom: 16 }}>
@@ -1953,13 +2961,31 @@ function WorkbenchOverviewCard({ overview, loading, taskId }) {
             children: anomalies.length === 0 ? (
               <Empty description="未检测到物理异常" />
             ) : (
-              <Table
+              <>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
+                  时间为解析库 UTC 时间戳对应的北京时间；点击任意一行将滚动到本页底部的「事件分析总结」，可在其中用「定位数据」打开解析结果表。
+                </Text>
+                <Table
                 size="small"
                 pagination={{ pageSize: 10 }}
                 rowKey={(_, i) => i}
                 dataSource={anomalies}
+                onRow={() => ({
+                  onClick: () => onScrollToEventsSummary?.(),
+                  style: { cursor: onScrollToEventsSummary ? 'pointer' : 'default' },
+                })}
                 columns={[
-                  { title: '时间', dataIndex: 'time', width: 120 },
+                  {
+                    title: '时间（北京）',
+                    dataIndex: 'time',
+                    width: 200,
+                    ellipsis: true,
+                    render: (t, row) => (
+                      <Tooltip title={row.time_utc || 'UTC 时刻见解析结果表'}>
+                        <span>{t}</span>
+                      </Tooltip>
+                    ),
+                  },
                   {
                     title: '严重度',
                     dataIndex: 'severity',
@@ -1972,7 +2998,8 @@ function WorkbenchOverviewCard({ overview, loading, taskId }) {
                   { title: '描述', dataIndex: 'detail', ellipsis: true },
                   { title: '来源', dataIndex: 'source', width: 140 },
                 ]}
-              />
+                />
+              </>
             ),
           },
         ]}

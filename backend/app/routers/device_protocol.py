@@ -221,7 +221,7 @@ async def get_spec_changelog(spec_id: int, db: AsyncSession = Depends(get_db)):
     return {"total": len(items), "items": items}
 
 
-@router.get("/versions/{version_id}")
+@router.get("/versions/{version_id:int}")
 async def get_version_detail(version_id: int, db: AsyncSession = Depends(get_db)):
     v = await dps.get_version(db, version_id)
     if not v:

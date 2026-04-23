@@ -166,7 +166,7 @@ class BMS800VParser(BaseParser):
     name = "800V动力电池BMS"
     display_name = "800V 动力电池 BMS"
     parser_version = "V2.5"
-    protocol_family = "bms_800v"
+    protocol_family = "bms800v"
     supported_ports: List[int] = _ALL_PORTS
 
     def can_parse_port(self, port: int) -> bool:

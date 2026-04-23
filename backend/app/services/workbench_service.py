@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -44,6 +44,9 @@ DEFAULT_STATUS_COLS = (
     "altitude_status_enum",
 )
 
+# 展示用：TSN/解析库 timestamp 为 UTC 秒 → 统一格式化为北京时间（UTC+8）
+_TZ_BEIJING = timezone(timedelta(hours=8))
+
 
 # ──────────────────────────── 通用工具 ────────────────────────────
 
@@ -54,6 +57,27 @@ def _fmt_time(seconds: Optional[float]) -> str:
     m = int((seconds % 3600) // 60)
     s = seconds - h * 3600 - m * 60
     return f"{h:02d}:{m:02d}:{s:05.2f}"
+
+
+def _fmt_timestamp_beijing_utc(ts: Optional[float]) -> str:
+    """将解析库中的 UTC Unix 秒格式化为北京时间字符串（含毫秒）。"""
+    if ts is None or not np.isfinite(float(ts)):
+        return "N/A"
+    try:
+        dt_utc = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+        dt_bj = dt_utc.astimezone(_TZ_BEIJING)
+        return dt_bj.strftime("%Y-%m-%d %H:%M:%S") + f".{int(dt_bj.microsecond / 1000):03d}"
+    except (OSError, OverflowError, ValueError):
+        return "N/A"
+
+
+def _fmt_timestamp_utc_iso(ts: Optional[float]) -> str:
+    if ts is None or not np.isfinite(float(ts)):
+        return "N/A"
+    try:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    except (OSError, OverflowError, ValueError):
+        return "N/A"
 
 
 def _fmt_duration(seconds: Optional[float]) -> str:
@@ -299,35 +323,52 @@ def _detect_flight_phases(
 
 
 def _detect_altitude_jump_anomalies(
-    times: np.ndarray, altitudes: np.ndarray, port: int
+    times: np.ndarray,
+    altitudes: np.ndarray,
+    times_raw_utc: np.ndarray,
+    port: int,
+    parser_id: Optional[int],
 ) -> List[Dict[str, Any]]:
-    """IRS altitude 跳变检测：沿用 50 m/s 阈值。"""
+    """IRS altitude 跳变检测：沿用 50 m/s 阈值。
+
+    times 为与飞行阶段一致的「日内秒」偏移序列，用于 dt；times_raw_utc 为解析库原始 UTC Unix 秒，用于展示与深链。
+    """
     if times is None or len(times) < 10:
         return []
+    if times_raw_utc is None or len(times_raw_utc) != len(times):
+        times_raw_utc = times
     alt_arr = np.asarray(altitudes, dtype=float)
     dt = np.diff(times)
     da = np.abs(np.diff(alt_arr))
     out: List[Dict[str, Any]] = []
     for i in range(len(da)):
         if dt[i] > 0 and da[i] / max(float(dt[i]), 0.01) > ALTITUDE_JUMP_THRESHOLD:
-            out.append({
-                "time": _fmt_time(float(times[i + 1])),
+            raw_ts = float(times_raw_utc[i + 1])
+            # 解析库 timestamp 为 Unix UTC 秒；明显过小则视为非 epoch（不应深链）
+            plausible_epoch = np.isfinite(raw_ts) and 946684800 < raw_ts < 4102444800
+            row: Dict[str, Any] = {
+                "time": _fmt_timestamp_beijing_utc(raw_ts) if plausible_epoch else _fmt_time(float(times[i + 1])),
                 "time_seconds": float(times[i + 1]),
                 "type": "Altitude Jump",
                 "detail": f"Altitude changed {da[i]:.1f}m in {dt[i]:.1f}s",
                 "severity": "warning",
                 "source": f"IRS port={port}",
                 "port": int(port),
-            })
+                "parser_id": int(parser_id) if parser_id is not None else None,
+            }
+            if plausible_epoch:
+                row["time_utc"] = _fmt_timestamp_utc_iso(raw_ts)
+                row["parse_ts"] = raw_ts
+            out.append(row)
             if len(out) > 20:
                 break
     return out
 
 
 def _detect_status_anomalies(
-    df: pd.DataFrame, time_col: str, port: int
+    df: pd.DataFrame, time_col: str, port: int, parser_id: Optional[int]
 ) -> List[Dict[str, Any]]:
-    """扫描 IRS *_status_enum 列，统计非 valid 段。"""
+    """扫描 IRS *_status_enum 列，统计非 valid 段。时间戳按解析库 UTC Unix 秒展示为北京时间。"""
     out: List[Dict[str, Any]] = []
     status_cols = [c for c in DEFAULT_STATUS_COLS if c in df.columns]
     if not status_cols or time_col not in df.columns:
@@ -348,15 +389,21 @@ def _detect_status_anomalies(
             t0 = float(seg[time_col].iloc[0])
             t1 = float(seg[time_col].iloc[-1])
             state = seg[col].iloc[0]
-            out.append({
-                "time": _fmt_time(t0),
+            plausible_epoch = np.isfinite(t0) and 946684800 < t0 < 4102444800
+            row: Dict[str, Any] = {
+                "time": _fmt_timestamp_beijing_utc(t0) if plausible_epoch else _fmt_time(t0),
                 "time_seconds": t0,
                 "type": f"IRS {col.replace('_enum', '')} abnormal",
                 "detail": f"{col}={state} 持续 {t1 - t0:.1f}s",
                 "severity": "warning",
                 "source": f"IRS port={port}",
                 "port": int(port),
-            })
+                "parser_id": int(parser_id) if parser_id is not None else None,
+            }
+            if plausible_epoch:
+                row["time_utc"] = _fmt_timestamp_utc_iso(t0)
+                row["parse_ts"] = t0
+            out.append(row)
             count += 1
         if len(out) > 30:
             break
@@ -618,13 +665,25 @@ async def build_overview(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]
                             spd_valid = s_valid
                     if len(t_valid) >= 10:
                         phases = _detect_flight_phases(t_valid, alt_valid, spd_valid)
+                        t_raw_valid = t_epoch[valid_mask]
                         anomalies.extend(
-                            _detect_altitude_jump_anomalies(t_valid, alt_valid, irs_primary.port_number)
+                            _detect_altitude_jump_anomalies(
+                                t_valid,
+                                alt_valid,
+                                t_raw_valid,
+                                irs_primary.port_number,
+                                irs_primary.parser_profile_id,
+                            )
                         )
 
                 if time_col:
                     anomalies.extend(
-                        _detect_status_anomalies(df_filtered, time_col, irs_primary.port_number)
+                        _detect_status_anomalies(
+                            df_filtered,
+                            time_col,
+                            irs_primary.port_number,
+                            irs_primary.parser_profile_id,
+                        )
                     )
 
                 # 轨迹降采样（与 CSV 平台 3000 点对齐）
@@ -655,6 +714,12 @@ async def build_overview(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]
                     attitude_series = {
                         "time": [round(float(x), 3) for x in t_s],
                     }
+                    # 附带 UTC 原始 epoch 秒；前端以此渲染北京时间 HH:MM:SS
+                    if time_col and time_col in df_filtered.columns and len(t_epoch) == len(df_filtered):
+                        t_epoch_s = t_epoch[idxs]
+                        attitude_series["time_epoch"] = [
+                            None if not np.isfinite(v) else round(float(v), 3) for v in t_epoch_s
+                        ]
                     for label, col in (("pitch", pitch_col), ("roll", roll_col), ("yaw", hdg_col)):
                         if col and col in sub.columns:
                             vals = pd.to_numeric(sub[col], errors="coerce").to_numpy(dtype=float)

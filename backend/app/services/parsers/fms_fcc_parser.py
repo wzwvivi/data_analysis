@@ -142,7 +142,7 @@ class FMSFCCParser(BaseParser):
     name = "飞管-飞控交互数据"
     display_name = "飞管-飞控交互数据"
     parser_version = "V1.5"
-    protocol_family = "fms_fcc"
+    protocol_family = "fms"
     supported_ports: List[int] = []
 
     OUTPUT_COLUMNS = _ALL_COLUMNS

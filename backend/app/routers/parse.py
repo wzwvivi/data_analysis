@@ -82,24 +82,101 @@ async def _validate_parse_profiles(
 ):
     """校验解析计划，返回 ``(dpm, display_names)``。
 
-    Phase 7 双路径：
-    - 新路径：``device_protocol_version_map`` 非空 → 校验每个 version 存在、
-      ``parser_key`` 已绑定、对应 Python 类已注册。``dpm`` 可为 ``None``（由
-      parser_service 按 family→version 推导）。
-    - 老路径：``device_parser_map`` 非空 → 走旧的 ParserProfile 校验逻辑，
-      供老任务"重新解析"以及仍未升级的旧前端使用。
-    至少要有一条路径；两路径都缺直接 400。
+    支持三种形态：
+    - 仅新路径：``device_protocol_version_map``（family -> 设备协议版本）
+    - 仅老路径：``device_parser_map``（device -> ParserProfile）
+    - 混合路径：两者同时存在（429 走新路径，非 429 走老路径）
     """
     import json
 
-    # ── 新路径：device_protocol_version_map ──
+    dpm: Optional[Dict[str, int]] = None
+    profile_names: List[str] = []
+    seen_names: set = set()
+
+    # ── 老路径：device_parser_map（可选） ──
+    if device_parser_map:
+        try:
+            raw = json.loads(device_parser_map)
+            if not isinstance(raw, dict) or not raw:
+                raise ValueError("device_parser_map 不能为空")
+            dpm = {k: int(v) for k, v in raw.items()}
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            raise HTTPException(status_code=400, detail=f"设备解析器映射格式错误: {e}")
+
+        profile_ids = list(set(dpm.values()))
+        for pid in profile_ids:
+            profile = await service.get_parser_profile(pid)
+            if not profile:
+                raise HTTPException(status_code=400, detail=f"协议解析器 {pid} 不存在")
+            if not profile.is_active:
+                raise HTTPException(status_code=400, detail=f"协议解析器 {profile.name} 已停用")
+            if profile.name not in seen_names:
+                seen_names.add(profile.name)
+                profile_names.append(profile.name)
+
+        # 兼容老逻辑：ATG 自动补依赖设备
+        if dpm and protocol_version_id:
+            pid_profiles = {}
+            for pid in set(dpm.values()):
+                p = await service.get_parser_profile(pid)
+                if p:
+                    pid_profiles[pid] = p
+            has_atg = any((p.protocol_family or "").lower() == "atg" for p in pid_profiles.values())
+
+            if has_atg:
+                devices_with_family = await service.protocol_service.get_devices_with_family(protocol_version_id)
+                active_profiles = await service.get_parser_profiles(active_only=True)
+
+                family_default_pid = {}
+                for p in active_profiles:
+                    fam = (p.protocol_family or "").lower()
+                    if fam and fam not in family_default_pid:
+                        family_default_pid[fam] = p.id
+
+                required_slots = [
+                    ("FCC1", ["FCC1", "飞控1"], "fcc"),
+                    ("FCC2", ["FCC2", "飞控2"], "fcc"),
+                    ("FCC3", ["FCC3", "飞控3"], "fcc"),
+                    ("RTK1", ["RTK1", "GPS1", "地基接收机1"], "rtk"),
+                    ("RTK2", ["RTK2", "GPS2", "地基接收机2"], "rtk"),
+                    ("IRS1", ["IRS1", "惯导1"], "irs"),
+                    ("IRS2", ["IRS2", "惯导2"], "irs"),
+                    ("IRS3", ["IRS3", "惯导3"], "irs"),
+                ]
+
+                for _, kws, fam in required_slots:
+                    dev = _match_device_by_keywords(devices_with_family, kws)
+                    if not dev:
+                        continue
+                    dev_name = dev["device_name"]
+                    if dev_name in dpm:
+                        continue
+                    parser_candidates = dev.get("available_parsers") or []
+                    parser_id = None
+                    if parser_candidates:
+                        parser_id = int(parser_candidates[0]["id"])
+                    elif fam in family_default_pid:
+                        parser_id = int(family_default_pid[fam])
+                    if parser_id:
+                        dpm[dev_name] = parser_id
+
+                # 补齐新增 parser 的名称
+                for pid in sorted(set(int(v) for v in dpm.values())):
+                    profile = await service.get_parser_profile(pid)
+                    if not profile:
+                        raise HTTPException(status_code=400, detail=f"协议解析器 {pid} 不存在")
+                    if not profile.is_active:
+                        raise HTTPException(status_code=400, detail=f"协议解析器 {profile.name} 已停用")
+                    if profile.name not in seen_names:
+                        seen_names.add(profile.name)
+                        profile_names.append(profile.name)
+
+    # ── 新路径：device_protocol_version_map（可选） ──
     if device_protocol_version_map:
         from sqlalchemy import select as _select
         from app.models.device_protocol import DeviceProtocolVersion
         from app.services.parsers import ParserRegistry
 
-        display_names: List[str] = []
-        seen_keys: set = set()
         for fam, version_id in device_protocol_version_map.items():
             row = await service.db.execute(
                 _select(DeviceProtocolVersion).where(
@@ -127,102 +204,21 @@ async def _validate_parse_profiles(
                     status_code=400,
                     detail=f"parser_key={parser_key} 未在代码中注册",
                 )
-            if parser_key not in seen_keys:
-                seen_keys.add(parser_key)
-                display_names.append(meta["display_name"])
+            display_name = meta["display_name"]
+            if display_name not in seen_names:
+                seen_names.add(display_name)
+                profile_names.append(display_name)
 
-        if protocol_version_id:
-            version = await service.protocol_service.get_version(protocol_version_id)
-            if not version:
-                raise HTTPException(status_code=400, detail="TSN网络配置版本不存在")
-
-        # 新路径不回填 device_parser_map（完全不依赖 ParserProfile）
-        return None, display_names
-
-    # ── 老路径：device_parser_map ──
-    if not device_parser_map:
+    if not device_protocol_version_map and not dpm:
         raise HTTPException(
             status_code=400,
             detail="请传 device_protocol_version_map（推荐）或 device_parser_map",
         )
-    try:
-        raw = json.loads(device_parser_map)
-        if not isinstance(raw, dict) or not raw:
-            raise ValueError("device_parser_map 不能为空")
-        dpm = {k: int(v) for k, v in raw.items()}
-    except (json.JSONDecodeError, ValueError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=f"设备解析器映射格式错误: {e}")
-
-    profile_ids = list(set(dpm.values()))
-
-    profile_names = []
-    for pid in profile_ids:
-        profile = await service.get_parser_profile(pid)
-        if not profile:
-            raise HTTPException(status_code=400, detail=f"协议解析器 {pid} 不存在")
-        if not profile.is_active:
-            raise HTTPException(status_code=400, detail=f"协议解析器 {profile.name} 已停用")
-        profile_names.append(profile.name)
 
     if protocol_version_id:
         version = await service.protocol_service.get_version(protocol_version_id)
         if not version:
             raise HTTPException(status_code=400, detail="TSN网络配置版本不存在")
-
-    if dpm and protocol_version_id:
-        pid_profiles = {}
-        for pid in set(dpm.values()):
-            p = await service.get_parser_profile(pid)
-            if p:
-                pid_profiles[pid] = p
-        has_atg = any((p.protocol_family or "").lower() == "atg" for p in pid_profiles.values())
-
-        if has_atg:
-            devices_with_family = await service.protocol_service.get_devices_with_family(protocol_version_id)
-            active_profiles = await service.get_parser_profiles(active_only=True)
-
-            family_default_pid = {}
-            for p in active_profiles:
-                fam = (p.protocol_family or "").lower()
-                if fam and fam not in family_default_pid:
-                    family_default_pid[fam] = p.id
-
-            required_slots = [
-                ("FCC1", ["FCC1", "飞控1"], "fcc"),
-                ("FCC2", ["FCC2", "飞控2"], "fcc"),
-                ("FCC3", ["FCC3", "飞控3"], "fcc"),
-                ("RTK1", ["RTK1", "GPS1", "地基接收机1"], "rtk"),
-                ("RTK2", ["RTK2", "GPS2", "地基接收机2"], "rtk"),
-                ("IRS1", ["IRS1", "惯导1"], "irs"),
-                ("IRS2", ["IRS2", "惯导2"], "irs"),
-                ("IRS3", ["IRS3", "惯导3"], "irs"),
-            ]
-
-            for _, kws, fam in required_slots:
-                dev = _match_device_by_keywords(devices_with_family, kws)
-                if not dev:
-                    continue
-                dev_name = dev["device_name"]
-                if dev_name in dpm:
-                    continue
-                parser_candidates = dev.get("available_parsers") or []
-                parser_id = None
-                if parser_candidates:
-                    parser_id = int(parser_candidates[0]["id"])
-                elif fam in family_default_pid:
-                    parser_id = int(family_default_pid[fam])
-                if parser_id:
-                    dpm[dev_name] = parser_id
-
-            profile_ids = sorted(set(int(v) for v in dpm.values()))
-            profile_names = []
-            for pid in profile_ids:
-                profile = await service.get_parser_profile(pid)
-                if not profile:
-                    raise HTTPException(status_code=400, detail=f"协议解析器 {pid} 不存在")
-                if not profile.is_active:
-                    raise HTTPException(status_code=400, detail=f"协议解析器 {profile.name} 已停用")
-                profile_names.append(profile.name)
 
     return dpm, profile_names
 

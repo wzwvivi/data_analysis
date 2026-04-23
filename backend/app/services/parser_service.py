@@ -27,6 +27,9 @@ from .bundle import BundleNotFoundError, load_bundle
 from .device_bundle import try_load_device_bundle
 from .bundle import generator as bundle_generator
 
+# 仅这批 family 走 version(bundle) 绑定；其余 family 继续使用 legacy ParserProfile 路径
+VERSION_BOUND_FAMILIES = frozenset({"adc", "ra", "turn", "brake", "lgcu"})
+
 # ATG 端口：仅与 IRS 核对，不做 RTK 时间核对（ICD：8050/8052 对应 IRS 流）
 ATG_IRS_ONLY_PORTS = frozenset({8050, 8052})
 # ATG 端口：仅与 RTK 核对时间，不做 IRS（ICD：8051/8053 对应 RTK 流）
@@ -723,12 +726,22 @@ class ParserService:
             # 记住每个 family 选中的设备（用于端口分配）
             selected_devices_by_family: Dict[str, List[str]] = {}
 
-            # 1a) 新任务：task.device_protocol_version_map
-            dpv_map_raw: Dict[str, int] = {
+            # 1a) 新任务：task.device_protocol_version_map（仅白名单 family 走 version 绑定）
+            dpv_map_raw_all: Dict[str, int] = {
                 f: int(v)
                 for f, v in (task.device_protocol_version_map or {}).items()
                 if v is not None
             }
+            dpv_map_raw: Dict[str, int] = {
+                f: v for f, v in dpv_map_raw_all.items()
+                if f in VERSION_BOUND_FAMILIES
+            }
+            ignored_families = sorted(set(dpv_map_raw_all.keys()) - set(dpv_map_raw.keys()))
+            if ignored_families:
+                print(
+                    f"[Parser] device_protocol_version_map 忽略非 version-bound family: {ignored_families} "
+                    f"(将继续走 legacy device_parser_map)"
+                )
             families_to_parse.update(dpv_map_raw)
 
             # 1b) 老任务回落：device_parser_map 的 profile.protocol_family
@@ -745,6 +758,9 @@ class ParserService:
                     if not profile_fb or not profile_fb.protocol_family:
                         continue
                     fam = profile_fb.protocol_family
+                    if fam in VERSION_BOUND_FAMILIES:
+                        # 这些 family 的执行语义由 device_protocol_version_map 控制
+                        continue
                     legacy_pid_to_family[pid_int] = fam
                     selected_devices_by_family.setdefault(fam, []).append(dev_name)
                     if fam not in families_to_parse:

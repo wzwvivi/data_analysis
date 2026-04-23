@@ -23,11 +23,15 @@ const FAMILY_LABELS = {
   ra: '无线电高度表 RA 协议',
   turn: '前轮转弯系统协议',
   brake: '机轮刹车系统协议',
+  lgcu: '起落架 LGCU 协议',
   bms800v: '800V 动力电池 BMS',
   bms270v: '270V&28V 动力电池 BMS',
   mcu: 'MCU 电推电驱 CAN',
   bpcu_empc: 'BPCU/EMPC 配电系统 CAN',
 }
+
+// 仅这 5 个 ARINC429 family 走 device_protocol_version_map（bundle + parser_key）
+const VERSION_BOUND_FAMILIES = new Set(['adc', 'ra', 'turn', 'brake', 'lgcu'])
 
 const DIRECTION_LABELS = {
   uplink: '上行数据',
@@ -65,10 +69,11 @@ function UploadPage() {
   const [selectedDevices, setSelectedDevices] = useState([])
   const [devicesLoading, setDevicesLoading] = useState(false)
 
-  // Phase 7：上传页只保留"协议版本"这一个选择。
-  // 用户选了设备 → 按设备的 parser_family 自动联带出该 family 的 Available 版本列表；
-  // 每个 family 默认选最新；用户可以改；提交时只发 device_protocol_version_map。
+  // 混合模式：
+  // - 429 五个 family 走协议版本（bundle）
+  // - 非 429 family 继续走 legacy parser profile
   const [deviceProtocolVersionMap, setDeviceProtocolVersionMap] = useState({})
+  const [deviceParserMap, setDeviceParserMap] = useState({})
   // { parser_family: [ {id, device_name, version_name, activated_at, has_bundle, parser_key, ...}, ... ] }
   const [availableDeviceVersionsByFamily, setAvailableDeviceVersionsByFamily] = useState({})
   const [deviceVersionsLoading, setDeviceVersionsLoading] = useState(false)
@@ -110,6 +115,7 @@ function UploadPage() {
       setDevices([])
       setSelectedDevices([])
       setDeviceProtocolVersionMap({})
+      setDeviceParserMap({})
     }
   }, [selectedVersion])
 
@@ -144,6 +150,7 @@ function UploadPage() {
     setSelectedVersionInfo(version)
     setSelectedDevices([])
     setDeviceProtocolVersionMap({})
+    setDeviceParserMap({})
   }
 
   const handleDeviceChange = (deviceNames) => {
@@ -166,6 +173,24 @@ function UploadPage() {
     }
 
     setSelectedDevices(selected)
+
+    // 非 version-bound family：默认选第一个 legacy parser
+    setDeviceParserMap(prev => {
+      const next = { ...prev }
+      selected.forEach(name => {
+        const d = devices.find(x => x.device_name === name)
+        const fam = d?.protocol_family
+        if (!fam || VERSION_BOUND_FAMILIES.has(fam)) return
+        if (next[name] == null) {
+          const first = d?.available_parsers?.[0]
+          if (first?.id != null) next[name] = first.id
+        }
+      })
+      Object.keys(next).forEach(deviceName => {
+        if (!selected.includes(deviceName)) delete next[deviceName]
+      })
+      return next
+    })
   }
 
   const selectedPorts = useMemo(() => {
@@ -204,13 +229,20 @@ function UploadPage() {
       return
     }
 
+    const vbFamilies = families.filter(f => VERSION_BOUND_FAMILIES.has(f))
+    if (vbFamilies.length === 0) {
+      setAvailableDeviceVersionsByFamily({})
+      setDeviceProtocolVersionMap({})
+      return
+    }
+
     let cancelled = false
-    const needed = families.filter(f => !(f in availableDeviceVersionsByFamily))
+    const needed = vbFamilies.filter(f => !(f in availableDeviceVersionsByFamily))
     if (needed.length === 0) {
       // 清理已废弃 family 的映射
       setDeviceProtocolVersionMap(prev => {
         const next = {}
-        families.forEach(f => { if (prev[f] != null) next[f] = prev[f] })
+        vbFamilies.forEach(f => { if (prev[f] != null) next[f] = prev[f] })
         return next
       })
       return
@@ -239,7 +271,7 @@ function UploadPage() {
         })
         // 清理已废弃 family
         Object.keys(next).forEach(k => {
-          if (!families.includes(k)) delete next[k]
+          if (!vbFamilies.includes(k)) delete next[k]
         })
         return next
       })
@@ -251,6 +283,10 @@ function UploadPage() {
 
   const handleDeviceProtocolVersionChange = (parserFamily, versionId) => {
     setDeviceProtocolVersionMap(prev => ({ ...prev, [parserFamily]: versionId }))
+  }
+
+  const handleParserChange = (deviceName, parserId) => {
+    setDeviceParserMap(prev => ({ ...prev, [deviceName]: parserId }))
   }
 
   const atgRequiredFamilies = ['irs', 'rtk', 'fcc']
@@ -270,17 +306,24 @@ function UploadPage() {
       const dev = devices.find(x => x.device_name === name)
       const fam = dev?.protocol_family
       if (!fam) return false
-      if (deviceProtocolVersionMap[fam] == null) return false
+      if (VERSION_BOUND_FAMILIES.has(fam)) {
+        if (deviceProtocolVersionMap[fam] == null) return false
+      } else if (deviceParserMap[name] == null) {
+        return false
+      }
     }
     return true
-  }, [selectedDevices, devices, deviceProtocolVersionMap])
+  }, [selectedDevices, devices, deviceProtocolVersionMap, deviceParserMap])
 
   // 整行要不要 disable：没有 Available 版本的 family（含 protocol_family 为空）
   const isDeviceRowDisabled = (dev) => {
     const fam = dev?.protocol_family
     if (!fam) return true
-    const items = availableDeviceVersionsByFamily[fam] || []
-    return items.length === 0
+    if (VERSION_BOUND_FAMILIES.has(fam)) {
+      const items = availableDeviceVersionsByFamily[fam] || []
+      return items.length === 0
+    }
+    return !(dev?.available_parsers?.length > 0)
   }
 
   const handleUpload = async () => {
@@ -304,13 +347,17 @@ function UploadPage() {
     } else {
       formData.append('shared_tsn_id', String(platformFileId))
     }
-    // Phase 7：只发 device_protocol_version_map（按 family 分组），后端根据
-    // version.parser_key 反查 Python 实现；不再前端挑 parser。
+    // 混合模式：
+    // - 429 五个 family：device_protocol_version_map
+    // - 其它 family：device_parser_map（legacy）
     if (Object.keys(deviceProtocolVersionMap).length > 0) {
       formData.append(
         'device_protocol_version_map',
         JSON.stringify(deviceProtocolVersionMap),
       )
+    }
+    if (Object.keys(deviceParserMap).length > 0) {
+      formData.append('device_parser_map', JSON.stringify(deviceParserMap))
     }
     if (selectedVersion) formData.append('protocol_version_id', selectedVersion)
     if (selectedDevices.length > 0) formData.append('selected_devices', selectedDevices.join(','))
@@ -401,37 +448,62 @@ function UploadPage() {
             </Tag>
           )
         }
-        const items = availableDeviceVersionsByFamily[fam] || []
-        if (items.length === 0) {
+
+        if (VERSION_BOUND_FAMILIES.has(fam)) {
+          const items = availableDeviceVersionsByFamily[fam] || []
+          if (items.length === 0) {
+            return (
+              <Tag style={{ background: 'rgba(240, 80, 80, 0.15)', borderColor: '#f05050', color: '#f05050' }}>
+                {deviceVersionsLoading ? '加载中…' : '无 Available 版本，请先激活'}
+              </Tag>
+            )
+          }
+          const currentId = deviceProtocolVersionMap[fam]
+          const latestId = items[0]?.id
+          return (
+            <Space size={6} wrap>
+              <Select
+                placeholder="选择版本"
+                style={{ width: 240 }}
+                value={currentId}
+                onChange={(val) => handleDeviceProtocolVersionChange(fam, val)}
+                size="small"
+                loading={deviceVersionsLoading}
+                options={items.map(v => ({
+                  value: v.id,
+                  label: `${FAMILY_LABELS[fam] || fam} ${v.version_name}${v.has_bundle ? '' : ' · bundle 缺失'}`,
+                  title: v.parser_key ? `parser_key=${v.parser_key}` : undefined,
+                }))}
+              />
+              {currentId && currentId === latestId && (
+                <Tag style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>
+                  最新
+                </Tag>
+              )}
+            </Space>
+          )
+        }
+
+        const parsers = record.available_parsers || []
+        if (parsers.length === 0) {
           return (
             <Tag style={{ background: 'rgba(240, 80, 80, 0.15)', borderColor: '#f05050', color: '#f05050' }}>
-              {deviceVersionsLoading ? '加载中…' : '无 Available 版本，请先激活'}
+              无可用解析器
             </Tag>
           )
         }
-        const currentId = deviceProtocolVersionMap[fam]
-        const latestId = items[0]?.id
         return (
-          <Space size={6} wrap>
-            <Select
-              placeholder="选择版本"
-              style={{ width: 240 }}
-              value={currentId}
-              onChange={(val) => handleDeviceProtocolVersionChange(fam, val)}
-              size="small"
-              loading={deviceVersionsLoading}
-              options={items.map(v => ({
-                value: v.id,
-                label: `${v.version_name}${v.has_bundle ? '' : ' · bundle 缺失'}`,
-                title: v.parser_key ? `parser_key=${v.parser_key}` : undefined,
-              }))}
-            />
-            {currentId && currentId === latestId && (
-              <Tag style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>
-                最新
-              </Tag>
-            )}
-          </Space>
+          <Select
+            placeholder="选择解析器"
+            style={{ width: 240 }}
+            value={deviceParserMap[record.device_name]}
+            onChange={(val) => handleParserChange(record.device_name, val)}
+            size="small"
+            options={parsers.map(p => ({
+              value: p.id,
+              label: `${p.name}${p.version ? ` ${p.version}` : ''}`,
+            }))}
+          />
         )
       },
     },
@@ -546,6 +618,7 @@ function UploadPage() {
                     setSelectedVersionInfo(null)
                     setDevices([])
                     setSelectedDevices([])
+                    setDeviceProtocolVersionMap({})
                     setDeviceParserMap({})
                   }}
                 >
@@ -685,17 +758,25 @@ function UploadPage() {
                       <div><strong>解析计划</strong></div>
                       {selectedDeviceRows.map(dev => {
                         const fam = dev.protocol_family
-                        const versionId = fam ? deviceProtocolVersionMap[fam] : null
+                        const versionId = fam && VERSION_BOUND_FAMILIES.has(fam)
+                          ? deviceProtocolVersionMap[fam]
+                          : null
                         const items = fam ? (availableDeviceVersionsByFamily[fam] || []) : []
-                        const ver = items.find(v => v.id === versionId)
+                        const ver = versionId != null ? items.find(v => v.id === versionId) : null
+                        const legacyPid = deviceParserMap[dev.device_name]
+                        const legacyParser = (dev.available_parsers || []).find(x => x.id === legacyPid)
                         return (
                           <div key={dev.device_name}>
                             <Tag style={{ background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843' }}>{dev.device_name}</Tag>
                             →
                             <Tag style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068' }}>
-                              {ver
-                                ? `${FAMILY_LABELS[fam] || fam} · ${ver.version_name}`
-                                : `版本 #${versionId}`}
+                              {VERSION_BOUND_FAMILIES.has(fam)
+                                ? (ver
+                                  ? `${FAMILY_LABELS[fam] || fam} · ${ver.version_name}`
+                                  : `版本 #${versionId}`)
+                                : (legacyParser
+                                  ? `${FAMILY_LABELS[fam] || fam} · ${legacyParser.name}${legacyParser.version ? ` ${legacyParser.version}` : ''}`
+                                  : `${FAMILY_LABELS[fam] || fam} · 未选解析器`)}
                             </Tag>
                             <span style={{ color: '#a1a1aa', fontSize: 12 }}>
                               ({dev.ports?.length || 0} 个端口)
