@@ -715,7 +715,7 @@ function WorkbenchDetail({ sortieId }) {
   })
   const [fs, setFs] = useState(false)
   /** 姿态时序：与解析结果页一致的「叠加 / 并列」布局 */
-  const [attitudeChartLayout, setAttitudeChartLayout] = useState('overlay')
+  const [attitudeChartLayout, setAttitudeChartLayout] = useState('grid')
   const wrapRef = useRef(null)
   const videoElsRef = useRef({})
   /** 每个 fileId 对应 stable ref，避免每次 render 新建函数导致 <video> 反复挂载并死循环 */
@@ -1570,7 +1570,8 @@ function WorkbenchDetail({ sortieId }) {
 
   /** 叠加模式：剖面 + 姿态合并为一张图，共用时间轴与悬停读数 */
   const mergedProfileAttitudeOption = useMemo(() => {
-    if (attitudeChartLayout !== 'overlay') return null
+    // 已移除独立垂直剖面图，统一只保留姿态图（含 altitude/pitch/roll/yaw）
+    return null
     const attCtx = getAttitudeTooltipContext(overview, align)
     if (!attCtx || !trajData?.path?.length || !trajData.altColumn) return null
     const { altVals, altColumn, tSec, path } = trajData
@@ -1589,8 +1590,16 @@ function WorkbenchDetail({ sortieId }) {
     const aMax = Math.max(...finAlts)
 
     const { series, fields, toX } = attCtx
+    const plotFields = [
+      ...fields,
+      { key: '_traj_altitude', shortName: 'altitude', color: '#f97316', source: 'trajectory' },
+    ]
     const pointsByField = {}
-    fields.forEach((f) => {
+    plotFields.forEach((f) => {
+      if (f.source === 'trajectory') {
+        pointsByField[f.key] = pts.map((p) => [p[0], p[1]])
+        return
+      }
       pointsByField[f.key] = series[f.key]
         .map((v, k) => [toX(k), v])
         .filter((p) => p[0] != null && p[1] != null && Number.isFinite(p[1]))
@@ -1615,15 +1624,59 @@ function WorkbenchDetail({ sortieId }) {
       }
       : undefined
 
-    const nFields = fields.length
-    const attitudeColors = { pitch: '#60a5fa', roll: '#34d399', yaw: '#fbbf24' }
+    const nFields = plotFields.length
+    const attitudeColors = { pitch: '#60a5fa', roll: '#34d399', yaw: '#fbbf24', _traj_altitude: '#f97316' }
     let attitudeYAxis
     let attitudeSeriesArr
-    const attitudeRightPad = nFields === 2 ? 52 : 22
+    const attitudeOnlyFields = plotFields.filter((f) => f.source !== 'trajectory')
+    const altitudeOnlyField = plotFields.find((f) => f.source === 'trajectory')
+    const hasAltitudeSeries = !!altitudeOnlyField
 
-    if (nFields === 2) {
-      const f0 = fields[0]
-      const f1 = fields[1]
+    if (hasAltitudeSeries && attitudeOnlyFields.length) {
+      const rAtt = computeWorkbenchAttitudeYRange(attitudeOnlyFields.map((f) => series[f.key]))
+      attitudeYAxis = [
+        {
+          type: 'value',
+          gridIndex: 1,
+          name: 'attitude (°)',
+          min: rAtt.min,
+          max: rAtt.max,
+          position: 'left',
+          nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+          axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { lineStyle: { color: '#27272a' } },
+        },
+        {
+          type: 'value',
+          gridIndex: 1,
+          name: altitudeOnlyField.shortName,
+          min: aMin,
+          max: aMax,
+          position: 'right',
+          nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+          axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          splitLine: { show: false },
+        },
+      ]
+      attitudeSeriesArr = plotFields.map((f, i) => ({
+        name: f.shortName,
+        type: 'line',
+        xAxisIndex: 1,
+        yAxisIndex: f.source === 'trajectory' ? 2 : 1,
+        smooth: true,
+        showSymbol: false,
+        sampling: 'lttb',
+        lineStyle: { width: 1.5, color: attitudeColors[f.key] || '#94a3b8' },
+        itemStyle: { color: attitudeColors[f.key] || '#94a3b8' },
+        emphasis: { focus: 'series', lineStyle: { width: 2.5 } },
+        data: pointsByField[f.key],
+        markLine: i === 0 ? markLine : undefined,
+      }))
+    } else if (nFields === 2) {
+      const f0 = plotFields[0]
+      const f1 = plotFields[1]
       const r0 = computeWorkbenchAttitudeYRange([series[f0.key]])
       const r1 = computeWorkbenchAttitudeYRange([series[f1.key]])
       attitudeYAxis = [
@@ -1652,7 +1705,7 @@ function WorkbenchDetail({ sortieId }) {
           splitLine: { show: false },
         },
       ]
-      attitudeSeriesArr = fields.map((f, i) => ({
+      attitudeSeriesArr = plotFields.map((f, i) => ({
         name: f.shortName,
         type: 'line',
         xAxisIndex: 1,
@@ -1667,7 +1720,7 @@ function WorkbenchDetail({ sortieId }) {
         markLine: i === 0 ? markLine : undefined,
       }))
     } else {
-      const rAll = computeWorkbenchAttitudeYRange(fields.map((f) => series[f.key]))
+      const rAll = computeWorkbenchAttitudeYRange(plotFields.map((f) => series[f.key]))
       attitudeYAxis = {
         type: 'value',
         gridIndex: 1,
@@ -1679,7 +1732,7 @@ function WorkbenchDetail({ sortieId }) {
         axisLine: { lineStyle: { color: '#27272a' } },
         splitLine: { lineStyle: { color: '#27272a' } },
       }
-      attitudeSeriesArr = fields.map((f, i) => ({
+      attitudeSeriesArr = plotFields.map((f, i) => ({
         name: f.shortName,
         type: 'line',
         xAxisIndex: 1,
@@ -1694,6 +1747,7 @@ function WorkbenchDetail({ sortieId }) {
         markLine: i === 0 ? markLine : undefined,
       }))
     }
+    const attitudeRightPad = Array.isArray(attitudeYAxis) ? 52 : 22
 
     const xAxisBase = {
       type: 'time',
@@ -1717,7 +1771,7 @@ function WorkbenchDetail({ sortieId }) {
         textStyle: { fontSize: 12, color: '#9ca3af', fontWeight: 'normal' },
       },
       legend: {
-        data: [altColumn, ...fields.map((f) => f.shortName)],
+        data: [altColumn, ...plotFields.map((f) => f.shortName)],
         textStyle: { color: '#a1a1aa' },
         top: 26,
       },
@@ -2538,96 +2592,41 @@ function WorkbenchDetail({ sortieId }) {
               </Space>
             )}
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-              轨迹叠加在 OpenStreetMap 底图上；线段颜色表示地速（由东/北分量计算或解析标量速度列）。下方
-              {mergedProfileAttitudeOption ? '垂直剖面与姿态时序合并为一图' : '垂直剖面与姿态时序'}
-              与地图、滑块选点共用同一时间基准（含「解析时间偏移」）；右侧视频仍按该时间关联。
+              轨迹叠加在 OpenStreetMap 底图上；线段颜色表示地速（由东/北分量计算或解析标量速度列）。下方姿态时序图（含 altitude / pitch / roll / yaw）与地图、滑块选点共用同一时间基准（含「解析时间偏移」）；右侧视频仍按该时间关联。
             </Text>
-            {(mergedProfileAttitudeOption || trajAltOption || attitudeChart) && (
+            {attitudeChart && (
               <Row gutter={[0, 20]} style={{ marginTop: 12 }}>
-                {mergedProfileAttitudeOption ? (
-                  <Col span={24}>
-                    <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                      垂直剖面与姿态时序（共用时间轴；悬停显示时间、累计航程、经纬度、高度与各姿态分量；黄线表示当前选点时刻；在图内点击联动地图；点底部缩放条区域无效）
-                    </Text>
-                    {attitudeChart?.canToggleLayout && (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
-                        <Radio.Group
-                          value={attitudeChartLayout}
-                          onChange={(e) => setAttitudeChartLayout(e.target.value)}
-                          size="small"
-                          optionType="button"
-                          buttonStyle="solid"
-                        >
-                          <Radio.Button value="overlay">
-                            <Space size={4}><LineChartOutlined />叠加图</Space>
-                          </Radio.Button>
-                          <Radio.Button value="grid">
-                            <Space size={4}><AppstoreOutlined />并列图</Space>
-                          </Radio.Button>
-                        </Radio.Group>
-                      </div>
-                    )}
-                    <ReactECharts
-                      ref={mergedProfileAttitudeRef}
-                      option={mergedProfileAttitudeOption.option}
-                      style={{ height: mergedProfileAttitudeOption.chartHeight, minHeight: 400 }}
-                      notMerge
-                      lazyUpdate
-                      theme="dark"
-                    />
-                  </Col>
-                ) : (
-                  <>
-                    {trajAltOption && (
-                      <Col span={24}>
-                        <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                          垂直剖面（高度 vs 时间，与地图同源）
-                        </Text>
-                        <ReactECharts
-                          ref={trajAltChartRef}
-                          option={trajAltOption}
-                          style={{ height: 300 }}
-                          notMerge
-                          lazyUpdate
-                          theme="dark"
-                        />
-                      </Col>
-                    )}
-                    {attitudeChart && (
-                      <Col span={24}>
-                        <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                          姿态时序（pitch / roll / yaw，总览 IRS 降采样；黄线表示当前选点时刻）。在图内点击与垂直剖面相同，会联动地图与剖面；点底部缩放条区域无效。
-                        </Text>
-                        {attitudeChart.canToggleLayout && (
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
-                            <Radio.Group
-                              value={attitudeChartLayout}
-                              onChange={(e) => setAttitudeChartLayout(e.target.value)}
-                              size="small"
-                              optionType="button"
-                              buttonStyle="solid"
-                            >
-                              <Radio.Button value="overlay">
-                                <Space size={4}><LineChartOutlined />叠加图</Space>
-                              </Radio.Button>
-                              <Radio.Button value="grid">
-                                <Space size={4}><AppstoreOutlined />并列图</Space>
-                              </Radio.Button>
-                            </Radio.Group>
-                          </div>
-                        )}
-                        <ReactECharts
-                          ref={attitudeChartRef}
-                          option={attitudeChart.option}
-                          style={{ height: attitudeChart.chartHeight, minHeight: 280 }}
-                          notMerge
-                          lazyUpdate
-                          theme="dark"
-                        />
-                      </Col>
-                    )}
-                  </>
-                )}
+                <Col span={24}>
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                    姿态时序（altitude / pitch / roll / yaw，总览 IRS 降采样；黄线表示当前选点时刻）。在图内点击会联动地图；点底部缩放条区域无效。
+                  </Text>
+                  {attitudeChart.canToggleLayout && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                      <Radio.Group
+                        value={attitudeChartLayout}
+                        onChange={(e) => setAttitudeChartLayout(e.target.value)}
+                        size="small"
+                        optionType="button"
+                        buttonStyle="solid"
+                      >
+                        <Radio.Button value="overlay">
+                          <Space size={4}><LineChartOutlined />叠加图</Space>
+                        </Radio.Button>
+                        <Radio.Button value="grid">
+                          <Space size={4}><AppstoreOutlined />并列图</Space>
+                        </Radio.Button>
+                      </Radio.Group>
+                    </div>
+                  )}
+                  <ReactECharts
+                    ref={attitudeChartRef}
+                    option={attitudeChart.option}
+                    style={{ height: attitudeChart.chartHeight, minHeight: 280 }}
+                    notMerge
+                    lazyUpdate
+                    theme="dark"
+                  />
+                </Col>
               </Row>
             )}
           </Card>
