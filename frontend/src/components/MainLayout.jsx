@@ -17,6 +17,7 @@ import {
   AimOutlined,
   SettingOutlined,
   ApartmentOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useAuth } from '../context/AuthContext'
@@ -153,6 +154,14 @@ function MainLayout() {
       items.push({ type: 'group', label: '飞行助手分析', children: flightAssistantChildren })
     }
 
+    items.push({
+      type: 'group',
+      label: '帮助与支持',
+      children: [
+        { key: '/help', icon: <QuestionCircleOutlined />, label: '帮助中心' },
+      ],
+    })
+
     // 系统配置（仅管理员）
     if (isAdmin) {
       items.push({ type: 'divider' })
@@ -199,6 +208,7 @@ function MainLayout() {
     if (path.startsWith('/fcc-event-analysis')) return '/fcc-event-analysis'
     if (path.startsWith('/fms-event-analysis')) return '/fms-event-analysis'
     if (path.startsWith('/event-analysis')) return '/fms-event-analysis'
+    if (path.startsWith('/help')) return '/help'
     if (path.startsWith('/admin/platform-data')) return '/admin/platform-data'
     if (path.startsWith('/admin/configurations')) return '/admin/configurations'
     if (path.startsWith('/admin/users')) return '/admin/users'
@@ -212,7 +222,7 @@ function MainLayout() {
 
   const breadcrumbItems = useMemo(() => {
     const path = location.pathname
-    const items = [{ title: '首页', href: '/dashboard' }]
+    const items = [{ title: '首页', href: '/modules' }]
     const push = (title, href) => items.push({ title, href })
 
     if (path === '/dashboard') {
@@ -257,6 +267,10 @@ function MainLayout() {
       push('网络数据分析', null); push('事件分析', null); push('飞管事件分析', '/fms-event-analysis'); push('任务详情', null)
     } else if (path.startsWith('/fms-event-analysis') || path.startsWith('/event-analysis')) {
       push('网络数据分析', null); push('事件分析', null); push('飞管事件分析', null)
+    } else if (path.startsWith('/help/')) {
+      push('帮助与支持', null); push('帮助中心', '/help'); push('文档详情', null)
+    } else if (path.startsWith('/help')) {
+      push('帮助与支持', null); push('帮助中心', null)
     } else if (path.startsWith('/admin/platform-data')) {
       push('系统配置', null); push('平台共享数据', null)
     } else if (path.startsWith('/admin/configurations')) {
@@ -410,6 +424,24 @@ function MainLayout() {
             }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Tooltip title="帮助中心" placement="bottom">
+            <Button
+              type="text"
+              style={{
+                color: '#d4d4d8',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: 38,
+                width: 38,
+                borderRadius: 10,
+                padding: 0,
+              }}
+              onClick={() => navigate('/help')}
+            >
+              <QuestionCircleOutlined style={{ fontSize: 16, color: '#d4d4d8' }} />
+            </Button>
+          </Tooltip>
           <Dropdown
             open={notifOpen}
             onOpenChange={(open) => {

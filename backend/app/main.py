@@ -40,6 +40,13 @@ async def lifespan(app: FastAPI):
         await init_all_data(db)
         from .services.shared_tsn_service import purge_expired_shared_files
         from .services.disk_maintenance import purge_expired_results, free_disk_mb
+        from .services import ParserService
+
+        # 先清扫上次运行残留的僵尸解析任务（防止 UI 卡在"取消中"/"解析中"）
+        try:
+            await ParserService(db).sweep_orphan_tasks()
+        except Exception as exc:
+            print(f"[Parser] 启动清扫僵尸任务失败: {exc}")
 
         await purge_expired_shared_files(db)
         await purge_expired_results(db)

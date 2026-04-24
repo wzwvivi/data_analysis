@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Card, Form, Input, Button, Typography, message } from 'antd'
 import { DatabaseOutlined, LockOutlined, UserOutlined } from '@ant-design/icons'
 import { useAuth } from '../context/AuthContext'
@@ -8,21 +8,24 @@ const { Title, Text } = Typography
 
 function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { login, user, ready } = useAuth()
   const [loading, setLoading] = useState(false)
+  const from = location.state?.from
+  const redirectTo = typeof from === 'string' && from.startsWith('/') && from !== '/login' ? from : '/modules'
 
   useEffect(() => {
     if (ready && user) {
-      navigate('/dashboard', { replace: true })
+      navigate(redirectTo, { replace: true })
     }
-  }, [ready, user, navigate])
+  }, [ready, user, navigate, redirectTo])
 
   const onFinish = async (values) => {
     setLoading(true)
     try {
       await login(values.username, values.password)
       message.success('登录成功')
-      navigate('/dashboard', { replace: true })
+      navigate(redirectTo, { replace: true })
     } catch (e) {
       message.error(e.response?.data?.detail || '登录失败')
     } finally {

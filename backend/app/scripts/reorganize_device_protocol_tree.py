@@ -22,6 +22,8 @@
        - 空壳 = Arinc429/Can/Rs422 family handler 的 normalize({}) 结果
        - availability_status = Available（可选池，待 parser 实现再推进）
        - git_export_status   = pending（留给 M2 真 Git 后端处理）
+
+  5) 32-1 刹车控制单元仅 ARINC429：删除历史上误绑的 ``ata32_32_1__can`` spec
 """
 import asyncio
 import copy
@@ -139,10 +141,6 @@ TARGET: Dict[Tuple[str, str], Dict] = {
         "device_name": "32-1-刹车控制单元", "ata_code": "ata32",
         "parent_path": ["ATA32", "起落架系统"], "versions": ["V7.3"],
     },
-    ("ata32_32_1__can", "can"): {
-        "device_name": "32-1-刹车控制单元", "ata_code": "ata32",
-        "parent_path": ["ATA32", "起落架系统"], "versions": ["V7.3"],
-    },
     ("ata32_32_2", "arinc429"): {
         "device_name": "32-2-收放控制单元", "ata_code": "ata32",
         "parent_path": ["ATA32", "起落架系统"],
@@ -242,6 +240,11 @@ VERSION_RENAMES: List[Tuple[str, str, str, str]] = [
     ("ata23_23_3", "arinc429", "V20260402", "V1.0"),
     ("ata34_34_8", "arinc429", "V20260113", "V1.0"),
     ("ata24_24_3", "can", "V2.0", "V1.0"),
+]
+
+# 已从目标树移除：历史上与「32-1-刹车控制单元」误绑的 CAN spec（该设备仅 429）
+RETIRED_SPEC_KEYS: List[Tuple[str, str]] = [
+    ("ata32_32_1__can", "can"),
 ]
 
 
@@ -402,6 +405,34 @@ async def step4_ensure_versions(db) -> None:
     await db.flush()
 
 
+async def step4b_remove_retired_specs(db) -> None:
+    """删除 RETIRED_SPEC_KEYS 中的 spec（含级联版本/草稿）。
+
+    用于从目标清单撤下的设备+总线组合（如刹车单元误绑 CAN）。
+    """
+    print("\n── Step 4b: 移除已退役 spec ──")
+    for did, fam in RETIRED_SPEC_KEYS:
+        r = await db.execute(
+            select(DeviceProtocolSpec)
+            .where(
+                DeviceProtocolSpec.device_id == did,
+                DeviceProtocolSpec.protocol_family == fam,
+            )
+            .options(selectinload(DeviceProtocolSpec.versions))
+        )
+        spec = r.scalar_one_or_none()
+        if spec is None:
+            _log("remove_retired", "SKIP", f"{did}[{fam}] 不存在")
+            continue
+        n_ver = len(spec.versions or [])
+        # 解除自引用，避免部分 SQLite 配置下删 spec 与 version 顺序冲突
+        spec.current_version_id = None
+        await db.flush()
+        await db.delete(spec)
+        _log("remove_retired", "DONE", f"已删除 {did}[{fam}]（含约 {n_ver} 个版本）")
+    await db.flush()
+
+
 async def step6_prune_orphans(db) -> None:
     """Step 6: 清理孤儿 spec（目标清单之外 + 没有任何版本）
 
@@ -459,6 +490,7 @@ async def main():
         await step2_rename_versions(db)
         await step3_create_specs(db)
         await step4_ensure_versions(db)
+        await step4b_remove_retired_specs(db)
         await step6_prune_orphans(db)
         await db.commit()
         await step5_summary(db)

@@ -443,6 +443,35 @@ class ParserService:
         val = r.scalar_one_or_none()
         return bool(val)
 
+    async def sweep_orphan_tasks(self) -> int:
+        """后端启动时调用：把所有残留在 pending/processing 状态的任务标记为 failed。
+
+        FastAPI 进程 + ProcessPoolExecutor 都在容器内，容器重启或进程被杀后，
+        所有解析 future 都会丢失。原本写在 DB 里的 ``processing`` 记录没人再去
+        推进状态，就会永远卡在"取消中"/"解析中"。启动时一次性清扫，避免 UI
+        出现僵尸任务。
+        """
+        from sqlalchemy import select as _select
+        r = await self.db.execute(
+            _select(ParseTask).where(ParseTask.status.in_(["pending", "processing"]))
+        )
+        tasks = r.scalars().all()
+        now = datetime.utcnow()
+        for t in tasks:
+            reason = "后端重启时任务被中断" if not t.cancel_requested else "用户已请求取消，任务被后端重启中断"
+            t.status = "failed"
+            t.error_message = reason
+            t.progress = 0
+            t.stage = None
+            t.completed_at = now
+            if not t.started_at:
+                t.started_at = now
+        if tasks:
+            await self.db.commit()
+            print(f"[Parser] 启动清扫：{len(tasks)} 个僵尸解析任务被标记为 failed: "
+                  f"{[t.id for t in tasks]}")
+        return len(tasks)
+
     async def update_task_meta(
         self,
         task_id: int,

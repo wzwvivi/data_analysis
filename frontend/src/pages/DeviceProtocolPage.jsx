@@ -348,56 +348,63 @@ function DeviceProtocolPage() {
       const isFamilyNode = n.type === 'family'
       const isAtaNode = n.type === 'ata'
       const deviceCount = isDevice ? 0 : countDevicesUnder(n)
+      const parserKeyBase = isDevice && n.parser_key
+        ? String(n.parser_key).replace(/_v[^_]*$/i, '')
+        : ''
       return {
         key: n.key,
         title: (
-          <Space size={6} style={{ width: '100%' }}>
-            {isFamilyNode ? (
-              <Tag color={FAMILY_COLORS[n.family] || 'default'} style={{ margin: 0 }}>
-                {FAMILY_LABEL[n.family] || (n.family || '').toUpperCase()}
-              </Tag>
-            ) : null}
-            {isDevice && groupBy === 'ata' ? (
-              sortFamilies(n.families && n.families.length ? n.families : [n.family]).map((f) => (
-                <Tag key={f} color={FAMILY_COLORS[f] || 'default'} style={{ margin: 0 }}>
-                  {FAMILY_TAG[f] || (f || '').toUpperCase()}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%', padding: '2px 0' }}>
+            <Space size={6} style={{ width: '100%' }}>
+              {isFamilyNode ? (
+                <Tag color={FAMILY_COLORS[n.family] || 'default'} style={{ margin: 0 }}>
+                  {FAMILY_LABEL[n.family] || (n.family || '').toUpperCase()}
                 </Tag>
-              ))
-            ) : null}
-            <span
-              style={{
-                fontWeight: isAtaNode || isFamilyNode ? 600 : 400,
-                color: isAtaNode ? '#e4e4e7' : undefined,
-              }}
-            >
-              {n.title}
-            </span>
-            {isDevice && n.parser_key ? (
-              <Tooltip title={`当前绑定的 Python parser_key：${n.parser_key}`}>
-                <Tag
-                  color="gold"
-                  style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 6px' }}
-                >
-                  ⛓ {n.parser_key}
-                </Tag>
-              </Tooltip>
-            ) : null}
-            {!isDevice && deviceCount > 0 ? (
-              <Tag
+              ) : null}
+              {isDevice && groupBy === 'ata' ? (
+                sortFamilies(n.families && n.families.length ? n.families : [n.family]).map((f) => (
+                  <Tag key={f} color={FAMILY_COLORS[f] || 'default'} style={{ margin: 0 }}>
+                    {FAMILY_TAG[f] || (f || '').toUpperCase()}
+                  </Tag>
+                ))
+              ) : null}
+              <span
                 style={{
-                  margin: 0,
-                  fontSize: 11,
-                  lineHeight: '16px',
-                  padding: '0 6px',
-                  background: '#27272a',
-                  border: '1px solid #3f3f46',
-                  color: '#a1a1aa',
+                  fontWeight: isAtaNode || isFamilyNode ? 600 : 400,
+                  color: isAtaNode ? '#e4e4e7' : undefined,
                 }}
               >
-                {deviceCount}
-              </Tag>
+                {n.title}
+              </span>
+              {!isDevice && deviceCount > 0 ? (
+                <Tag
+                  style={{
+                    margin: 0,
+                    fontSize: 11,
+                    lineHeight: '16px',
+                    padding: '0 6px',
+                    background: '#27272a',
+                    border: '1px solid #3f3f46',
+                    color: '#a1a1aa',
+                  }}
+                >
+                  {deviceCount}
+                </Tag>
+              ) : null}
+            </Space>
+            {isDevice && parserKeyBase ? (
+              <div style={{ paddingLeft: 2 }}>
+                <Tooltip title={`当前绑定的 Python parser_key：${n.parser_key}`}>
+                  <Tag
+                    color="gold"
+                    style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 6px' }}
+                  >
+                    ⛓ {parserKeyBase}
+                  </Tag>
+                </Tooltip>
+              </div>
             ) : null}
-          </Space>
+          </div>
         ),
         selectable: true,
         __meta: n,

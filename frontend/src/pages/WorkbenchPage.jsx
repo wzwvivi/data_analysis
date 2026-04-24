@@ -1271,7 +1271,7 @@ function WorkbenchDetail({ sortieId }) {
         yAxis = [
           {
             type: 'value',
-            name: 'attitude (°)',
+            name: 'pitch / roll / yaw（°）',
             min: rAtt.min,
             max: rAtt.max,
             position: 'left',
@@ -1282,7 +1282,7 @@ function WorkbenchDetail({ sortieId }) {
           },
           {
             type: 'value',
-            name: altitudeOnlyField.shortName,
+            name: 'altitude（m）',
             min: altMin,
             max: altMax,
             position: 'right',
@@ -1431,14 +1431,15 @@ function WorkbenchDetail({ sortieId }) {
       return { option, chartHeight: 320, canToggleLayout }
     }
 
-    // 并列：多子图 + 底部滑块联动所有 X 轴
+    // 并列：多子图 + 底部滑块联动；视觉与「叠加图」同一套（边距、轴线、分割线、十字准星、缩放条）
     const n = fields.length
-    const padTop = 12
-    const padBottom = 56
-    const rowGap = 44
-    const rowInner = 148
-    const leftPx = 88
-    const rightPx = 28
+    const padTop = 40
+    // 最下层：倾斜刻度 + 轴标题「时间（北京）」+ dataZoom，需足够底边距避免与标题叠字
+    const padBottom = 92
+    const rowGap = 36
+    const rowInner = 140
+    const leftPx = 58
+    const rightPx = 22
     const chartHeight = padTop + n * rowInner + Math.max(0, n - 1) * rowGap + padBottom
 
     const grids = fields.map((_, i) => ({
@@ -1449,9 +1450,17 @@ function WorkbenchDetail({ sortieId }) {
       containLabel: false,
     }))
 
-    const axisLabelStyle = { color: '#a1a1aa', fontSize: 11 }
     const splitStyle = { lineStyle: { color: '#27272a' } }
     const xAxisIndices = fields.map((_, i) => i)
+
+    const yRangeForGridField = (f) => {
+      if (f.source === 'trajectory' && trajData?.altVals?.length) {
+        const nums = trajData.altVals.filter((v) => v != null && Number.isFinite(v))
+        if (!nums.length) return { min: undefined, max: undefined }
+        return { min: Math.min(...nums), max: Math.max(...nums) }
+      }
+      return computeWorkbenchAttitudeYRange([series[f.key]])
+    }
 
     const option = {
       backgroundColor: 'transparent',
@@ -1507,7 +1516,7 @@ function WorkbenchDetail({ sortieId }) {
           start: 0,
           end: 100,
           height: 20,
-          bottom: 6,
+          bottom: 8,
           borderColor: '#27272a',
           backgroundColor: '#0f0f12',
           fillerColor: 'rgba(139, 92, 246, 0.2)',
@@ -1522,35 +1531,34 @@ function WorkbenchDetail({ sortieId }) {
           gridIndex: i,
           name: isBottom ? (useEpoch ? '时间（北京）' : '时间 (s)') : '',
           nameLocation: 'middle',
-          nameGap: 30,
-          nameTextStyle: { color: '#9ca3af', fontSize: 11, padding: [10, 0, 0, 0] },
-          scale: true,
+          nameGap: isBottom ? 52 : 28,
+          nameTextStyle: { color: '#9ca3af', fontSize: 11 },
           axisTick: { show: isBottom },
           axisLabel: {
             show: isBottom,
-            ...axisLabelStyle,
-            margin: 10,
+            color: '#a1a1aa',
             hideOverlap: true,
+            rotate: 30,
+            margin: isBottom ? 18 : 10,
             formatter: (v) => (useEpoch ? beijingHmsFromMs(v) : Number(v).toFixed(0)),
           },
+          splitLine: { show: false },
+        }
+      }),
+      yAxis: fields.map((f, i) => {
+        const { min: yMin, max: yMax } = yRangeForGridField(f)
+        return {
+          type: 'value',
+          gridIndex: i,
+          name: f.shortName,
+          min: yMin,
+          max: yMax,
+          nameTextStyle: { color: '#a1a1aa', fontSize: 11 },
+          axisLine: { lineStyle: { color: '#27272a' } },
+          axisLabel: { color: '#a1a1aa', formatter: fmtYTick },
           splitLine: { show: true, ...splitStyle },
         }
       }),
-      yAxis: fields.map((f, i) => ({
-        type: 'value',
-        gridIndex: i,
-        name: f.shortName,
-        nameLocation: 'middle',
-        nameRotate: 90,
-        nameGap: 52,
-        nameTextStyle: { color: '#9ca3af', fontSize: 11, align: 'center' },
-        scale: true,
-        axisLine: { show: true, lineStyle: { color: '#27272a' } },
-        axisTick: { show: true },
-        axisLabel: { ...axisLabelStyle, margin: 10, formatter: fmtYTick },
-        splitLine: { show: true, ...splitStyle },
-        splitNumber: 5,
-      })),
       series: fields.map((f, i) => ({
         name: f.shortName,
         type: 'line',
@@ -1560,8 +1568,18 @@ function WorkbenchDetail({ sortieId }) {
         sampling: 'lttb',
         smooth: true,
         lineStyle: { color: f.color, width: 1.5 },
+        itemStyle: { color: f.color },
+        emphasis: { focus: 'series', lineStyle: { width: 2.5 } },
         data: fieldPoints(f),
-        markLine,
+        // 并列：每个子图同一时刻各画一条竖线；「选中」文案只标在第一张，避免叠字
+        markLine: !markLine
+          ? undefined
+          : {
+            symbol: markLine.symbol,
+            lineStyle: markLine.lineStyle,
+            data: markLine.data,
+            label: i === 0 ? markLine.label : { show: false },
+          },
       })),
     }
 
@@ -1638,7 +1656,7 @@ function WorkbenchDetail({ sortieId }) {
         {
           type: 'value',
           gridIndex: 1,
-          name: 'attitude (°)',
+          name: 'pitch / roll / yaw（°）',
           min: rAtt.min,
           max: rAtt.max,
           position: 'left',
@@ -1650,7 +1668,7 @@ function WorkbenchDetail({ sortieId }) {
         {
           type: 'value',
           gridIndex: 1,
-          name: altitudeOnlyField.shortName,
+          name: 'altitude（m）',
           min: aMin,
           max: aMax,
           position: 'right',

@@ -1,5 +1,5 @@
 import React from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import MainLayout from './components/MainLayout'
 import LoginPage from './pages/LoginPage'
@@ -28,9 +28,13 @@ import DeviceVersionViewerPage from './pages/device-protocol/VersionViewerPage'
 import DashboardPage from './pages/DashboardPage'
 import WorkbenchPage from './pages/WorkbenchPage'
 import WorkbenchComparePage from './pages/WorkbenchComparePage'
+import LandingPage from './pages/LandingPage'
+import HelpCenterPage from './pages/HelpCenterPage'
+import ModuleHubPage from './pages/ModuleHubPage'
 import { Result } from 'antd'
 
 function PrivateRoute({ children }) {
+  const location = useLocation()
   const { user, ready } = useAuth()
   if (!ready) {
     return (
@@ -40,12 +44,14 @@ function PrivateRoute({ children }) {
     )
   }
   if (!user) {
-    return <Navigate to="/login" replace />
+    const from = `${location.pathname}${location.search}${location.hash}`
+    return <Navigate to="/login" replace state={{ from }} />
   }
   return children
 }
 
 function AdminRoute({ children }) {
+  const location = useLocation()
   const { user, ready, isAdmin } = useAuth()
   if (!ready) {
     return (
@@ -55,7 +61,8 @@ function AdminRoute({ children }) {
     )
   }
   if (!user) {
-    return <Navigate to="/login" replace />
+    const from = `${location.pathname}${location.search}${location.hash}`
+    return <Navigate to="/login" replace state={{ from }} />
   }
   if (!isAdmin) {
     return <Navigate to="/upload" replace />
@@ -74,6 +81,7 @@ function PermissionDenied({ pageKey }) {
 }
 
 function PermissionRoute({ children, requiredPage }) {
+  const location = useLocation()
   const { user, ready, hasPageAccess } = useAuth()
   if (!ready) {
     return (
@@ -83,7 +91,8 @@ function PermissionRoute({ children, requiredPage }) {
     )
   }
   if (!user) {
-    return <Navigate to="/login" replace />
+    const from = `${location.pathname}${location.search}${location.hash}`
+    return <Navigate to="/login" replace state={{ from }} />
   }
   if (requiredPage && !hasPageAccess(requiredPage)) {
     return <PermissionDenied pageKey={requiredPage} />
@@ -91,50 +100,74 @@ function PermissionRoute({ children, requiredPage }) {
   return children
 }
 
+const PUBLIC_DOC_KEYS = new Set(['overview', 'quickstart', 'faq', 'changelog'])
+
+function PublicDocRoute() {
+  const { moduleKey } = useParams()
+  const currentKey = moduleKey || 'overview'
+
+  if (!PUBLIC_DOC_KEYS.has(currentKey)) {
+    return <Navigate to={`/help/${currentKey}`} replace />
+  }
+
+  return <HelpCenterPage />
+}
+
 function AppRoutes() {
   return (
     <Routes>
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/docs" element={<PublicDocRoute />} />
+      <Route path="/docs/:moduleKey" element={<PublicDocRoute />} />
       <Route
-        path="/"
+        path="/modules"
+        element={(
+          <PrivateRoute>
+            <ModuleHubPage />
+          </PrivateRoute>
+        )}
+      />
+      <Route
         element={(
           <PrivateRoute>
             <MainLayout />
           </PrivateRoute>
         )}
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<PermissionRoute requiredPage="dashboard"><DashboardPage /></PermissionRoute>} />
-        <Route path="workbench" element={<PermissionRoute requiredPage="workbench"><WorkbenchPage /></PermissionRoute>} />
-        <Route path="workbench/compare" element={<PermissionRoute requiredPage="workbench"><WorkbenchComparePage /></PermissionRoute>} />
-        <Route path="workbench/:sortieId" element={<PermissionRoute requiredPage="workbench"><WorkbenchPage /></PermissionRoute>} />
-        <Route path="upload" element={<PermissionRoute requiredPage="upload"><UploadPage /></PermissionRoute>} />
-        <Route path="tasks" element={<PermissionRoute requiredPage="tasks"><TaskListPage /></PermissionRoute>} />
-        <Route path="tasks/:taskId" element={<PermissionRoute requiredPage="tasks/:taskId"><ResultPage /></PermissionRoute>} />
-        <Route path="tasks/:taskId/analysis" element={<PermissionRoute requiredPage="tasks/:taskId/analysis"><ResultPage /></PermissionRoute>} />
-        <Route path="tasks/:taskId/event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
-        <Route path="tasks/:taskId/fms-event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
-        <Route path="network-config" element={<PermissionRoute requiredPage="network-config"><NetworkConfigPage /></PermissionRoute>} />
-        <Route path="network-config/versions/:id" element={<PermissionRoute requiredPage="network-config"><VersionViewerPage /></PermissionRoute>} />
-        <Route path="network-config/drafts/:id" element={<PermissionRoute requiredPage="network-config"><DraftEditorPage /></PermissionRoute>} />
-        <Route path="network-config/change-requests/:id" element={<PermissionRoute requiredPage="network-config"><ChangeRequestPage /></PermissionRoute>} />
-        <Route path="device-protocol" element={<PermissionRoute requiredPage="device-protocol"><DeviceProtocolPage /></PermissionRoute>} />
-        <Route path="device-protocol/drafts/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceDraftJsonEditorPage /></PermissionRoute>} />
-        <Route path="device-protocol/change-requests/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceChangeRequestPage /></PermissionRoute>} />
-        <Route path="device-protocol/versions/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceVersionViewerPage /></PermissionRoute>} />
-        <Route path="compare" element={<PermissionRoute requiredPage="compare"><ComparePage /></PermissionRoute>} />
-        <Route path="compare/:taskId" element={<PermissionRoute requiredPage="compare/:taskId"><ComparePage /></PermissionRoute>} />
+        <Route path="/dashboard" element={<PermissionRoute requiredPage="dashboard"><DashboardPage /></PermissionRoute>} />
+        <Route path="/workbench" element={<PermissionRoute requiredPage="workbench"><WorkbenchPage /></PermissionRoute>} />
+        <Route path="/workbench/compare" element={<PermissionRoute requiredPage="workbench"><WorkbenchComparePage /></PermissionRoute>} />
+        <Route path="/workbench/:sortieId" element={<PermissionRoute requiredPage="workbench"><WorkbenchPage /></PermissionRoute>} />
+        <Route path="/help" element={<HelpCenterPage />} />
+        <Route path="/help/:moduleKey" element={<HelpCenterPage />} />
+        <Route path="/upload" element={<PermissionRoute requiredPage="upload"><UploadPage /></PermissionRoute>} />
+        <Route path="/tasks" element={<PermissionRoute requiredPage="tasks"><TaskListPage /></PermissionRoute>} />
+        <Route path="/tasks/:taskId" element={<PermissionRoute requiredPage="tasks/:taskId"><ResultPage /></PermissionRoute>} />
+        <Route path="/tasks/:taskId/analysis" element={<PermissionRoute requiredPage="tasks/:taskId/analysis"><ResultPage /></PermissionRoute>} />
+        <Route path="/tasks/:taskId/event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
+        <Route path="/tasks/:taskId/fms-event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
+        <Route path="/network-config" element={<PermissionRoute requiredPage="network-config"><NetworkConfigPage /></PermissionRoute>} />
+        <Route path="/network-config/versions/:id" element={<PermissionRoute requiredPage="network-config"><VersionViewerPage /></PermissionRoute>} />
+        <Route path="/network-config/drafts/:id" element={<PermissionRoute requiredPage="network-config"><DraftEditorPage /></PermissionRoute>} />
+        <Route path="/network-config/change-requests/:id" element={<PermissionRoute requiredPage="network-config"><ChangeRequestPage /></PermissionRoute>} />
+        <Route path="/device-protocol" element={<PermissionRoute requiredPage="device-protocol"><DeviceProtocolPage /></PermissionRoute>} />
+        <Route path="/device-protocol/drafts/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceDraftJsonEditorPage /></PermissionRoute>} />
+        <Route path="/device-protocol/change-requests/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceChangeRequestPage /></PermissionRoute>} />
+        <Route path="/device-protocol/versions/:id" element={<PermissionRoute requiredPage="device-protocol"><DeviceVersionViewerPage /></PermissionRoute>} />
+        <Route path="/compare" element={<PermissionRoute requiredPage="compare"><ComparePage /></PermissionRoute>} />
+        <Route path="/compare/:taskId" element={<PermissionRoute requiredPage="compare/:taskId"><ComparePage /></PermissionRoute>} />
         {/* 飞管事件分析（Phase 1 renamed，旧 /event-analysis 路径保留一段兼容期） */}
-        <Route path="fms-event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fms-event-analysis/task/:analysisTaskId"><StandaloneFmsEventTaskPage /></PermissionRoute>} />
-        <Route path="fms-event-analysis" element={<PermissionRoute requiredPage="fms-event-analysis"><StandaloneFmsEventPage /></PermissionRoute>} />
-        <Route path="event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fms-event-analysis/task/:analysisTaskId"><StandaloneFmsEventTaskPage /></PermissionRoute>} />
-        <Route path="event-analysis" element={<PermissionRoute requiredPage="fms-event-analysis"><StandaloneFmsEventPage /></PermissionRoute>} />
-        <Route path="fcc-event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fcc-event-analysis/task/:analysisTaskId"><FccEventAnalysisTaskPage /></PermissionRoute>} />
-        <Route path="fcc-event-analysis" element={<PermissionRoute requiredPage="fcc-event-analysis"><FccEventAnalysisPage /></PermissionRoute>} />
-        <Route path="auto-flight-analysis/task/:taskId" element={<PermissionRoute requiredPage="auto-flight-analysis/task/:taskId"><AutoFlightAnalysisTaskPage /></PermissionRoute>} />
-        <Route path="auto-flight-analysis" element={<PermissionRoute requiredPage="auto-flight-analysis"><AutoFlightAnalysisPage /></PermissionRoute>} />
+        <Route path="/fms-event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fms-event-analysis/task/:analysisTaskId"><StandaloneFmsEventTaskPage /></PermissionRoute>} />
+        <Route path="/fms-event-analysis" element={<PermissionRoute requiredPage="fms-event-analysis"><StandaloneFmsEventPage /></PermissionRoute>} />
+        <Route path="/event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fms-event-analysis/task/:analysisTaskId"><StandaloneFmsEventTaskPage /></PermissionRoute>} />
+        <Route path="/event-analysis" element={<PermissionRoute requiredPage="fms-event-analysis"><StandaloneFmsEventPage /></PermissionRoute>} />
+        <Route path="/fcc-event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fcc-event-analysis/task/:analysisTaskId"><FccEventAnalysisTaskPage /></PermissionRoute>} />
+        <Route path="/fcc-event-analysis" element={<PermissionRoute requiredPage="fcc-event-analysis"><FccEventAnalysisPage /></PermissionRoute>} />
+        <Route path="/auto-flight-analysis/task/:taskId" element={<PermissionRoute requiredPage="auto-flight-analysis/task/:taskId"><AutoFlightAnalysisTaskPage /></PermissionRoute>} />
+        <Route path="/auto-flight-analysis" element={<PermissionRoute requiredPage="auto-flight-analysis"><AutoFlightAnalysisPage /></PermissionRoute>} />
         <Route
-          path="admin/platform-data"
+          path="/admin/platform-data"
           element={(
             <AdminRoute>
               <AdminPlatformDataPage />
@@ -142,7 +175,7 @@ function AppRoutes() {
           )}
         />
         <Route
-          path="admin/configurations"
+          path="/admin/configurations"
           element={(
             <AdminRoute>
               <ConfigurationManagerPage />
@@ -150,7 +183,7 @@ function AppRoutes() {
           )}
         />
         <Route
-          path="admin/users"
+          path="/admin/users"
           element={(
             <AdminRoute>
               <AdminUserPage />
