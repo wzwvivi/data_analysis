@@ -3,6 +3,7 @@ import quickstartRaw from './quickstart.md?raw'
 import glossaryRaw from './glossary.md?raw'
 import uploadRaw from './upload.md?raw'
 import tasksRaw from './tasks.md?raw'
+import resultAnalysisRaw from './result-analysis.md?raw'
 import networkConfigRaw from './network-config.md?raw'
 import deviceProtocolRaw from './device-protocol.md?raw'
 import fmsEventRaw from './fms-event-analysis.md?raw'
@@ -70,9 +71,17 @@ export const DOCS = [
     raw: tasksRaw,
   },
   {
-    key: 'network-config',
+    key: 'result-analysis',
     group: 'network',
     order: 3,
+    title: '结果分析',
+    summary: '查看解析后的表格、趋势图与异常分析结果。',
+    raw: resultAnalysisRaw,
+  },
+  {
+    key: 'network-config',
+    group: 'network',
+    order: 4,
     title: 'TSN 网络配置',
     summary: '管理网络配置草稿、审批流与发布版本，保障配置可追踪。',
     raw: networkConfigRaw,
@@ -80,7 +89,7 @@ export const DOCS = [
   {
     key: 'device-protocol',
     group: 'network',
-    order: 4,
+    order: 5,
     title: '设备协议管理',
     summary: '维护设备协议定义与版本，供上传解析页面选择并绑定。',
     raw: deviceProtocolRaw,
