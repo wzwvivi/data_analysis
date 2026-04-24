@@ -108,6 +108,24 @@ function DocsRedirect() {
   return <Navigate to={target} replace />
 }
 
+function EventAnalysisLegacyRedirect() {
+  const location = useLocation()
+  const nextPath = location.pathname.replace('/event-analysis', '/fms-event-analysis')
+  const target = `${nextPath}${location.search}${location.hash}`
+  return <Navigate to={target} replace />
+}
+
+// 旧路径 /tasks/:taskId/analysis 统一重定向到 /tasks/:taskId?tab=analysis
+// 保留书签兼容；ResultPage 内部仍识别末尾 /analysis 做向前兼容。
+function TaskAnalysisLegacyRedirect() {
+  const location = useLocation()
+  const { taskId } = useParams()
+  const qs = new URLSearchParams(location.search)
+  if (!qs.get('tab')) qs.set('tab', 'analysis')
+  const target = `/tasks/${taskId}?${qs.toString()}${location.hash}`
+  return <Navigate to={target} replace />
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -140,7 +158,7 @@ function AppRoutes() {
         <Route path="/upload" element={<PermissionRoute requiredPage="upload"><UploadPage /></PermissionRoute>} />
         <Route path="/tasks" element={<PermissionRoute requiredPage="tasks"><TaskListPage /></PermissionRoute>} />
         <Route path="/tasks/:taskId" element={<PermissionRoute requiredPage="tasks/:taskId"><ResultPage /></PermissionRoute>} />
-        <Route path="/tasks/:taskId/analysis" element={<PermissionRoute requiredPage="tasks/:taskId/analysis"><ResultPage /></PermissionRoute>} />
+        <Route path="/tasks/:taskId/analysis" element={<PermissionRoute requiredPage="tasks/:taskId/analysis"><TaskAnalysisLegacyRedirect /></PermissionRoute>} />
         <Route path="/tasks/:taskId/event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
         <Route path="/tasks/:taskId/fms-event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
         <Route path="/network-config" element={<PermissionRoute requiredPage="network-config"><NetworkConfigPage /></PermissionRoute>} />
@@ -156,8 +174,8 @@ function AppRoutes() {
         {/* 飞管事件分析（Phase 1 renamed，旧 /event-analysis 路径保留一段兼容期） */}
         <Route path="/fms-event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fms-event-analysis/task/:analysisTaskId"><StandaloneFmsEventTaskPage /></PermissionRoute>} />
         <Route path="/fms-event-analysis" element={<PermissionRoute requiredPage="fms-event-analysis"><StandaloneFmsEventPage /></PermissionRoute>} />
-        <Route path="/event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fms-event-analysis/task/:analysisTaskId"><StandaloneFmsEventTaskPage /></PermissionRoute>} />
-        <Route path="/event-analysis" element={<PermissionRoute requiredPage="fms-event-analysis"><StandaloneFmsEventPage /></PermissionRoute>} />
+        <Route path="/event-analysis/task/:analysisTaskId" element={<EventAnalysisLegacyRedirect />} />
+        <Route path="/event-analysis" element={<EventAnalysisLegacyRedirect />} />
         <Route path="/fcc-event-analysis/task/:analysisTaskId" element={<PermissionRoute requiredPage="fcc-event-analysis/task/:analysisTaskId"><FccEventAnalysisTaskPage /></PermissionRoute>} />
         <Route path="/fcc-event-analysis" element={<PermissionRoute requiredPage="fcc-event-analysis"><FccEventAnalysisPage /></PermissionRoute>} />
         <Route path="/auto-flight-analysis/task/:taskId" element={<PermissionRoute requiredPage="auto-flight-analysis/task/:taskId"><AutoFlightAnalysisTaskPage /></PermissionRoute>} />

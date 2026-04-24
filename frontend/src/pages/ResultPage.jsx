@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import {
   Card, Table, Tabs, Tag, Button, Space, message, Statistic, Row, Col,
   Spin, Empty, Select, Radio, Checkbox, Alert, Progress, InputNumber, Divider, Segmented,
-  Modal, Collapse, Tooltip, Typography, Popconfirm,
+  Modal, Collapse, Tooltip, Typography, Popconfirm, Form, Input,
 } from 'antd'
 import {
   DownloadOutlined, LineChartOutlined, ReloadOutlined,
@@ -809,16 +809,32 @@ function ResultPage() {
     setSearchParams(next, { replace: true })
   }
 
-  const handleRenameTask = async () => {
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameSubmitting, setRenameSubmitting] = useState(false)
+  const [renameForm] = Form.useForm()
+
+  const handleRenameTask = () => {
     if (!task) return
-    const next = window.prompt('任务显示名称', task.display_name || task.filename)
-    if (next == null) return
+    renameForm.setFieldsValue({ display_name: task.display_name || '' })
+    setRenameOpen(true)
+  }
+
+  const submitRenameTask = async () => {
+    if (!task) return
     try {
-      await parseApi.updateTaskMeta(task.id, { display_name: (next || '').trim() || null })
-      message.success('已更新')
+      const values = await renameForm.validateFields()
+      setRenameSubmitting(true)
+      const display_name = (values.display_name || '').trim() || null
+      await parseApi.updateTaskMeta(task.id, { display_name })
+      message.success('已更新任务名称')
+      setRenameOpen(false)
+      renameForm.resetFields()
       loadTask(true)
     } catch (err) {
-      message.error(err.response?.data?.detail || '更新失败')
+      if (err?.errorFields) return
+      message.error(err?.response?.data?.detail || '更新失败')
+    } finally {
+      setRenameSubmitting(false)
     }
   }
 
@@ -2695,7 +2711,7 @@ function ResultPage() {
                 icon={<ExperimentOutlined />}
                 onClick={() => navigate(`/tasks/${task.id}/event-analysis`)}
               >
-                事件分析
+                专项分析
               </Button>
             )}
             {task.can_rerun && (
@@ -3087,6 +3103,30 @@ function ResultPage() {
             </Row>
           </Checkbox.Group>
         </div>
+      </Modal>
+      <Modal
+        title="重命名任务"
+        open={renameOpen}
+        onCancel={() => { if (!renameSubmitting) { setRenameOpen(false); renameForm.resetFields() } }}
+        onOk={submitRenameTask}
+        confirmLoading={renameSubmitting}
+        okText="保存"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Form form={renameForm} layout="vertical" preserve={false}>
+          <div style={{ color: '#a1a1aa', fontSize: 12, marginBottom: 8 }}>
+            原文件名：<span className="mono">{task?.filename}</span>
+          </div>
+          <Form.Item
+            name="display_name"
+            label="显示名称"
+            rules={[{ max: 128, message: '不超过 128 个字符' }]}
+            extra="留空则使用原文件名显示"
+          >
+            <Input allowClear maxLength={128} placeholder="为该任务起一个便于识别的名称" />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   )

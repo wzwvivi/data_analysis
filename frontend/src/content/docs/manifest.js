@@ -22,7 +22,7 @@ import changelogRaw from './changelog.md?raw'
 export const DOC_GROUPS = [
   { key: 'overview', title: '总览', order: 10 },
   { key: 'network', title: '网络数据分析', order: 20 },
-  { key: 'events', title: '事件与异常', order: 30 },
+  { key: 'events', title: '专项分析', order: 30 },
   { key: 'workbench', title: '工作台', order: 40 },
   { key: 'assistant', title: '飞行助手', order: 50 },
   { key: 'system', title: '系统管理', order: 60 },

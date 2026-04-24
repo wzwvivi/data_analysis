@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Table, Tag, Button, Space, message, Tooltip, Progress, Input, Select, DatePicker,
-  Typography, Dropdown, Modal, Popconfirm, Row, Col, Empty,
+  Typography, Dropdown, Modal, Popconfirm, Row, Col, Empty, Form,
 } from 'antd'
 import {
   EyeOutlined, LineChartOutlined, ReloadOutlined,
@@ -62,6 +62,11 @@ function TaskListPage() {
     total: 0,
   })
 
+  // 编辑弹窗：{ task, mode: 'rename' | 'tags' }
+  const [editState, setEditState] = useState(null)
+  const [editForm] = Form.useForm()
+  const [editSubmitting, setEditSubmitting] = useState(false)
+
   // 过滤器
   const [filterQ, setFilterQ] = useState('')
   const [filterStatus, setFilterStatus] = useState([])
@@ -116,29 +121,47 @@ function TaskListPage() {
     return () => clearInterval(id)
   }, [tasks, loadTasks])
 
-  const handleRename = async (task) => {
-    const next = window.prompt('任务显示名称', task.display_name || task.filename)
-    if (next == null) return
-    try {
-      await parseApi.updateTaskMeta(task.id, { display_name: next.trim() || null })
-      message.success('已更新')
-      loadTasks(true)
-    } catch (err) {
-      message.error(err.response?.data?.detail || '更新失败')
-    }
+  const openRename = (task) => {
+    editForm.setFieldsValue({ display_name: task.display_name || '' })
+    setEditState({ task, mode: 'rename' })
   }
 
-  const handleEditTags = async (task) => {
-    const existing = (task.tags || []).join(', ')
-    const next = window.prompt('标签（用英文逗号分隔）', existing)
-    if (next == null) return
-    const tags = next.split(',').map(s => s.trim()).filter(Boolean)
+  const openEditTags = (task) => {
+    editForm.setFieldsValue({ tags_text: (task.tags || []).join(', ') })
+    setEditState({ task, mode: 'tags' })
+  }
+
+  const closeEdit = () => {
+    if (editSubmitting) return
+    setEditState(null)
+    editForm.resetFields()
+  }
+
+  const submitEdit = async () => {
+    if (!editState) return
     try {
-      await parseApi.updateTaskMeta(task.id, { tags })
-      message.success('已更新标签')
+      const values = await editForm.validateFields()
+      setEditSubmitting(true)
+      if (editState.mode === 'rename') {
+        const display_name = (values.display_name || '').trim() || null
+        await parseApi.updateTaskMeta(editState.task.id, { display_name })
+        message.success('已更新任务名称')
+      } else {
+        const tags = String(values.tags_text || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+        await parseApi.updateTaskMeta(editState.task.id, { tags })
+        message.success('已更新标签')
+      }
+      setEditState(null)
+      editForm.resetFields()
       loadTasks(true)
     } catch (err) {
-      message.error(err.response?.data?.detail || '更新失败')
+      if (err?.errorFields) return
+      message.error(err?.response?.data?.detail || '更新失败')
+    } finally {
+      setEditSubmitting(false)
     }
   }
 
@@ -389,13 +412,13 @@ function TaskListPage() {
             key: 'rename',
             icon: <TagsOutlined />,
             label: '重命名',
-            onClick: () => handleRename(record),
+            onClick: () => openRename(record),
           },
           {
             key: 'tag',
             icon: <TagsOutlined />,
             label: '编辑标签',
-            onClick: () => handleEditTags(record),
+            onClick: () => openEditTags(record),
           },
           canRerun ? {
             key: 'rerun',
@@ -443,7 +466,7 @@ function TaskListPage() {
                 type="text"
                 size="small"
                 icon={<LineChartOutlined />}
-                onClick={() => navigate(`/tasks/${record.id}/analysis`)}
+                onClick={() => navigate(`/tasks/${record.id}?tab=anomaly`)}
                 disabled={!canAnalyze}
               />
             </Tooltip>
@@ -587,6 +610,44 @@ function TaskListPage() {
       </Card>
         </div>
       </div>
+      <Modal
+        title={editState?.mode === 'rename' ? '重命名任务' : '编辑任务标签'}
+        open={!!editState}
+        onCancel={closeEdit}
+        onOk={submitEdit}
+        confirmLoading={editSubmitting}
+        okText="保存"
+        cancelText="取消"
+        destroyOnClose
+      >
+        {editState ? (
+          <Form form={editForm} layout="vertical" preserve={false}>
+            {editState.mode === 'rename' ? (
+              <>
+                <div style={{ color: '#a1a1aa', fontSize: 12, marginBottom: 8 }}>
+                  原文件名：<span className="mono">{editState.task.filename}</span>
+                </div>
+                <Form.Item
+                  name="display_name"
+                  label="显示名称"
+                  rules={[{ max: 128, message: '不超过 128 个字符' }]}
+                  extra="留空则使用原文件名显示"
+                >
+                  <Input allowClear maxLength={128} placeholder="为该任务起一个便于识别的名称" />
+                </Form.Item>
+              </>
+            ) : (
+              <Form.Item
+                name="tags_text"
+                label="标签"
+                extra="多个标签用英文逗号分隔，例如：试飞,A架次,回归"
+              >
+                <Input.TextArea rows={3} allowClear placeholder="试飞, A架次, 回归" />
+              </Form.Item>
+            )}
+          </Form>
+        ) : null}
+      </Modal>
     </div>
   )
 }

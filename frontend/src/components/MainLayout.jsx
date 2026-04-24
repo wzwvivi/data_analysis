@@ -104,23 +104,23 @@ function MainLayout() {
       items.push({ type: 'group', label: '总览', children: overviewChildren })
     }
 
-    // 网络数据分析（含 事件分析 子菜单）
+    // 网络数据分析（含 专项分析 子菜单）
     const networkChildren = []
     if (hasPageAccess('upload')) networkChildren.push({ key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' })
     if (hasPageAccess('tasks')) networkChildren.push({ key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' })
     if (hasPageAccess('network-config')) networkChildren.push({ key: '/network-config', icon: <SafetyCertificateOutlined />, label: 'TSN 网络配置' })
 
-    const eventChildren = []
-    if (hasPageAccess('fms-event-analysis') || hasPageAccess('event-analysis')) eventChildren.push({ key: '/fms-event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' })
-    if (hasPageAccess('fcc-event-analysis')) eventChildren.push({ key: '/fcc-event-analysis', icon: <FileSearchOutlined />, label: '飞控事件分析' })
-    if (hasPageAccess('auto-flight-analysis')) eventChildren.push({ key: '/auto-flight-analysis', icon: <FileSearchOutlined />, label: '自动飞行性能分析' })
-    if (hasPageAccess('compare')) eventChildren.push({ key: '/compare', icon: <SwapOutlined />, label: 'TSN 异常检查' })
-    if (eventChildren.length > 0) {
+    const specializedChildren = []
+    if (hasPageAccess('fms-event-analysis') || hasPageAccess('event-analysis')) specializedChildren.push({ key: '/fms-event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' })
+    if (hasPageAccess('fcc-event-analysis')) specializedChildren.push({ key: '/fcc-event-analysis', icon: <FileSearchOutlined />, label: '飞控事件分析' })
+    if (hasPageAccess('auto-flight-analysis')) specializedChildren.push({ key: '/auto-flight-analysis', icon: <FileSearchOutlined />, label: '自动飞行性能分析' })
+    if (hasPageAccess('compare')) specializedChildren.push({ key: '/compare', icon: <SwapOutlined />, label: 'TSN 异常检查' })
+    if (specializedChildren.length > 0) {
       networkChildren.push({
-        key: 'submenu/event-analysis',
+        key: 'submenu/specialized-analysis',
         icon: <DatabaseOutlined />,
-        label: '事件分析',
-        children: eventChildren,
+        label: '专项分析',
+        children: specializedChildren,
       })
     }
 
@@ -178,17 +178,17 @@ function MainLayout() {
     return items
   }, [isAdmin, hasPageAccess, publicConfig?.flight_assistant_url])
 
-  // 事件分析子菜单：根据当前路由自动展开
-  const eventSubmenuKey = 'submenu/event-analysis'
-  const eventPaths = ['/fms-event-analysis', '/event-analysis', '/fcc-event-analysis', '/auto-flight-analysis', '/compare']
-  const isInsideEventSubmenu = eventPaths.some((p) => location.pathname.startsWith(p))
-  const [openKeys, setOpenKeys] = useState(isInsideEventSubmenu ? [eventSubmenuKey] : [])
+  // 专项分析子菜单：根据当前路由自动展开
+  const specializedSubmenuKey = 'submenu/specialized-analysis'
+  const specializedPaths = ['/fms-event-analysis', '/event-analysis', '/fcc-event-analysis', '/auto-flight-analysis', '/compare']
+  const isInsideSpecializedSubmenu = specializedPaths.some((p) => location.pathname.startsWith(p))
+  const [openKeys, setOpenKeys] = useState(isInsideSpecializedSubmenu ? [specializedSubmenuKey] : [])
   useEffect(() => {
-    if (isInsideEventSubmenu && !openKeys.includes(eventSubmenuKey)) {
-      setOpenKeys((prev) => [...prev, eventSubmenuKey])
+    if (isInsideSpecializedSubmenu && !openKeys.includes(specializedSubmenuKey)) {
+      setOpenKeys((prev) => [...prev, specializedSubmenuKey])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isInsideEventSubmenu])
+  }, [isInsideSpecializedSubmenu])
 
   const handleMenuClick = ({ key }) => {
     // 外链/自定义 onClick 项的 key 不以 `/` 开头, 让项目自己的 onClick 处理, 不走路由。
@@ -227,6 +227,8 @@ function MainLayout() {
 
     if (path === '/dashboard') {
       push('总览', null); push('平台仪表盘', null)
+    } else if (path === '/workbench/compare') {
+      push('总览', null); push('试验工作台', '/workbench'); push('架次比对', null)
     } else if (path === '/workbench' || path.startsWith('/workbench/')) {
       push('总览', null); push('试验工作台', null)
     } else if (path === '/upload') {
@@ -236,9 +238,9 @@ function MainLayout() {
     } else if (/^\/tasks\/[^/]+\/analysis$/.test(path)) {
       push('网络数据分析', null); push('任务中心', '/tasks'); push('结果分析', null)
     } else if (/^\/tasks\/[^/]+\/event-analysis$/.test(path)) {
-      push('网络数据分析', null); push('任务中心', '/tasks'); push('事件分析', null)
+      push('网络数据分析', null); push('任务中心', '/tasks'); push('专项分析', null)
     } else if (/^\/tasks\/[^/]+$/.test(path)) {
-      push('网络数据分析', null); push('任务中心', '/tasks'); push('解析结果', null)
+      push('网络数据分析', null); push('任务中心', '/tasks'); push('结果分析', null)
     } else if (path.startsWith('/network-config/drafts')) {
       push('网络数据分析', null); push('TSN 网络配置', '/network-config'); push('草稿编辑', null)
     } else if (path.startsWith('/network-config/change-requests')) {
@@ -254,19 +256,19 @@ function MainLayout() {
     } else if (path.startsWith('/device-protocol')) {
       push('网络数据分析', null); push('设备协议管理', null)
     } else if (path.startsWith('/compare')) {
-      push('网络数据分析', null); push('事件分析', null); push('TSN 异常检查', null)
+      push('网络数据分析', null); push('专项分析', null); push('TSN 异常检查', null)
     } else if (path.startsWith('/fcc-event-analysis/task/')) {
-      push('网络数据分析', null); push('事件分析', null); push('飞控事件分析', '/fcc-event-analysis'); push('任务详情', null)
+      push('网络数据分析', null); push('专项分析', null); push('飞控事件分析', '/fcc-event-analysis'); push('任务详情', null)
     } else if (path.startsWith('/fcc-event-analysis')) {
-      push('网络数据分析', null); push('事件分析', null); push('飞控事件分析', null)
+      push('网络数据分析', null); push('专项分析', null); push('飞控事件分析', null)
     } else if (path.startsWith('/auto-flight-analysis/task/')) {
-      push('网络数据分析', null); push('事件分析', null); push('自动飞行性能分析', '/auto-flight-analysis'); push('任务详情', null)
+      push('网络数据分析', null); push('专项分析', null); push('自动飞行性能分析', '/auto-flight-analysis'); push('任务详情', null)
     } else if (path.startsWith('/auto-flight-analysis')) {
-      push('网络数据分析', null); push('事件分析', null); push('自动飞行性能分析', null)
+      push('网络数据分析', null); push('专项分析', null); push('自动飞行性能分析', null)
     } else if (path.startsWith('/fms-event-analysis/task/') || path.startsWith('/event-analysis/task/')) {
-      push('网络数据分析', null); push('事件分析', null); push('飞管事件分析', '/fms-event-analysis'); push('任务详情', null)
+      push('网络数据分析', null); push('专项分析', null); push('飞管事件分析', '/fms-event-analysis'); push('任务详情', null)
     } else if (path.startsWith('/fms-event-analysis') || path.startsWith('/event-analysis')) {
-      push('网络数据分析', null); push('事件分析', null); push('飞管事件分析', null)
+      push('网络数据分析', null); push('专项分析', null); push('飞管事件分析', null)
     } else if (path.startsWith('/help/')) {
       push('帮助与支持', null); push('帮助中心', '/help'); push('文档详情', null)
     } else if (path.startsWith('/help')) {

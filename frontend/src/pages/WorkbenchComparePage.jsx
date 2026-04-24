@@ -146,8 +146,18 @@ export default function WorkbenchComparePage() {
     { title: '指标', dataIndex: 'name', width: 180, fixed: 'left' },
     ...selectedIds.map((sid) => ({
       title: (
-        <Space direction="vertical" size={0} style={{ lineHeight: 1.2 }}>
-          <span>{sortieLabel(sid)}</span>
+        <Space direction="vertical" size={2} style={{ lineHeight: 1.2 }}>
+          <Space size={6} wrap>
+            <span>{sortieLabel(sid)}</span>
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto', fontSize: 11 }}
+              onClick={() => navigate(`/workbench/${sid}`)}
+            >
+              打开架次
+            </Button>
+          </Space>
           <Text type="secondary" style={{ fontSize: 11 }}>
             任务 #{pickedTaskBySortie[sid] ?? '—'}
           </Text>
@@ -155,12 +165,7 @@ export default function WorkbenchComparePage() {
       ),
       dataIndex: `s_${sid}`,
       render: (v) => (
-        <Button
-          type="link"
-          size="small"
-          style={{ padding: 0 }}
-          onClick={() => navigate(`/workbench/${sid}`)}
-        >{String(v ?? '—')}</Button>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{String(v ?? '—')}</span>
       ),
     })),
   ], [selectedIds, sortieLabel, pickedTaskBySortie, navigate])
@@ -199,10 +204,18 @@ export default function WorkbenchComparePage() {
 
   return (
     <div className="fade-in">
-      <Space style={{ marginBottom: 16 }} align="center">
+      <Space style={{ marginBottom: 8 }} align="center" wrap>
         <Button type="link" icon={<LeftOutlined />} onClick={() => navigate('/workbench')}>返回架次列表</Button>
         <Title level={4} style={{ margin: 0 }}>跨架次对比</Title>
+        <Tag color="purple">架次级复盘</Tag>
       </Space>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="本页按架次汇总指标、事件与异常，用于复盘对比不同架次的表现差异。"
+        description="如需对比「两次解析任务」本身的数据包差异（时间同步、端口覆盖、周期抖动等），请使用侧栏「专项分析 → TSN 异常检查」。"
+      />
 
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space direction="vertical" size={12} style={{ width: '100%' }}>

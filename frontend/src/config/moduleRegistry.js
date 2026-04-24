@@ -2,7 +2,7 @@ import { PAGE_FLIGHT_ASSISTANT } from '../constants/roles'
 
 export const MODULE_GROUPS = [
   { key: 'common', title: '常用入口', desc: '登录后最常进入的核心模块。', order: 10 },
-  { key: 'analysis', title: '深度分析', desc: '面向异常定位与性能复盘的专项能力。', order: 20 },
+  { key: 'analysis', title: '专项分析', desc: '面向异常定位与性能复盘的专项能力。', order: 20 },
   { key: 'governance', title: '配置与管理', desc: '用于配置治理与系统管理。', order: 30 },
 ]
 
@@ -44,6 +44,15 @@ export const MODULE_REGISTRY = [
     permissionAny: ['workbench'],
   },
   {
+    key: 'workbench-compare',
+    group: 'analysis',
+    icon: 'swap',
+    title: '跨架次对比',
+    summary: '对比多个架次的指标与事件数量，偏复盘（需先在工作台选择架次）。',
+    path: '/workbench',
+    permissionAny: ['workbench'],
+  },
+  {
     key: 'fms-event-analysis',
     group: 'analysis',
     icon: 'search',
@@ -75,7 +84,7 @@ export const MODULE_REGISTRY = [
     group: 'analysis',
     icon: 'swap',
     title: 'TSN 异常检查',
-    summary: '比较任务差异并定位异常变化点。',
+    summary: '对两份抓包做时间同步、端口覆盖与周期抖动检查。',
     path: '/compare',
     permissionAny: ['compare'],
   },

@@ -639,7 +639,7 @@ function WorkbenchPicker() {
         )}
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-          选择一个<strong>试验架次</strong>进入工作台查看总览/轨迹/视频/事件分析；
+          选择一个<strong>试验架次</strong>进入工作台查看总览/轨迹/视频/专项分析；
           在表格左侧勾选多行后点击<strong>对比所选架次</strong>可进入跨架次对比页。
           经纬度轨迹需先在「任务列表」中完成与本试验相关的<strong>解析任务</strong>（包含惯导端口）。
         </Text>
@@ -724,7 +724,7 @@ function WorkbenchDetail({ sortieId }) {
   const attitudeChartRef = useRef(null)
   /** 垂直剖面 + 姿态叠加合并为一张图时使用 */
   const mergedProfileAttitudeRef = useRef(null)
-  /** 架次总览「物理异常」行点击后滚动定位到页面底部「事件分析总结」 */
+  /** 架次总览「物理异常」行点击后滚动定位到页面底部「专项分析总结」 */
   const eventsSummarySectionRef = useRef(null)
 
   useEffect(() => {
@@ -2351,7 +2351,7 @@ function WorkbenchDetail({ sortieId }) {
         style={{ marginBottom: 16 }}
       >
         <Space wrap size="middle">
-          <Text type="secondary">选择该架次的解析任务，总览/事件分析以此为数据来源：</Text>
+          <Text type="secondary">选择该架次的解析任务，总览/专项分析以此为数据来源：</Text>
           <Select
             style={{ minWidth: 320 }}
             placeholder="选择已完成的解析任务"
@@ -2980,7 +2980,7 @@ function WorkbenchOverviewCard({ overview, loading, taskId, onScrollToEventsSumm
             ) : (
               <>
                 <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
-                  时间为解析库 UTC 时间戳对应的北京时间；点击任意一行将滚动到本页底部的「事件分析总结」，可在其中用「定位数据」打开解析结果表。
+                  时间为解析库 UTC 时间戳对应的北京时间；点击任意一行将滚动到本页底部的「专项分析总结」，可在其中用「定位数据」打开解析结果表。
                 </Text>
                 <Table
                 size="small"
@@ -3055,7 +3055,7 @@ function WorkbenchEventsCard({ summary, loading, taskId, onOpenEvent }) {
   if (loading) {
     return (
       <Card size="small" style={{ marginTop: 16 }}>
-        <div style={{ textAlign: 'center', padding: 24 }}><Spin /> 加载事件分析总结…</div>
+        <div style={{ textAlign: 'center', padding: 24 }}><Spin /> 加载专项分析总结…</div>
       </Card>
     )
   }
@@ -3064,7 +3064,7 @@ function WorkbenchEventsCard({ summary, loading, taskId, onOpenEvent }) {
   return (
     <Card
       size="small"
-      title="事件分析总结（按解析任务聚合）"
+      title="专项分析总结（按解析任务聚合）"
       style={{ marginTop: 16 }}
     >
       <Row gutter={[16, 16]}>

@@ -99,8 +99,8 @@ ROLE_PAGE_ACCESS = {
         PAGE_WORKBENCH_DETAIL,
         PAGE_COMPARE,
         PAGE_COMPARE_TASK,
-        PAGE_EVENT_ANALYSIS,
-        PAGE_EVENT_ANALYSIS_TASK,
+        PAGE_FMS_EVENT_ANALYSIS,
+        PAGE_FMS_EVENT_ANALYSIS_TASK,
         PAGE_FCC_EVENT_ANALYSIS,
         PAGE_FCC_EVENT_ANALYSIS_TASK,
         PAGE_AUTO_FLIGHT_ANALYSIS,
@@ -143,8 +143,8 @@ ROLE_PAGE_ACCESS = {
         PAGE_TASK_ANALYSIS,
         PAGE_WORKBENCH,
         PAGE_WORKBENCH_DETAIL,
-        PAGE_EVENT_ANALYSIS,
-        PAGE_EVENT_ANALYSIS_TASK,
+        PAGE_FMS_EVENT_ANALYSIS,
+        PAGE_FMS_EVENT_ANALYSIS_TASK,
         PAGE_DEVICE_PROTOCOL,
     ],
     ROLE_NETWORK_TEAM: [
@@ -154,12 +154,17 @@ ROLE_PAGE_ACCESS = {
         PAGE_TASK_ANALYSIS,
         PAGE_WORKBENCH,
         PAGE_WORKBENCH_DETAIL,
-        PAGE_EVENT_ANALYSIS,
-        PAGE_EVENT_ANALYSIS_TASK,
+        PAGE_FMS_EVENT_ANALYSIS,
+        PAGE_FMS_EVENT_ANALYSIS_TASK,
         PAGE_NETWORK_CONFIG,
         PAGE_COMPARE,
         PAGE_COMPARE_TASK,
     ],
+}
+
+LEGACY_PAGE_KEY_ALIASES = {
+    "event-analysis": PAGE_FMS_EVENT_ANALYSIS,
+    "event-analysis/task/:analysisTaskId": PAGE_FMS_EVENT_ANALYSIS_TASK,
 }
 
 
@@ -172,5 +177,6 @@ def get_role_pages(role: str) -> list[str]:
 
 
 def has_page_access(role: str, page_key: str) -> bool:
+    normalized_page_key = LEGACY_PAGE_KEY_ALIASES.get(page_key, page_key)
     pages = get_role_pages(role)
-    return "*" in pages or page_key in pages
+    return "*" in pages or normalized_page_key in pages

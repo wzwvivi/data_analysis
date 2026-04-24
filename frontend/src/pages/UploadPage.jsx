@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Card, Upload, Button, Select, Form, message, Space, Tag, Row, Col, Alert, Divider, Table, Progress, Radio,
+  Card, Upload, Button, Select, Form, message, Space, Tag, Row, Col, Alert, Divider, Table, Progress, Radio, Steps,
 } from 'antd'
 import {
   InboxOutlined, CloudUploadOutlined, ApiOutlined, DesktopOutlined, SettingOutlined,
@@ -390,9 +390,9 @@ function UploadPage() {
     accept: '.pcapng,.pcap,.cap',
     fileList,
     beforeUpload: (file) => {
-      const maxSize = 5 * 1024 * 1024 * 1024
+      const maxSize = 2 * 1024 * 1024 * 1024
       if (file.size > maxSize) {
-        message.error(`文件大小超过限制（最大 5GB），当前文件: ${(file.size / 1024 / 1024 / 1024).toFixed(2)}GB`)
+        message.error(`文件大小超过限制（最大 2GB），当前文件: ${(file.size / 1024 / 1024 / 1024).toFixed(2)}GB`)
         return false
       }
       setFileList([file])
@@ -524,6 +524,46 @@ function UploadPage() {
     return devices.filter(d => selectedDevices.includes(d.device_name))
   }, [devices, selectedDevices])
 
+  // 上传页引导步骤：数据 → 网络配置 → 设备 → 协议版本 → 提交
+  const hasData = (dataSource === 'local' && fileList.length > 0) || (dataSource === 'platform' && !!platformFileId)
+  const uploadStep = !hasData
+    ? 0
+    : !selectedVersion
+      ? 1
+      : selectedDevices.length === 0
+        ? 2
+        : !allDevicesConfigured
+          ? 3
+          : 4
+
+  const usageGuideSteps = [
+    {
+      title: '1. 准备数据',
+      titleColor: '#e4e4e7',
+      desc: '上传从 TSN 网络抓取的 .pcapng / .pcap / .cap 文件，或优先选择平台共享数据（近 20 天内有效，单文件上限 2 GB）。',
+    },
+    {
+      title: '2. 选择网络配置',
+      titleColor: '#a78bfa',
+      desc: '选择 TSN 网络配置版本，定义端口和字段偏移位置；这一步决定解析口径，如需新增版本请到「TSN 网络配置」发起审批。',
+    },
+    {
+      title: '3. 选择设备',
+      titleColor: '#d4a843',
+      desc: '选择要解析的目标设备；系统会按网络配置给出可选设备，选择 ATG 时会自动带入 IRS / RTK / FCC 依赖设备。',
+    },
+    {
+      title: '4. 配置解析版本',
+      titleColor: '#5fd068',
+      desc: '为每个设备选择对应的解析协议版本：ARINC 429 五类走设备协议版本，其他走 legacy 解析器；无 Available 版本请先到「设备协议管理」激活。',
+    },
+    {
+      title: '5. 开始解析',
+      titleColor: '#e4e4e7',
+      desc: '系统将按设备分配端口和解析器，精确解码每个设备的数据；提交成功后自动跳转到任务详情页继续跟踪进度。',
+    },
+  ]
+
   return (
     <div className="app-page-shell fade-in">
       <div className="app-page-shell-inner">
@@ -534,10 +574,24 @@ function UploadPage() {
           subtitle="选择平台共享数据或本地 PCAP 抓包文件，依次指定网络配置、参与设备及各设备所需的协议版本，系统将据此创建解析任务。"
           tags={[
             { text: '支持 .pcapng / .pcap / .cap' },
+            { text: '单文件上限 2 GB', tone: 'neutral' },
             { text: '平台数据近 20 天内有效', tone: 'neutral' },
           ]}
         />
         <div className="app-page-body">
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Steps
+          size="small"
+          current={uploadStep}
+          items={[
+            { title: '选择数据', description: '平台共享 / 本地上传' },
+            { title: 'TSN 网络配置', description: '指定协议版本' },
+            { title: '选择设备', description: '勾选需要解析的设备' },
+            { title: '设备协议版本', description: '为每个设备绑定版本' },
+            { title: '开始解析', description: '提交后跳转任务详情' },
+          ]}
+        />
+      </Card>
       <Row gutter={24}>
         <Col span={16}>
           <Card
@@ -833,59 +887,51 @@ function UploadPage() {
         </Col>
 
         <Col span={8}>
-          <Card title="使用说明">
-            <div style={{ color: '#a1a1aa', lineHeight: 2, fontSize: 13 }}>
-              <p><strong style={{ color: '#d4d4d8' }}>1. 准备数据</strong></p>
-              <p>上传从TSN网络抓取的 .pcapng 文件</p>
-
-              <p style={{ marginTop: 16 }}><strong style={{ color: '#a78bfa' }}>2. 选择网络配置</strong></p>
-              <p>选择TSN网络配置版本，定义端口和字段偏移位置</p>
-
-              <p style={{ marginTop: 16 }}><strong style={{ color: '#d4a843' }}>3. 选择设备</strong></p>
-              <p>选择要解析的目标设备</p>
-
-              <p style={{ marginTop: 16 }}><strong style={{ color: '#5fd068' }}>4. 配置解析版本</strong></p>
-              <p>为每个设备选择对应的解析协议版本。系统会自动匹配协议类型，只显示适用的版本。</p>
-
-              <p style={{ marginTop: 16 }}><strong style={{ color: '#d4d4d8' }}>5. 开始解析</strong></p>
-              <p>系统将按设备分配端口和解析器，精确解码每个设备的数据</p>
+          <Card title="使用说明" size="small">
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {usageGuideSteps.map((step, idx) => (
+                <div
+                  key={step.title}
+                  style={{
+                    padding: idx === 0 ? '2px 0 18px' : '18px 0',
+                    borderTop: idx === 0 ? 'none' : '1px solid rgba(63, 63, 70, 0.45)',
+                  }}
+                >
+                  <div
+                    style={{
+                      color: step.titleColor,
+                      fontWeight: 700,
+                      fontSize: 14,
+                      marginBottom: 10,
+                      letterSpacing: '0.01em',
+                    }}
+                  >
+                    {step.title}
+                  </div>
+                  <div
+                    style={{
+                      color: '#a1a1aa',
+                      lineHeight: 1.85,
+                      fontSize: 13,
+                    }}
+                  >
+                    {step.desc}
+                  </div>
+                </div>
+              ))}
             </div>
           </Card>
 
           {netVersions.length === 0 && !loading && (
-            <Card title="提示" style={{ marginTop: 16 }}>
+            <Card title="提示" size="small" style={{ marginTop: 16 }}>
               <div style={{ color: '#d4a843' }}>
-                <p>暂无可用网络配置</p>
-                <p style={{ fontSize: 12, color: '#a1a1aa' }}>
+                <p style={{ marginBottom: 4 }}>暂无可用网络配置</p>
+                <p style={{ fontSize: 12, color: '#a1a1aa', marginBottom: 0 }}>
                   当前系统固定使用 TSN ICD v6.0.1，请联系管理员检查内置配置是否加载成功。
                 </p>
               </div>
             </Card>
           )}
-
-          <Card title="解析流程" style={{ marginTop: 16 }}>
-            <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 2 }}>
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                <Tag style={{ background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa', margin: 0, marginRight: 8 }}>网络配置</Tag>
-                <span>定位端口和偏移</span>
-              </div>
-              <div style={{ borderLeft: '2px solid rgba(139, 92, 246, 0.3)', height: 16, marginLeft: 12 }} />
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                <Tag style={{ background: 'rgba(212, 168, 67, 0.15)', borderColor: '#d4a843', color: '#d4a843', margin: 0, marginRight: 8 }}>设备选择</Tag>
-                <span>筛选目标设备端口</span>
-              </div>
-              <div style={{ borderLeft: '2px solid rgba(139, 92, 246, 0.2)', height: 16, marginLeft: 12 }} />
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                <Tag style={{ background: 'rgba(95, 208, 104, 0.15)', borderColor: '#5fd068', color: '#5fd068', margin: 0, marginRight: 8 }}>版本配置</Tag>
-                <span>逐设备指定协议版本</span>
-              </div>
-              <div style={{ borderLeft: '2px solid rgba(139, 92, 246, 0.15)', height: 16, marginLeft: 12 }} />
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <Tag style={{ background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa', margin: 0, marginRight: 8 }}>输出结果</Tag>
-                <span>按设备/端口分组</span>
-              </div>
-            </div>
-          </Card>
         </Col>
       </Row>
         </div>

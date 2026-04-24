@@ -43,9 +43,9 @@ const MODULE_ICONS = {
 }
 
 const HIGHLIGHT_STATS = [
-  { value: '13+', label: '业务模块', hint: '覆盖上传、解析、事件、异常、配置全链路' },
+  { value: '15+', label: '业务模块', hint: '覆盖上传、解析、事件、异常、配置全链路' },
   { value: '2GB', label: '单次上传上限', hint: '典型 1GB PCAP 数秒排队进入解析' },
-  { value: '全量', label: '历史任务留存', hint: '结果长期保留，支持任意回溯复盘' },
+  { value: '长期', label: '解析结果留存', hint: '解析结果默认永久保留，共享原始数据默认 20 天后清理' },
   { value: 'RBAC', label: '页面级权限', hint: '按角色与页面双维度管控访问' },
 ]
 
