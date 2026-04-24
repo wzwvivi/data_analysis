@@ -1661,6 +1661,32 @@
   font-weight: 600;
 }
 
+.doc-bottom-cta {
+  margin-top: 32px;
+  padding: 20px 22px;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(46, 36, 78, 0.55) 0%, rgba(24, 24, 27, 0.6) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.doc-bottom-cta-title {
+  color: #f4f4f5;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.doc-bottom-cta-sub {
+  color: #a1a1aa;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .doc-renderer {
   color: #d4d4d8;
   line-height: 1.75;

@@ -79,10 +79,11 @@ const WORKFLOW_STEPS = [
   { icon: <AimOutlined />, title: '联查复盘', desc: '工作台按架次聚合，沉淀结论与发布材料' },
 ]
 
+// 常用入口：面向已经熟悉平台的老用户，提供直达任务页面的快捷方式；首次使用用户不建议从这里开始。
 const QUICK_START_LINKS = [
-  { key: 'quickstart', title: '首次使用', desc: '10 分钟完成首次登录、上传与结果查看', target: '/help/quickstart', requiresAuth: true },
-  { key: 'upload', title: '我要上传数据', desc: '直接进入上传解析，绑定协议后启动任务', target: '/upload', requiresAuth: true },
-  { key: 'tasks', title: '我要查历史结果', desc: '前往任务中心筛选、复盘与下载结果', target: '/tasks', requiresAuth: true },
+  { key: 'upload', title: '上传解析', desc: '直接进入上传解析，绑定协议后启动任务', target: '/upload', requiresAuth: true },
+  { key: 'tasks', title: '任务中心', desc: '前往任务中心筛选、复盘与下载结果', target: '/tasks', requiresAuth: true },
+  { key: 'modules', title: '工具集', desc: '进入模块选择页面，按角色查看可用工具', target: '/modules', requiresAuth: true },
 ]
 
 const MODULE_SECTIONS = [
@@ -190,8 +191,8 @@ function LandingPage() {
             </Space>
             <Paragraph className="landing-hero-tip">
               {user
-                ? '已登录，点击“进入工具集”即可进入模块选择页面；浏览文档可随时通过文档页的“返回首页”回到这里。'
-                : '产品介绍、快速开始等文档需登录后查看；登录完成会自动跳回对应页面，阅读结束可回到首页再点击“开始使用”进入工具集。'}
+                ? '已登录。点击“进入工具集”可直接进入模块选择页面；如需查看说明，可从顶部进入产品介绍或快速开始。'
+                : '首次使用建议先阅读 产品介绍 或 快速开始，登录后会自动跳回文档；阅读结束再回到首页点击“开始使用”进入工具集。'}
             </Paragraph>
 
             <div className="landing-stats">
@@ -204,35 +205,6 @@ function LandingPage() {
               ))}
             </div>
           </div>
-        </section>
-
-        <section className="landing-section animate-slide-up" style={{ animationDelay: '100ms' }}>
-          <div className="landing-section-head">
-            <Tag className="landing-section-tag border-purple-500/30 bg-purple-500/10 text-purple-400">开始使用</Tag>
-            <Title level={2} className="landing-section-title">面向真实任务的三条快捷路径</Title>
-            <Paragraph type="secondary" className="landing-section-sub">
-              选择你当前最关心的目标，直接进入对应页面；未登录会先引导登录并返回该入口。
-            </Paragraph>
-          </div>
-          <Row gutter={[16, 16]}>
-            {QUICK_START_LINKS.map((item) => (
-              <Col xs={24} md={8} key={item.key}>
-                <Card className="landing-quick-card" bordered={false}>
-                  <Text strong className="landing-quick-title">{item.title}</Text>
-                  <Paragraph type="secondary" className="landing-quick-desc">
-                    {item.desc}
-                  </Paragraph>
-                  <Button
-                    type="link"
-                    className="landing-quick-action"
-                    onClick={() => (item.requiresAuth ? goProtected(item.target) : navigate(item.target))}
-                  >
-                    立即进入
-                  </Button>
-                </Card>
-              </Col>
-            ))}
-          </Row>
         </section>
 
         <section className="landing-section animate-slide-up" style={{ animationDelay: '200ms' }}>
@@ -321,6 +293,35 @@ function LandingPage() {
               </div>
             ))}
           </div>
+        </section>
+
+        <section className="landing-section landing-section-quick animate-slide-up" style={{ animationDelay: '500ms' }}>
+          <div className="landing-section-head">
+            <Tag className="landing-section-tag border-purple-500/30 bg-purple-500/10 text-purple-400">常用入口</Tag>
+            <Title level={3} className="landing-section-title">适合已使用用户的快捷跳转</Title>
+            <Paragraph type="secondary" className="landing-section-sub">
+              已经熟悉平台的用户可以直接跳到常用页面；第一次使用的用户建议先通过上方的“产品介绍”或“快速开始”了解整体流程。
+            </Paragraph>
+          </div>
+          <Row gutter={[16, 16]}>
+            {QUICK_START_LINKS.map((item) => (
+              <Col xs={24} md={8} key={item.key}>
+                <Card className="landing-quick-card" bordered={false}>
+                  <Text strong className="landing-quick-title">{item.title}</Text>
+                  <Paragraph type="secondary" className="landing-quick-desc">
+                    {item.desc}
+                  </Paragraph>
+                  <Button
+                    type="link"
+                    className="landing-quick-action"
+                    onClick={() => (item.requiresAuth ? goProtected(item.target) : navigate(item.target))}
+                  >
+                    立即进入
+                  </Button>
+                </Card>
+              </Col>
+            ))}
+          </Row>
         </section>
 
         <section className="landing-cta">

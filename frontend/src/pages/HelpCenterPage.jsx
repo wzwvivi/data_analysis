@@ -132,6 +132,29 @@ function HelpCenterPage() {
             ) : (
               <Empty description="未找到文档" />
             )}
+
+            {currentDoc ? (
+              <div className="doc-bottom-cta no-print">
+                <div className="doc-bottom-cta-text">
+                  <div className="doc-bottom-cta-title">阅读完成？</div>
+                  <div className="doc-bottom-cta-sub">
+                    可以返回首页再点击“开始使用”，或直接进入工具集按角色选择可用模块。
+                  </div>
+                </div>
+                <Space size={8} wrap>
+                  <Button icon={<HomeOutlined />} onClick={() => navigate('/')}>
+                    返回首页
+                  </Button>
+                  <Button
+                    type="primary"
+                    icon={<AppstoreOutlined />}
+                    onClick={() => navigate('/modules')}
+                  >
+                    我已了解，进入工具集
+                  </Button>
+                </Space>
+              </div>
+            ) : null}
           </Card>
         </Col>
 
