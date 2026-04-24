@@ -5,9 +5,10 @@ import {
   Upload, Select, Radio, Alert, Progress,
 } from 'antd'
 import {
-  UploadOutlined, ReloadOutlined, PlayCircleOutlined,
+  UploadOutlined, ReloadOutlined, PlayCircleOutlined, FileSearchOutlined,
 } from '@ant-design/icons'
 import { standaloneFmsEventApi, sharedTsnApi, protocolApi } from '../services/api'
+import AppPageHeader from '../components/AppPageHeader'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import {
   HISTORY_TASK_LIST_PAGE,
@@ -214,6 +215,13 @@ function StandaloneFmsEventPage() {
 
   return (
     <div className="fade-in">
+      <AppPageHeader
+        variant="lite"
+        icon={<FileSearchOutlined />}
+        eyebrow="专项分析"
+        title="飞管事件分析（独立）"
+        subtitle="基于已选择的规则模板与 TSN 协议版本，对上传 / 平台共享的 PCAP 数据进行飞管子系统事件分析，产出独立分析任务。"
+      />
       <Card title="上传 pcap / pcapng 进行飞管事件分析" style={{ marginBottom: 24 }}>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <div>

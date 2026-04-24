@@ -5,9 +5,10 @@ import {
   Upload, Select, Radio, Alert, Progress,
 } from 'antd'
 import {
-  UploadOutlined, ReloadOutlined, PlayCircleOutlined,
+  UploadOutlined, ReloadOutlined, PlayCircleOutlined, RadarChartOutlined,
 } from '@ant-design/icons'
 import { fccEventAnalysisApi, sharedTsnApi, protocolApi } from '../services/api'
+import AppPageHeader from '../components/AppPageHeader'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import {
   HISTORY_TASK_LIST_PAGE,
@@ -207,6 +208,13 @@ function FccEventAnalysisPage() {
 
   return (
     <div className="fade-in">
+      <AppPageHeader
+        variant="lite"
+        icon={<RadarChartOutlined />}
+        eyebrow="专项分析"
+        title="飞控事件分析"
+        subtitle="上传 pcap / pcapng 或选择平台共享数据，对飞控子系统进行事件级分析（支持配置分歧容忍阈值与 TSN 协议版本）。"
+      />
       <Card title="上传 pcap / pcapng 进行飞控事件分析" style={{ marginBottom: 24 }}>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <div>

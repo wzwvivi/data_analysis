@@ -13,6 +13,7 @@ import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
 import { dashboardApi } from '../services/api'
 import { useAuth } from '../context/AuthContext'
+import AppPageHeader from '../components/AppPageHeader'
 
 const { Title, Text } = Typography
 
@@ -208,21 +209,21 @@ function DashboardPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div>
-          <Title level={3} style={{ margin: 0, color: '#e4e4e7', fontWeight: 600, letterSpacing: '-0.01em' }}>
-            <DashboardOutlined style={{ marginRight: 10, color: ACCENT.purple }} />
-            平台仪表盘
-          </Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            {user ? `欢迎回来，${user.username}` : '欢迎使用 TSN 日志分析平台'}
-            {overview?.generated_at && ` · 数据刷新于 ${dayjs(overview.generated_at).format('HH:mm:ss')}`}
-          </Text>
-        </div>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => load(false)} loading={loading}>刷新</Button>
-        </Space>
-      </div>
+      <AppPageHeader
+        variant="lite"
+        icon={<DashboardOutlined />}
+        eyebrow="平台概览"
+        title="平台仪表盘"
+        subtitle={
+          (user ? `欢迎回来，${user.username}` : '欢迎使用 TSN 日志分析平台') +
+          (overview?.generated_at ? ` · 数据刷新于 ${dayjs(overview.generated_at).format('HH:mm:ss')}` : '')
+        }
+        actions={
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={() => load(false)} loading={loading}>刷新</Button>
+          </Space>
+        }
+      />
 
       <Spin spinning={loading && !overview}>
         {!overview && !loading ? (

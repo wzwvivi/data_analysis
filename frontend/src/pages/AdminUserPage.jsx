@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Card, Form, Input, Button, Select, Table, Tag, message, Popconfirm, Tooltip, Tabs, Modal } from 'antd'
-import { ReloadOutlined, DeleteOutlined, KeyOutlined } from '@ant-design/icons'
+import { ReloadOutlined, DeleteOutlined, KeyOutlined, TeamOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { authApi, roleConfigApi, protocolApi } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { ROLE_LABELS, ROLE_OPTIONS } from '../constants/roles'
+import AppPageHeader from '../components/AppPageHeader'
 
 function AdminUserPage() {
   const { user: currentUser } = useAuth()
@@ -262,8 +263,17 @@ function AdminUserPage() {
   ]
 
   return (
-    <div className="fade-in">
-      <Card style={{ marginBottom: 24 }}>
+    <div className="app-page-shell fade-in">
+      <div className="app-page-shell-inner">
+        <AppPageHeader
+          icon={<TeamOutlined />}
+          eyebrow="平台运维"
+          title="用户与权限"
+          subtitle="管理平台账号、分配精细化角色、配置角色可见端口。不能删除当前登录用户及最后一个管理员。"
+          tags={[{ text: '仅管理员' }]}
+        />
+        <div className="app-page-body">
+      <Card>
         <Tabs
           defaultActiveKey="users"
           items={[
@@ -427,6 +437,8 @@ function AdminUserPage() {
           </Form.Item>
         </Form>
       </Modal>
+        </div>
+      </div>
     </div>
   )
 }

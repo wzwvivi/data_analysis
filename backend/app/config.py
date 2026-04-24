@@ -54,8 +54,8 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "dev-change-me-use-env-jwt-secret")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "168"))  # 默认 7 天
 
-# 平台共享 TSN：管理员上传文件保留天数
-SHARED_TSN_RETENTION_DAYS = int(os.environ.get("SHARED_TSN_RETENTION_DAYS", "2"))
+# 平台共享 TSN：管理员上传文件保留天数（可用环境变量 SHARED_TSN_RETENTION_DAYS 覆盖）
+SHARED_TSN_RETENTION_DAYS = int(os.environ.get("SHARED_TSN_RETENTION_DAYS", "20"))
 
 # 飞行助手分析 (flight_data_webapp) 独立部署的外链 URL。
 # 空字符串表示未启用, 前端菜单不会展示入口。

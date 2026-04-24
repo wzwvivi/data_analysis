@@ -8,11 +8,12 @@ import {
   EyeOutlined, LineChartOutlined, ReloadOutlined,
   CheckCircleOutlined, ClockCircleOutlined, LoadingOutlined, CloseCircleOutlined,
   SearchOutlined, DeleteOutlined, StopOutlined, MoreOutlined, RedoOutlined,
-  FilterOutlined, TagsOutlined, AppstoreOutlined,
+  FilterOutlined, TagsOutlined, AppstoreOutlined, UnorderedListOutlined,
 } from '@ant-design/icons'
 import { parseApi, protocolApi } from '../services/api'
 import dayjs from 'dayjs'
 import { formatBytes } from '../utils/fileFingerprint'
+import AppPageHeader from '../components/AppPageHeader'
 
 const { Text } = Typography
 const { RangePicker } = DatePicker
@@ -456,33 +457,33 @@ function TaskListPage() {
   ]
 
   return (
-    <div className="fade-in">
-      <Card
-        title={
-          <Space>
-            <span>任务中心</span>
-            {activeFilterCount > 0 && (
-              <Tag color="purple">{activeFilterCount} 项筛选</Tag>
-            )}
-          </Space>
-        }
-        extra={
-          <Space>
-            {selectedRowKeys.length > 0 && (
-              <Button danger icon={<DeleteOutlined />} onClick={handleBulkDelete}>
-                删除选中（{selectedRowKeys.length}）
+    <div className="app-page-shell fade-in">
+      <div className="app-page-shell-inner">
+        <AppPageHeader
+          icon={<UnorderedListOutlined />}
+          eyebrow="任务管理"
+          title="任务中心"
+          subtitle="查看所有解析任务的运行状态、过滤/搜索历史任务、重试失败任务或跳转到结果分析页面。"
+          tags={activeFilterCount > 0 ? [{ text: `${activeFilterCount} 项筛选` }] : undefined}
+          actions={
+            <Space>
+              {selectedRowKeys.length > 0 && (
+                <Button danger icon={<DeleteOutlined />} onClick={handleBulkDelete}>
+                  删除选中（{selectedRowKeys.length}）
+                </Button>
+              )}
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => loadTasks(false)}
+                loading={loading}
+              >
+                刷新
               </Button>
-            )}
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => loadTasks(false)}
-              loading={loading}
-            >
-              刷新
-            </Button>
-          </Space>
-        }
-      >
+            </Space>
+          }
+        />
+        <div className="app-page-body">
+      <Card>
         <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
           <Col xs={24} md={8} lg={6}>
             <Input.Search
@@ -584,6 +585,8 @@ function TaskListPage() {
           }}
         />
       </Card>
+        </div>
+      </div>
     </div>
   )
 }

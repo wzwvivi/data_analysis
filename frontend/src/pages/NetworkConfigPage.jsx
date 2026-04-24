@@ -45,6 +45,7 @@ import 'dayjs/locale/zh-cn'
 dayjs.extend(relativeTime)
 import { networkConfigApi, protocolApi } from '../services/api'
 import { useAuth } from '../context/AuthContext'
+import AppPageHeader from '../components/AppPageHeader'
 
 const { Text, Paragraph, Title } = Typography
 
@@ -804,39 +805,25 @@ function NetworkConfigPage() {
 
   return (
     <div>
-      <Card
-        style={{ marginBottom: 16 }}
-        bodyStyle={{ paddingBottom: 16 }}
-        title={(
-          <Space>
-            <SafetyCertificateOutlined />
-            <span>TSN 网络配置（协议版本管理）</span>
-          </Space>
-        )}
-        extra={(
-          <Space>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={refreshAll}
-              loading={loading}
-            >
-              刷新
-            </Button>
-          </Space>
-        )}
-      >
-        <Space size={32} wrap>
-          <Statistic title="版本总数" value={headerStats.total} />
-          <Statistic title="可用" value={headerStats.available} valueStyle={{ color: '#10b981' }} />
-          <Statistic title="待代码就绪" value={headerStats.pending} valueStyle={{ color: '#3b82f6' }} />
-          <Statistic title="已弃用" value={headerStats.deprecated} valueStyle={{ color: '#a1a1aa' }} />
-          <Statistic title="已注册协议族" value={parserFamilies.length} />
-        </Space>
-        <Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-          <InfoCircleOutlined style={{ marginRight: 6 }} />
-          在「查看已有的协议」浏览所有版本，支持弃用不再使用的版本；在「更新新的版本」发起新的版本草稿与审批。
-        </Paragraph>
-      </Card>
+      <AppPageHeader
+        variant="lite"
+        icon={<SafetyCertificateOutlined />}
+        eyebrow="协议版本管理"
+        title="TSN 网络配置"
+        subtitle="在「查看已有的协议」浏览所有版本，支持弃用不再使用的版本；在「更新新的版本」发起新的版本草稿与审批。"
+        metrics={[
+          { label: '版本总数', value: headerStats.total },
+          { label: '可用', value: headerStats.available, tone: 'green' },
+          { label: '待代码就绪', value: headerStats.pending, tone: 'blue' },
+          { label: '已弃用', value: headerStats.deprecated, tone: 'gray' },
+          { label: '已注册协议族', value: parserFamilies.length, tone: 'purple' },
+        ]}
+        actions={
+          <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={loading}>
+            刷新
+          </Button>
+        }
+      />
 
       <Card bodyStyle={{ paddingTop: 8 }}>
         <Tabs

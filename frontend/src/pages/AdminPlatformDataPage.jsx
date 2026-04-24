@@ -3,9 +3,10 @@ import {
   Card, Upload, Button, Table, message, Modal, Form, DatePicker, Input, Space, Tag, Popconfirm, Progress,
   Select, Collapse, Typography,
 } from 'antd'
-import { UploadOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons'
+import { UploadOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, PlusOutlined, DatabaseOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { sharedTsnApi, configurationApi } from '../services/api'
+import AppPageHeader from '../components/AppPageHeader'
 
 const { Text } = Typography
 
@@ -301,30 +302,31 @@ function AdminPlatformDataPage() {
   ]
 
   return (
-    <div className="fade-in">
-      <Card
-        title="平台共享试验数据"
-        extra={
-          <Space>
-            <Tag color="blue">按试验架次分类；保留近 2 天</Tag>
-            <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
-              刷新
-            </Button>
-          </Space>
-        }
-        style={{ marginBottom: 24 }}
-      >
-        <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-          一次完整试验可包含：TSN 交换机 1/2 抓包、地面网联记录、飞控记录器数据，以及下列各机位视频（可按试验实际上传其中一部分）。
-          请先<strong>新建架次</strong>，再按<strong>数据类型</strong>分别上传；解析/分析功能仅可选用 PCAP 类数据源。
-        </Text>
-        <Space wrap style={{ marginBottom: 16 }}>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateSortie}>
-            新建试验架次
-          </Button>
-        </Space>
+    <div className="app-page-shell fade-in">
+      <div className="app-page-shell-inner">
+        <AppPageHeader
+          icon={<DatabaseOutlined />}
+          eyebrow="数据管理"
+          title="平台共享试验数据"
+          subtitle="一次完整试验可包含 TSN 交换机 1/2 抓包、地面网联记录、飞控记录器数据，以及各机位视频。请先新建架次，再按数据类型分别上传；解析 / 分析功能仅可选用 PCAP 类数据源。"
+          tags={[
+            { text: '按试验架次分类' },
+            { text: '保留近 20 天', tone: 'neutral' },
+          ]}
+          actions={
+            <Space>
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreateSortie}>
+                新建试验架次
+              </Button>
+              <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
+                刷新
+              </Button>
+            </Space>
+          }
+        />
 
-        <Card type="inner" title="上传到指定架次" style={{ marginBottom: 16 }}>
+      <div className="app-page-body">
+      <Card title="上传到指定架次">
           <Space direction="vertical" style={{ width: '100%' }} size="middle">
             <Space wrap align="center">
               <span style={{ color: '#a1a1aa' }}>试验架次</span>
@@ -374,7 +376,6 @@ function AdminPlatformDataPage() {
               </div>
             )}
           </Space>
-        </Card>
       </Card>
 
       <Card title="按试验架次浏览" loading={loading}>
@@ -493,6 +494,8 @@ function AdminPlatformDataPage() {
           scroll={{ x: 1100 }}
         />
       </Card>
+      </div>
+      </div>
 
       <Modal
         title={sortieEdit ? '编辑试验架次' : '新建试验架次'}

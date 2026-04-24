@@ -5,9 +5,10 @@ import {
   Upload, Select, Radio, Alert, Progress,
 } from 'antd'
 import {
-  UploadOutlined, ReloadOutlined, PlayCircleOutlined,
+  UploadOutlined, ReloadOutlined, PlayCircleOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
 import { autoFlightAnalysisApi, sharedTsnApi, parseApi, protocolApi } from '../services/api'
+import AppPageHeader from '../components/AppPageHeader'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
 import {
   HISTORY_TASK_LIST_PAGE,
@@ -255,6 +256,13 @@ function AutoFlightAnalysisPage() {
 
   return (
     <div className="fade-in">
+      <AppPageHeader
+        variant="lite"
+        icon={<ThunderboltOutlined />}
+        eyebrow="专项分析"
+        title="自动飞行性能分析"
+        subtitle="上传 pcap / pcapng 或选择平台共享数据，对自动飞行相关子系统进行性能与一致性检查，并形成历史分析任务。"
+      />
       <Card title="上传 pcap / pcapng 进行自动飞行性能分析" style={{ marginBottom: 24 }}>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <div>

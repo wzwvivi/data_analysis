@@ -28,9 +28,11 @@ import {
   CloseCircleOutlined,
   WarningOutlined,
   SyncOutlined,
+  SwapOutlined,
 } from '@ant-design/icons'
 import { compareApi, protocolApi, sharedTsnApi } from '../services/api'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
+import AppPageHeader from '../components/AppPageHeader'
 
 const { Panel } = Collapse
 
@@ -682,6 +684,13 @@ function ComparePage() {
   if (!taskId) {
     return (
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+        <AppPageHeader
+          variant="lite"
+          icon={<SwapOutlined />}
+          eyebrow="数据质量"
+          title="TSN 数据异常检查"
+          subtitle="上传两个交换机的抓包文件，系统将执行四项检查：记录时间同步性、端口覆盖完整性、周期端口数据连续性（丢包检测），以及端口周期正确性与抖动分析。"
+        />
         {renderHistoryPanel()}
         <Card title="TSN数据异常检查" style={{ maxWidth: 800, margin: '0 auto' }}>
         <Alert

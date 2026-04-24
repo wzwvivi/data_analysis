@@ -18,6 +18,8 @@ services:
       - RESULT_RETENTION_DAYS=${RESULT_RETENTION_DAYS:-0}
       # 上传前剩余磁盘低于此值则拒绝新上传（默认 2 GB）
       - MIN_FREE_DISK_MB=${MIN_FREE_DISK_MB:-2048}
+      # 平台共享数据（管理员上传）在磁盘上的保留天数，超期启动/上传时会清理
+      - SHARED_TSN_RETENTION_DAYS=${SHARED_TSN_RETENTION_DAYS:-20}
       # —— 其他原有配置 ——
       - APP_BASE_DIR=/app_runtime
       # 浏览器打开飞行助手用的绝对 URL；局域网访问时请在 .env 里设 FLIGHT_ASSISTANT_URL=http://<本机IP>:8082

@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons'
 import { parseApi, protocolApi, sharedTsnApi, deviceProtocolApi } from '../services/api'
 import { isParseCompatibleSharedItem } from '../utils/sharedPlatform'
+import AppPageHeader from '../components/AppPageHeader'
 
 const { Dragger } = Upload
 const { Option } = Select
@@ -524,7 +525,19 @@ function UploadPage() {
   }, [devices, selectedDevices])
 
   return (
-    <div className="fade-in">
+    <div className="app-page-shell fade-in">
+      <div className="app-page-shell-inner">
+        <AppPageHeader
+          icon={<CloudUploadOutlined />}
+          eyebrow="数据接入"
+          title="上传 TSN 数据包"
+          subtitle="选择平台共享数据或本地 PCAP 抓包文件，依次指定网络配置、参与设备及各设备所需的协议版本，系统将据此创建解析任务。"
+          tags={[
+            { text: '支持 .pcapng / .pcap / .cap' },
+            { text: '平台数据近 20 天内有效', tone: 'neutral' },
+          ]}
+        />
+        <div className="app-page-body">
       <Row gutter={24}>
         <Col span={16}>
           <Card
@@ -556,7 +569,7 @@ function UploadPage() {
 
             {dataSource === 'platform' ? (
               <div style={{ marginBottom: 24 }}>
-                <div style={{ color: '#a1a1aa', marginBottom: 8 }}>选择管理员上传的平台数据（近 2 天内有效）</div>
+                <div style={{ color: '#a1a1aa', marginBottom: 8 }}>选择管理员上传的平台数据（近 20 天内有效）</div>
                 <Select
                   placeholder="选择一条平台数据"
                   style={{ width: '100%' }}
@@ -875,6 +888,8 @@ function UploadPage() {
           </Card>
         </Col>
       </Row>
+        </div>
+      </div>
     </div>
   )
 }

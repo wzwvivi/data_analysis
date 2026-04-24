@@ -32,6 +32,7 @@ import {
 } from '@ant-design/icons'
 import { configurationApi } from '../services/api'
 import dayjs from 'dayjs'
+import AppPageHeader from '../components/AppPageHeader'
 
 const { Text } = Typography
 
@@ -814,38 +815,46 @@ function SoftwareConfigPanel() {
 // ══════════════════════════ 主页面 ══════════════════════════
 export default function ConfigurationManagerPage() {
   return (
-    <div className="fade-in">
-      <Card
-        title={<span><SettingOutlined /> 构型管理</span>}
-        extra={<Tag color="purple">仅管理员</Tag>}
-      >
-        <Tabs
-          defaultActiveKey="software"
-          items={[
-            {
-              key: 'software',
-              label: (
-                <span><CloudUploadOutlined /> 软件构型</span>
-              ),
-              children: <SoftwareConfigPanel />,
-            },
-            {
-              key: 'aircraft',
-              label: (
-                <span><SafetyCertificateOutlined /> 飞机构型</span>
-              ),
-              children: <AircraftConfigPanel />,
-            },
-            {
-              key: 'devices',
-              label: (
-                <span><ApartmentOutlined /> 设备库</span>
-              ),
-              children: <DeviceLibraryPanel />,
-            },
-          ]}
+    <div className="app-page-shell fade-in">
+      <div className="app-page-shell-inner">
+        <AppPageHeader
+          icon={<SettingOutlined />}
+          eyebrow="平台运维"
+          title="构型管理"
+          subtitle="维护软件构型快照、飞机构型（关联 TSN / 设备协议版本）与设备库；试验架次会引用这里的构型信息。"
+          tags={[{ text: '仅管理员' }]}
         />
-      </Card>
+        <div className="app-page-body">
+          <Card>
+            <Tabs
+              defaultActiveKey="software"
+              items={[
+                {
+                  key: 'software',
+                  label: (
+                    <span><CloudUploadOutlined /> 软件构型</span>
+                  ),
+                  children: <SoftwareConfigPanel />,
+                },
+                {
+                  key: 'aircraft',
+                  label: (
+                    <span><SafetyCertificateOutlined /> 飞机构型</span>
+                  ),
+                  children: <AircraftConfigPanel />,
+                },
+                {
+                  key: 'devices',
+                  label: (
+                    <span><ApartmentOutlined /> 设备库</span>
+                  ),
+                  children: <DeviceLibraryPanel />,
+                },
+              ]}
+            />
+          </Card>
+        </div>
+      </div>
     </div>
   )
 }

@@ -1820,3 +1820,297 @@
     font-size: 11px;
   }
 }
+
+/* ============================================
+   APP PAGE SHELL — 功能页统一外壳（与工具集同一视觉语言）
+   - 只做外壳/顶部区样式，内部 AntD 组件不接管
+   - 用法：<div className="app-page-shell"><div className="app-page-shell-inner">...</div></div>
+   ============================================ */
+
+.app-page-shell {
+  position: relative;
+  min-height: calc(100vh - 64px);
+  padding: 24px clamp(18px, 2.4vw, 36px) 40px;
+  color: #e4e4e7;
+  background:
+    radial-gradient(900px 520px at 12% -10%, rgba(139, 92, 246, 0.18), transparent 60%),
+    radial-gradient(800px 480px at 92% 0%, rgba(56, 189, 248, 0.10), transparent 60%),
+    radial-gradient(120% 80% at 50% 100%, rgba(139, 92, 246, 0.045), transparent 55%),
+    #080814;
+  overflow: hidden;
+}
+
+.app-page-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(139, 92, 246, 0.068) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 92, 246, 0.068) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+  mask-image: radial-gradient(ellipse at 50% 0%, #000 35%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 35%, transparent 80%);
+}
+
+.app-page-shell-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 1360px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.app-page-header {
+  position: relative;
+  border-radius: 22px;
+  padding: 24px 26px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.14) 0%, rgba(15, 15, 22, 0.70) 55%, rgba(15, 15, 22, 0.60) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.18);
+  box-shadow:
+    0 18px 48px -22px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.app-page-header::after {
+  content: '';
+  position: absolute;
+  right: -80px;
+  top: -80px;
+  width: 260px;
+  height: 260px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.20), transparent 70%);
+  pointer-events: none;
+}
+
+.app-page-header-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.app-page-header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  flex: 1 1 420px;
+}
+
+.app-page-header-icon {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fafafa;
+  font-size: 20px;
+  background: linear-gradient(135deg, #5b21b6 0%, #7c3aed 60%, #a855f7 100%);
+  box-shadow: 0 10px 30px -10px rgba(139, 92, 246, 0.48);
+}
+
+.app-page-header-text {
+  min-width: 0;
+}
+
+.app-page-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #a78bfa;
+  margin-bottom: 4px;
+}
+
+.app-page-eyebrow::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #a78bfa;
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.8);
+}
+
+.app-page-title {
+  color: #f4f4f5;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.app-page-subtitle {
+  margin-top: 6px;
+  color: #a1a1aa;
+  font-size: 13px;
+  line-height: 1.7;
+  max-width: 860px;
+}
+
+.app-page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.app-page-header-tags {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.app-page-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  background: rgba(139, 92, 246, 0.12);
+  color: #d6d3ff;
+}
+
+.app-page-tag.neutral {
+  border-color: rgba(161, 161, 170, 0.3);
+  background: rgba(39, 39, 42, 0.5);
+  color: #d4d4d8;
+}
+
+.app-page-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 让功能页里的 Ant Card 在深色外壳上更和谐 */
+.app-page-shell .ant-card {
+  background: rgba(20, 17, 28, 0.74);
+  border-color: rgba(88, 78, 108, 0.42);
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.app-page-shell .ant-card-head {
+  border-bottom-color: rgba(78, 72, 92, 0.38);
+}
+
+.app-page-shell .ant-card-head-title {
+  color: #e4e4e7;
+}
+
+@media (max-width: 720px) {
+  .app-page-shell {
+    padding: 16px 12px 28px;
+  }
+  .app-page-header {
+    padding: 18px 16px;
+  }
+  .app-page-title {
+    font-size: 20px;
+  }
+}
+
+/* ============================================
+   APP PAGE HEADER — LITE 变体
+   - 用于工作面板类页面：只替换顶部标题区，不包深色 shell
+   - 体积更小、更扁平，图标更小，下方内容直接接原布局
+   ============================================ */
+
+.app-page-header.app-page-header-lite {
+  padding: 16px 20px;
+  border-radius: 14px;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.11) 0%, rgba(24, 22, 30, 0.66) 70%);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  box-shadow:
+    0 10px 32px -20px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.app-page-header.app-page-header-lite::after {
+  width: 180px;
+  height: 180px;
+  right: -60px;
+  top: -60px;
+  opacity: 0.58;
+}
+
+.app-page-header.app-page-header-lite .app-page-header-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  font-size: 17px;
+}
+
+.app-page-header.app-page-header-lite .app-page-title {
+  font-size: 20px;
+}
+
+.app-page-header.app-page-header-lite .app-page-eyebrow {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.app-page-header.app-page-header-lite .app-page-subtitle {
+  font-size: 12.5px;
+  line-height: 1.65;
+  margin-top: 4px;
+}
+
+.app-page-header.app-page-header-lite .app-page-header-tags {
+  margin-top: 10px;
+}
+
+/* lite 版可以内嵌一组统计小卡（NetworkConfig 用） */
+.app-page-header-metrics {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 28px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(139, 92, 246, 0.18);
+}
+
+.app-page-header-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 88px;
+}
+
+.app-page-header-metric-label {
+  color: #a1a1aa;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.app-page-header-metric-value {
+  color: #f4f4f5;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.app-page-header-metric-value.accent-purple { color: #c4b5fd; }
+.app-page-header-metric-value.accent-green  { color: #6ee7b7; }
+.app-page-header-metric-value.accent-blue   { color: #93c5fd; }
+.app-page-header-metric-value.accent-gray   { color: #a1a1aa; }
+.app-page-header-metric-value.accent-orange { color: #fcd34d; }
