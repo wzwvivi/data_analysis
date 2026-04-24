@@ -100,17 +100,12 @@ function PermissionRoute({ children, requiredPage }) {
   return children
 }
 
-const PUBLIC_DOC_KEYS = new Set(['overview', 'quickstart', 'faq', 'changelog'])
-
-function PublicDocRoute() {
+function DocsRedirect() {
+  const location = useLocation()
   const { moduleKey } = useParams()
   const currentKey = moduleKey || 'overview'
-
-  if (!PUBLIC_DOC_KEYS.has(currentKey)) {
-    return <Navigate to={`/help/${currentKey}`} replace />
-  }
-
-  return <HelpCenterPage />
+  const target = `/help/${currentKey}${location.search}${location.hash}`
+  return <Navigate to={target} replace />
 }
 
 function AppRoutes() {
@@ -118,8 +113,9 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/docs" element={<PublicDocRoute />} />
-      <Route path="/docs/:moduleKey" element={<PublicDocRoute />} />
+      {/* /docs/* 原本是匿名可看的营销文档；现改为强制登录后查看。保留路径兼容旧链接，登录后跳到对应 /help 页 */}
+      <Route path="/docs" element={<DocsRedirect />} />
+      <Route path="/docs/:moduleKey" element={<DocsRedirect />} />
       <Route
         path="/modules"
         element={(

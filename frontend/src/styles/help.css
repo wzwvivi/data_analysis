@@ -1634,6 +1634,20 @@
   padding: 16px 20px;
 }
 
+.help-center-header-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .help-center-header-inner {
+    align-items: flex-start;
+  }
+}
+
 .doc-main-card .ant-card-body {
   padding: 20px 22px;
 }

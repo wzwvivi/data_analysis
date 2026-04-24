@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react'
+import React, { useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Card, Col, Layout, Row, Space, Tag, Typography } from 'antd'
+import { useAuth } from '../context/AuthContext'
 import {
   AimOutlined,
   ApartmentOutlined,
@@ -79,9 +80,9 @@ const WORKFLOW_STEPS = [
 ]
 
 const QUICK_START_LINKS = [
-  { key: 'quickstart', title: '首次使用', desc: '10 分钟完成首次登录、上传与结果查看', target: '/docs/quickstart' },
-  { key: 'upload', title: '我要上传数据', desc: '直接进入上传解析，绑定协议后启动任务', target: '/upload' },
-  { key: 'tasks', title: '我要查历史结果', desc: '前往任务中心筛选、复盘与下载结果', target: '/tasks' },
+  { key: 'quickstart', title: '首次使用', desc: '10 分钟完成首次登录、上传与结果查看', target: '/help/quickstart', requiresAuth: true },
+  { key: 'upload', title: '我要上传数据', desc: '直接进入上传解析，绑定协议后启动任务', target: '/upload', requiresAuth: true },
+  { key: 'tasks', title: '我要查历史结果', desc: '前往任务中心筛选、复盘与下载结果', target: '/tasks', requiresAuth: true },
 ]
 
 const MODULE_SECTIONS = [
@@ -109,6 +110,7 @@ const ADMIN_DOC_KEYS = new Set(['platform-data', 'configurations', 'users'])
 
 function LandingPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   const docMap = useMemo(() => DOCS.reduce((acc, doc) => {
     acc[doc.key] = doc
@@ -122,8 +124,17 @@ function LandingPage() {
     }))
   ), [docMap])
 
-  const ctaText = '开始使用'
-  const ctaTarget = '/login'
+  // 统一的受保护跳转：未登录先去 /login 并记录目标地址，登录后自动跳回目标页；已登录直接跳转。
+  const goProtected = useCallback((target) => {
+    if (user) {
+      navigate(target)
+    } else {
+      navigate('/login', { state: { from: target } })
+    }
+  }, [navigate, user])
+
+  const ctaText = user ? '进入工具集' : '开始使用'
+  const ctaTarget = user ? '/modules' : '/login'
 
   return (
     <Layout className="landing-layout">
@@ -137,9 +148,9 @@ function LandingPage() {
             </div>
           </div>
           <Space size={12}>
-            <Button type="text" onClick={() => navigate('/docs/overview')}>产品介绍</Button>
-            <Button type="text" onClick={() => navigate('/docs/quickstart')}>快速开始</Button>
-            <Button type="text" onClick={() => navigate('/docs/changelog')}>版本记录</Button>
+            <Button type="text" onClick={() => goProtected('/help/overview')}>产品介绍</Button>
+            <Button type="text" onClick={() => goProtected('/help/quickstart')}>快速开始</Button>
+            <Button type="text" onClick={() => goProtected('/help/changelog')}>版本记录</Button>
             <Button type="primary" onClick={() => navigate(ctaTarget)}>
               {ctaText}
             </Button>
@@ -173,12 +184,14 @@ function LandingPage() {
               >
                 {ctaText}
               </Button>
-              <Button size="large" onClick={() => navigate('/docs/quickstart')} icon={<ArrowRightOutlined />}>
+              <Button size="large" onClick={() => goProtected('/help/quickstart')} icon={<ArrowRightOutlined />}>
                 先看快速开始
               </Button>
             </Space>
             <Paragraph className="landing-hero-tip">
-              点击“开始使用”后将先进入登录页，登录完成会自动进入工具集页面。
+              {user
+                ? '已登录，点击“进入工具集”即可进入模块选择页面；浏览文档可随时通过文档页的“返回首页”回到这里。'
+                : '产品介绍、快速开始等文档需登录后查看；登录完成会自动跳回对应页面，阅读结束可回到首页再点击“开始使用”进入工具集。'}
             </Paragraph>
 
             <div className="landing-stats">
@@ -209,7 +222,11 @@ function LandingPage() {
                   <Paragraph type="secondary" className="landing-quick-desc">
                     {item.desc}
                   </Paragraph>
-                  <Button type="link" className="landing-quick-action" onClick={() => navigate(item.target)}>
+                  <Button
+                    type="link"
+                    className="landing-quick-action"
+                    onClick={() => (item.requiresAuth ? goProtected(item.target) : navigate(item.target))}
+                  >
                     立即进入
                   </Button>
                 </Card>
@@ -282,7 +299,7 @@ function LandingPage() {
                       <Card
                         hoverable
                         className="landing-module-card"
-                        onClick={() => navigate(`/help/${doc.key}`)}
+                        onClick={() => goProtected(`/help/${doc.key}`)}
                         bordered={false}
                       >
                         <Space align="start" size={14}>
@@ -323,7 +340,7 @@ function LandingPage() {
               >
                 {ctaText}
               </Button>
-              <Button size="large" onClick={() => navigate('/docs/quickstart')}>
+              <Button size="large" onClick={() => goProtected('/help/quickstart')}>
                 阅读快速开始
               </Button>
             </Space>

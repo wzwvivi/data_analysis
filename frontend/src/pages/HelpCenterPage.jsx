@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Col, Empty, Row, Typography } from 'antd'
+import { Button, Card, Col, Empty, Row, Space, Typography } from 'antd'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { FileTextOutlined, PrinterOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, FileTextOutlined, HomeOutlined, PrinterOutlined } from '@ant-design/icons'
 import DocSidebar from '../components/help/DocSidebar'
 import DocRenderer from '../components/help/DocRenderer'
 import DocSearch from '../components/help/DocSearch'
@@ -86,12 +86,24 @@ function HelpCenterPage() {
   return (
     <div className="help-center-page">
       <Card className="help-center-header no-print">
-        <Title level={3} style={{ marginBottom: 4 }}>
-          帮助中心
-        </Title>
-        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          网络数据分析平台使用文档（中文为主，保留必要英文术语）
-        </Paragraph>
+        <div className="help-center-header-inner">
+          <div>
+            <Title level={3} style={{ marginBottom: 4 }}>
+              帮助中心
+            </Title>
+            <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+              网络数据分析平台使用文档（中文为主，保留必要英文术语）
+            </Paragraph>
+          </div>
+          <Space size={8} wrap>
+            <Button icon={<HomeOutlined />} onClick={() => navigate('/')}>
+              返回首页
+            </Button>
+            <Button type="primary" icon={<AppstoreOutlined />} onClick={() => navigate('/modules')}>
+              进入工具集
+            </Button>
+          </Space>
+        </div>
       </Card>
 
       <Row gutter={[16, 16]}>
