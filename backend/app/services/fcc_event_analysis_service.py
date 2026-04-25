@@ -133,7 +133,7 @@ class FccEventAnalysisService:
                 )
             except self.BundleResolutionError as exc:
                 task.status = "failed"
-                task.error_message = f"网络配置版本加载失败：{exc}"
+                task.error_message = f"TSN 网络协议版本加载失败：{exc}"
                 await self.db.commit()
                 print(f"[FccEventAnalysis] {task.error_message}")
                 return False
@@ -295,7 +295,7 @@ class FccEventAnalysisService:
             raise self.BundleResolutionError(
                 f"Bundle v{bundle_version_id} 未声明 fcc_status/fcc_channel/fcc_fault "
                 f"三组角色端口，也无足够 fcc_event 端口(得 {len(fcc_ports)}<9)可按排序切分；"
-                "请在网络配置里补齐端口角色"
+                "请在 TSN 网络协议里补齐端口角色"
             )
         # 4) 未选版本：走硬编码默认
         return default

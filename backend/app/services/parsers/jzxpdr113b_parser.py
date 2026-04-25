@@ -3,7 +3,7 @@
 S模式应答机（JZXPDR113B）专用解析器
 
 实现依据：JZXPDR113B S模式应答机接口控制文件（20260113 版）
-解析ARINC 429数据流，端口由TSN网络配置动态指定
+解析ARINC 429数据流，端口由TSN 网络协议动态指定
 
 ========== 输入标号 (→ ATC) ==========
 - 306: 设置工作状态 (离散量, TACU→ATC)
@@ -426,7 +426,7 @@ class JZXPDR113BParser(Arinc429Mixin, BaseParser):
 
     _LABEL_DEFS = _LABEL_DEFS
     _FIELD_NAME_TO_LABEL = _FIELD_NAME_TO_LABEL
-    # 端口 → labels 路由由 TSN 网络配置承载。
+    # 端口 → labels 路由由 TSN 网络协议承载。
 
     # ---- 输入标号 ----
     LABEL_WORK_STATUS = 0o306

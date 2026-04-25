@@ -237,7 +237,7 @@ export const notificationApi = {
   markAllRead: () => api.post('/notifications/read-all'),
 }
 
-// 协议（网络配置）相关API
+// 协议与 TSN 网络侧配置（历史路径 /protocols，对应 TSN 网络配置管理 发布数据）相关
 export const protocolApi = {
   // 获取协议列表（含嵌套版本）
   list: () => api.get('/protocols'),
@@ -253,7 +253,7 @@ export const protocolApi = {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   
-  // 获取所有网络配置版本（扁平列表，供上传页选择）
+  // 获取所有可选择的 TSN 网络侧配置/协议版本（扁平列表，供上传页选择）
   listVersions: () => api.get('/protocols/versions'),
   
   // 获取版本下的端口
@@ -597,8 +597,10 @@ export const workbenchApi = {
   listMatchedTasks: (sortieId) => api.get(`/workbench/sorties/${sortieId}/matched-tasks`),
   getOverview: (sortieId, parseTaskId) =>
     api.get(`/workbench/sorties/${sortieId}/overview`, { params: { parse_task_id: parseTaskId } }),
-  getEventsSummary: (sortieId, parseTaskId) =>
-    api.get(`/workbench/sorties/${sortieId}/events-summary`, { params: { parse_task_id: parseTaskId } }),
+  getEventsSummary: (sortieId, parseTaskId = null) =>
+    api.get(`/workbench/sorties/${sortieId}/events-summary`, {
+      params: parseTaskId ? { parse_task_id: parseTaskId } : {},
+    }),
 }
 
 export default api

@@ -178,7 +178,7 @@ class ProtocolChangeRequest(Base):
     """协议变更请求 = 一次审批流
 
     通过 ``draft_kind`` 区分多种协议类型：
-    - ``tsn_network``：TSN 网络配置（draft_id → protocol_version_drafts）
+    - ``tsn_network``：TSN 网络配置管理（draft_id → protocol_version_drafts）
     - ``device_arinc429`` / ``device_can`` / ``device_rs422``：设备协议
       （device_draft_id → device_protocol_drafts）
     两个 draft FK 互斥：根据 draft_kind 只读其中一个。
@@ -186,7 +186,7 @@ class ProtocolChangeRequest(Base):
     __tablename__ = "protocol_change_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    # TSN 网络配置草稿（保留兼容；device 场景下为空）
+    # TSN 网络配置管理草稿（保留兼容；device 场景下为空）
     draft_id = Column(Integer, ForeignKey("protocol_version_drafts.id"), nullable=True, index=True)
     # 设备协议草稿（新）
     device_draft_id = Column(
@@ -215,7 +215,7 @@ class ProtocolChangeRequest(Base):
     )
     diff_summary = Column(JSON, nullable=True, comment="submit 时刻生成的 diff 快照")
     final_note = Column(Text, nullable=True, comment="终审 / 驳回 记录")
-    # TSN 网络配置专用：提交者勾选的"变更激活后需知会的团队"列表
+    # TSN 网络配置管理专用：提交者勾选的"变更激活后需知会的团队"列表
     # 例如 ["fms", "fcc"]；激活 ProtocolVersion 时据此发站内通知，不影响审批链。
     notify_teams = Column(JSON, nullable=True, default=list, comment="激活后知会团队代码列表")
 

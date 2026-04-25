@@ -19,7 +19,7 @@ class ParseTask(Base):
     parser_profile_id = Column(Integer, ForeignKey("parser_profiles.id"), nullable=True, comment="内置协议解析器ID(单解析器兼容)")
     parser_profile_ids = Column(JSON, comment="多解析器ID列表(旧字段，兼容)")
     device_parser_map = Column(JSON, comment="设备到解析器映射: {device_name: parser_profile_id}")
-    protocol_version_id = Column(Integer, ForeignKey("protocol_versions.id"), nullable=True, comment="TSN网络配置版本ID")
+    protocol_version_id = Column(Integer, ForeignKey("protocol_versions.id"), nullable=True, comment="TSN 网络协议版本 ID")
     device_protocol_version_map = Column(
         JSON,
         nullable=True,

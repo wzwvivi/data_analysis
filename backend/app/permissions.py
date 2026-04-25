@@ -80,7 +80,7 @@ ROLE_META_LIST = [
     RoleMeta(ROLE_DEV_FMS, "开发团队(飞管)", "查看飞管事件分析内容"),
     RoleMeta(ROLE_DEV_AUTO_FLIGHT, "开发团队(自动飞行)", "查看自动飞行分析内容"),
     RoleMeta(ROLE_DEVICE_TEAM, "设备团队", "查看设备事件分析与协议检查相关内容"),
-    RoleMeta(ROLE_NETWORK_TEAM, "TSN/网络团队", "TSN 事件异常分析、网络配置版本管理、数据解析结果查看"),
+    RoleMeta(ROLE_NETWORK_TEAM, "TSN/网络团队", "TSN 事件异常分析、TSN 网络配置管理、数据解析结果查看"),
 ]
 
 ROLE_PAGE_ACCESS = {

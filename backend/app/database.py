@@ -668,7 +668,7 @@ async def init_db():
                             "ON protocol_change_requests(overall_status)"
                         )
                     )
-                # 存量数据：未标 kind 的默认 tsn_network（TSN 网络配置）
+                # 存量数据：未标 kind 的默认 tsn_network（TSN 网络配置管理 / tsn_network）
                 sync_conn.execute(
                     text(
                         "UPDATE protocol_change_requests SET draft_kind='tsn_network' "
@@ -998,8 +998,8 @@ async def init_db():
                     )
 
             # ── 审批链再压缩：TSN 3 步（network_team → device_team → admin）→ 2 步（network_team → admin） ──
-            # 背景：设备团队会签位下线，TSN 网络配置审批仅保留 TSN 团队自审 + 管理员终审。
-            #      只影响 TSN 网络配置类 (draft_kind='tsn_network') 且仍在 pending 的 CR；
+            # 背景：设备团队会签位下线，TSN 网络配置管理审批仅保留 TSN 团队自审 + 管理员终审。
+            #      只影响 TSN 网络配置管理类 (draft_kind='tsn_network') 且仍在 pending 的 CR；
             #      历史已完结（approved/rejected/published）的记录不动，保留审计原貌。
             if 'change_request_approvals' in inspector.get_table_names():
                 two_step_targets = sync_conn.execute(

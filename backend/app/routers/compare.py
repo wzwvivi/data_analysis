@@ -234,7 +234,7 @@ async def upload_and_compare(
     file_2: Optional[UploadFile] = File(None),
     shared_id_1: Optional[int] = Form(None),
     shared_id_2: Optional[int] = Form(None),
-    protocol_version_id: int = Form(..., description="网络配置版本ID"),
+    protocol_version_id: int = Form(..., description="TSN 网络协议版本 ID"),
     jitter_threshold_pct: float = Form(10.0, description="抖动阈值百分比，默认10%"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -242,7 +242,7 @@ async def upload_and_compare(
     service = CompareService(db)
     version = await service.protocol_service.get_version(protocol_version_id)
     if not version:
-        raise HTTPException(status_code=400, detail="网络配置版本不存在")
+        raise HTTPException(status_code=400, detail="TSN 网络协议版本不存在")
 
     try:
         ensure_free_disk(UPLOAD_DIR)
@@ -575,7 +575,7 @@ async def export_report(
         ["同步结果", result_text(task.sync_result)],
         [""],
         ["检查2: 端口覆盖完整性"],
-        ["网络配置端口总数", task.expected_port_count or 0],
+        ["协议约定端口总数", task.expected_port_count or 0],
         ["两边都有数据", task.both_present_count or 0],
         ["至少一边缺失", task.missing_count or 0],
         [""],

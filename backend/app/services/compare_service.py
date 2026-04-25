@@ -189,7 +189,7 @@ class CompareService:
                 in_switch1 = len(ts_list_1) > 0
                 in_switch2 = len(ts_list_2) > 0
                 
-                # 覆盖率统计只针对网络配置中的端口，避免统计口径混乱
+                # 覆盖率统计只针对 TSN 网络协议中的端口，避免统计口径混乱
                 if is_expected_port:
                     if in_switch1 and in_switch2:
                         both_present_count += 1
@@ -487,7 +487,7 @@ class CompareService:
         profile: Optional[BundleCompareProfile] = None,
     ):
         """检查1: 记录时间同步性（阈值来自 Bundle compare_profile）"""
-        # 同步性只在网络配置端口范围内判断，避免无关端口提前包造成误判
+        # 同步性只在 TSN 网络协议端口范围内判断，避免无关端口提前包造成误判
         first_candidates_1 = [
             ts_map_1[p][0] for p in expected_ports if p in ts_map_1 and ts_map_1[p]
         ]

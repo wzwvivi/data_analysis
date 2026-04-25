@@ -42,7 +42,7 @@ function FccEventAnalysisPage() {
   const [localFile, setLocalFile] = useState(null)
   const [tolerance, setTolerance] = useState(100)
 
-  // MR4：网络配置版本（bundle）选择，仅用于审计展示
+  // MR4：TSN 网络协议版本（bundle）选择，仅用于审计展示
   const [availableVersions, setAvailableVersions] = useState([])
   const [bundleVersionId, setBundleVersionId] = useState(null)
 
@@ -101,7 +101,7 @@ function FccEventAnalysisPage() {
       return
     }
     if (!bundleVersionId) {
-      message.warning('请选择网络配置版本')
+      message.warning('请选择 TSN 网络协议版本')
       return
     }
     const formData = new FormData()
@@ -131,7 +131,7 @@ function FccEventAnalysisPage() {
       return
     }
     if (!bundleVersionId) {
-      message.warning('请选择网络配置版本')
+      message.warning('请选择 TSN 网络协议版本')
       return
     }
     const formData = new FormData()
@@ -240,7 +240,7 @@ function FccEventAnalysisPage() {
               style={{ width: 200 }}
               options={TOLERANCE_OPTIONS}
             />
-            <span style={{ color: '#a1a1aa', marginLeft: 16 }}>网络配置版本</span>
+            <span style={{ color: '#a1a1aa', marginLeft: 16 }}>TSN 网络协议版本</span>
             <Select
               value={bundleVersionId}
               onChange={setBundleVersionId}

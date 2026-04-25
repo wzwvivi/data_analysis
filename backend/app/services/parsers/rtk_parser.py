@@ -20,7 +20,7 @@ RS422 字节流中的 RTK 96字节帧可能跨越多个网络包。
 - 时间: UTC日期, 时分秒, 日内秒
 - 版本: 软件版本, 硬件版本
 
-端口配置：动态端口，从TSN网络配置读取
+端口配置：动态端口，从 TSN 网络协议读取
 """
 import struct
 from datetime import datetime, timezone, timedelta

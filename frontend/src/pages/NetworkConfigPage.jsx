@@ -809,7 +809,7 @@ function NetworkConfigPage() {
         variant="lite"
         icon={<SafetyCertificateOutlined />}
         eyebrow="协议版本管理"
-        title="TSN 网络配置"
+        title="TSN 网络配置管理"
         subtitle="在「查看已有的协议」浏览所有版本，支持弃用不再使用的版本；在「更新新的版本」发起新的版本草稿与审批。"
         metrics={[
           { label: '版本总数', value: headerStats.total },

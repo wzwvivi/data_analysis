@@ -670,7 +670,7 @@
 
 .tools-hub-wrapper {
   min-height: 100vh;
-  background: #020617;
+  background: #01030a;
   position: relative;
   overflow-x: hidden;
   font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -682,12 +682,12 @@
   inset: 0;
   background-image:
     /* subtle purple mesh gradient — keeps tech vibe without over-saturation */
-    radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.05) 0, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(167, 139, 250, 0.04) 0, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(91, 33, 182, 0.03) 0, transparent 50%),
-    radial-gradient(at 0% 100%, rgba(109, 40, 217, 0.04) 0, transparent 50%),
-    linear-gradient(rgba(139, 92, 246, 0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(139, 92, 246, 0.015) 1px, transparent 1px);
+    radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.035) 0, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(167, 139, 250, 0.028) 0, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(91, 33, 182, 0.022) 0, transparent 50%),
+    radial-gradient(at 0% 100%, rgba(109, 40, 217, 0.026) 0, transparent 50%),
+    linear-gradient(rgba(139, 92, 246, 0.01) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 92, 246, 0.01) 1px, transparent 1px);
   background-size: 100% 100%, 100% 100%, 100% 100%, 100% 100%, 60px 60px, 60px 60px;
   pointer-events: none;
   z-index: 0;
@@ -705,7 +705,7 @@
   right: -200px;
   width: 600px;
   height: 600px;
-  background: rgba(139, 92, 246, 0.04);
+  background: rgba(139, 92, 246, 0.026);
   filter: blur(120px);
 }
 
@@ -714,7 +714,7 @@
   left: -200px;
   width: 500px;
   height: 500px;
-  background: rgba(109, 40, 217, 0.03);
+  background: rgba(109, 40, 217, 0.02);
   filter: blur(100px);
 }
 
@@ -1092,10 +1092,10 @@
   flex-direction: column;
   min-height: 280px;
   /* default state: subtle purple tint like landing page */
-  background: linear-gradient(135deg, rgba(30, 27, 46, 0.7) 0%, rgba(17, 24, 39, 0.4) 100%);
+  background: linear-gradient(135deg, rgba(34, 27, 52, 0.72) 0%, rgba(17, 24, 39, 0.42) 100%);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.14);
   border-radius: 24px;
   padding: 24px;
   cursor: pointer;
@@ -1104,7 +1104,9 @@
               background 0.5s ease,
               border-color 0.5s ease,
               box-shadow 0.5s ease;
-  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 20px 40px -10px rgba(0, 0, 0, 0.5),
+    0 0 12px rgba(139, 92, 246, 0.05);
   animation: toolsHubCardIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) backwards;
   will-change: transform;
 }

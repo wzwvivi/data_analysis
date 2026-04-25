@@ -20,7 +20,7 @@ class CompareTask(Base):
     filename_2 = Column(String(255), nullable=False, comment="交换机2文件名")
     file_path_1 = Column(String(500), nullable=False, comment="交换机1文件路径")
     file_path_2 = Column(String(500), nullable=False, comment="交换机2文件路径")
-    protocol_version_id = Column(Integer, ForeignKey("protocol_versions.id"), nullable=False, comment="网络配置版本ID")
+    protocol_version_id = Column(Integer, ForeignKey("protocol_versions.id"), nullable=False, comment="TSN 网络协议版本 ID")
     bundle_version_id = Column(
         Integer, ForeignKey("protocol_versions.id"), nullable=True,
         comment="本次比对使用的 Bundle 版本（默认与 protocol_version_id 相同，MR4 版本锁定）",
@@ -36,7 +36,7 @@ class CompareTask(Base):
     sync_result = Column(String(20), comment="同步检查结果: pass/warning/fail")
     
     # 检查2: 端口覆盖完整性汇总
-    expected_port_count = Column(Integer, default=0, comment="网络配置中定义的端口总数")
+    expected_port_count = Column(Integer, default=0, comment="TSN 网络协议中定义的端口总数")
     both_present_count = Column(Integer, default=0, comment="两边都有数据的端口数")
     missing_count = Column(Integer, default=0, comment="至少一边缺失的端口数")
     
@@ -137,7 +137,7 @@ class ComparePortTimingResult(Base):
     message_name = Column(String(100), comment="消息名称")
     
     # 预期周期
-    expected_period_ms = Column(Float, nullable=False, comment="网络配置预期周期(毫秒)")
+    expected_period_ms = Column(Float, nullable=False, comment="TSN 网络协议预期周期(毫秒)")
     
     # 包数统计
     packet_count = Column(Integer, nullable=False, comment="总包数")

@@ -17,7 +17,7 @@ class ParserProfile(Base):
     device_model = Column(String(100), comment="设备型号")
     protocol_family = Column(String(50), comment="协议族标识，如 irs/xpdr，同族不同版本共享")
     parser_key = Column(String(100), nullable=False, unique=True, comment="解析器标识，如 jzxpdr113b_v20260113")
-    protocol_version_id = Column(Integer, ForeignKey("protocol_versions.id"), nullable=True, comment="关联的TSN网络配置版本")
+    protocol_version_id = Column(Integer, ForeignKey("protocol_versions.id"), nullable=True, comment="关联的 TSN 网络协议版本")
     is_active = Column(Boolean, default=True, comment="是否可用")
     description = Column(Text, comment="说明")
     supported_ports = Column(String(500), comment="支持的端口列表，逗号分隔")

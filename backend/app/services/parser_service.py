@@ -643,7 +643,7 @@ class ParserService:
         self, protocol_version_id: int, target_ports: List[int]
     ) -> Dict[int, List[FieldLayout]]:
         """
-        从TSN网络配置中构造字段布局。
+        从 TSN 网络协议中构造字段布局。
         
         返回: {端口号: [FieldLayout, ...], ...}
         """
@@ -746,7 +746,7 @@ class ParserService:
             #   2. 对每个 family：
             #      - 加载 version，拿 version.parser_key
             #      - ParserRegistry.create(parser_key)
-            #      - 注入 runtime_bundle（TSN 网络配置）+ device_bundle（版本化的 429 labels）
+            #      - 注入 runtime_bundle（TSN 网络协议）+ device_bundle（版本化的 429 labels）
             #   3. 把要解析的设备端口按 device_family_map 分配到对应 parser_key。
             # merged_plan key 是字符串 parser_key；同一 parser_key 不会跨 family 复用。
             merged_plan: Dict[str, tuple] = {}
@@ -886,7 +886,7 @@ class ParserService:
                 for dev_name in devs:
                     dev_ports = device_port_map.get(dev_name, [])
                     if not dev_ports:
-                        print(f"[Parser]   设备 {dev_name} 在 TSN 网络配置里没有端口，跳过")
+                        print(f"[Parser]   设备 {dev_name} 在 TSN 网络协议里没有端口，跳过")
                         continue
                     ports_set.update(dev_ports)
                     dev_labels.append(dev_name)
@@ -913,10 +913,10 @@ class ParserService:
             target_ports_list = sorted(all_target_ports)
             print(f"[Parser] 目标端口({len(target_ports_list)}个): {target_ports_list}")
             
-            # 构造网络配置布局
+            # 构造 TSN 网络协议布局
             network_layout: Dict[int, List[FieldLayout]] = {}
             if task.protocol_version_id and target_ports_list:
-                print(f"[Parser] 从TSN网络配置(版本ID={task.protocol_version_id})加载字段布局...")
+                print(f"[Parser] 从 TSN 网络协议(版本ID={task.protocol_version_id})加载字段布局...")
                 network_layout = await self._build_network_layout(
                     task.protocol_version_id, target_ports_list
                 )

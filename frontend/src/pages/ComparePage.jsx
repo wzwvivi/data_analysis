@@ -76,7 +76,7 @@ function ComparePage() {
   const [historyPage, setHistoryPage] = useState(1)
   const historyPageSize = 20
 
-  // 加载网络配置版本列表
+  // 加载 TSN 网络协议版本列表
   useEffect(() => {
     loadVersions()
   }, [])
@@ -151,7 +151,7 @@ function ComparePage() {
       const res = await protocolApi.listVersions()
       setVersions(res.data.items || [])
     } catch (error) {
-      message.error('加载网络配置版本失败')
+      message.error('加载 TSN 网络协议版本失败')
     }
   }
 
@@ -794,12 +794,12 @@ function ComparePage() {
 
           <Form.Item
             name="protocol_version_id"
-            label="网络配置版本"
-            rules={[{ required: true, message: '请选择网络配置版本' }]}
+            label="TSN 网络协议版本"
+            rules={[{ required: true, message: '请选择 TSN 网络协议版本' }]}
             tooltip="用于获取端口定义和周期信息"
           >
             <Select
-              placeholder="选择网络配置版本"
+              placeholder="选择 TSN 网络协议版本"
               showSearch
               optionFilterProp="children"
             >
@@ -1000,7 +1000,7 @@ function ComparePage() {
             >
               <Row gutter={16} style={{ marginBottom: 16 }}>
                 <Col span={6}>
-                  <Statistic title="网络配置端口总数" value={task.expected_port_count} />
+                  <Statistic title="协议约定端口总数" value={task.expected_port_count} />
                 </Col>
                 <Col span={6}>
                   <Statistic

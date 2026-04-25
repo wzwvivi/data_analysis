@@ -1578,7 +1578,7 @@ function AdvancedFieldsReadOnly({ label }) {
 }
 
 
-// 注：端口路由（port_routing，UDP 端口 → labels）归属 TSN 网络配置
+// 注：端口路由（port_routing，UDP 端口 → labels）归属 TSN 网络配置管理（network-config bundle）
 // （BundlePort.arinc_labels），不属于设备 ICD，因此在设备协议编辑器中不再提供
 // 相关编辑入口；旧 spec_json 里残留的 port_routing 字段会在后端 normalize_spec
 // 阶段被静默丢弃。

@@ -308,7 +308,7 @@ async def my_permissions(
     pages = get_role_pages(role)
 
     # 覆盖全量协议版本而不仅仅是「已有解析任务」的版本，保证新用户
-    # 首次查看时也能看到全部网络配置的权限信息。
+    # 首次查看时也能看到全部 TSN 网络侧配置与协议（network-config）相关权限信息。
     version_rows = await db.execute(
         select(ProtocolVersion.id).order_by(ProtocolVersion.id.asc())
     )

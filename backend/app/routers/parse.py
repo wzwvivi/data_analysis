@@ -218,7 +218,7 @@ async def _validate_parse_profiles(
     if protocol_version_id:
         version = await service.protocol_service.get_version(protocol_version_id)
         if not version:
-            raise HTTPException(status_code=400, detail="TSN网络配置版本不存在")
+            raise HTTPException(status_code=400, detail="TSN 网络协议版本不存在")
 
     return dpm, profile_names
 
@@ -504,7 +504,7 @@ async def list_tasks(
         if profile:
             profiles_map[pid] = profile
     
-    # 获取所有相关的网络配置版本信息
+    # 获取所有相关的 TSN 网络协议版本信息
     version_ids = list(set(t.protocol_version_id for t in tasks if t.protocol_version_id))
     versions_map = {}
     for vid in version_ids:
@@ -530,7 +530,7 @@ async def list_tasks(
             ]
         
         version = versions_map.get(t.protocol_version_id) if t.protocol_version_id else None
-        # 获取网络配置的协议名称
+        # 获取 TSN 网络协议的协议名称
         net_config_name = None
         net_config_version = None
         if version:
@@ -797,7 +797,7 @@ async def get_task(
                 "protocol_family": p.protocol_family if p else None,
             })
     
-    # 获取网络配置信息
+    # 获取 TSN 网络协议信息
     net_config_name = None
     net_config_version = None
     if task.protocol_version_id:

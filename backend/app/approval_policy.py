@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """协议草稿审批链配置
 
-历史：仅支持 TSN 网络配置默认审批链（``DEFAULT_APPROVAL_CHAIN``）。
+历史：仅支持 TSN 网络配置管理默认审批链（``DEFAULT_APPROVAL_CHAIN``）。
 扩展：按 draft_kind 选链，通过 ``CHAINS_BY_KIND`` 配置。
 未显式配置的 kind 回退到 ``DEFAULT_APPROVAL_CHAIN``。
 """
@@ -27,7 +27,7 @@ DRAFT_KIND_DEVICE_DISCRETE = "device_discrete"
 DRAFT_KIND_DEVICE_WIRELESS = "device_wireless"
 
 
-# TSN 网络配置审批链（精简）：network_team 提（step0 自审）→ admin 终审
+# TSN 网络配置管理审批链（精简）：network_team 提（step0 自审）→ admin 终审
 # 历史：原链为 network_team → device_team → admin，设备团队会签位已下线；
 #      老 pending CR 在启动迁移里会被压缩为本 2 步。
 DEFAULT_APPROVAL_CHAIN: List[str] = [

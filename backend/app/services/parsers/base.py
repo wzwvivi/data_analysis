@@ -5,7 +5,7 @@ from typing import Dict, List, Any, Optional, Type
 
 
 class FieldLayout:
-    """字段布局信息 - 来自TSN网络配置"""
+    """字段布局信息 - 来自TSN 网络协议"""
     
     def __init__(self, field_name: str, field_offset: int, field_length: int,
                  data_type: str = "bytes", scale_factor: float = 1.0,
@@ -64,7 +64,7 @@ class BaseParser(ABC):
             payload: UDP载荷数据
             port: 目标端口号
             timestamp: 时间戳
-            field_layout: 来自TSN网络配置的字段布局列表
+            field_layout: 来自TSN 网络协议的字段布局列表
             
         Returns:
             解析后的字段字典，如果无法解析返回None

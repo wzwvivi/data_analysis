@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""网络团队配置管理（只读骨架）
+"""TSN 网络配置管理（网络团队；API 只读骨架，见 MR 说明）
 
 MR1 范围：
 - 让有 `network-config` 页面权限的角色能看到**所有**协议版本（含 PendingCode /
@@ -67,13 +67,13 @@ from ..services import protocol_activation_service as activation_service
 def _require_network_config_access(user: User = Depends(get_current_user)) -> User:
     """只有拥有 network-config 页面权限的角色才能进。"""
     if not has_page_access(user.role or "", PAGE_NETWORK_CONFIG):
-        raise HTTPException(status_code=403, detail="无权访问网络配置管理")
+        raise HTTPException(status_code=403, detail="无权访问 TSN 网络配置管理")
     return user
 
 
 router = APIRouter(
     prefix="/api/network-config",
-    tags=["网络配置管理"],
+    tags=["TSN 网络配置管理"],
     dependencies=[Depends(_require_network_config_access)],
 )
 
@@ -200,7 +200,7 @@ async def _get_version_or_404(db: AsyncSession, version_id: int) -> ProtocolVers
     )
     pv = result.scalar_one_or_none()
     if pv is None:
-        raise HTTPException(status_code=404, detail="网络配置版本不存在")
+        raise HTTPException(status_code=404, detail="TSN 网络协议版本不存在")
     return pv
 
 

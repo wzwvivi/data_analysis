@@ -6,7 +6,7 @@
 | 维度        | services/bundle/             | services/device_bundle/（本模块）  |
 | ----------- | ---------------------------- | ---------------------------------- |
 | 源数据      | ProtocolVersion.ports/fields | DeviceProtocolVersion.spec_json    |
-| 范围        | TSN 网络配置（端口/字段）     | 设备 ICD（ARINC429 Label 级细节）  |
+| 范围        | TSN 网络协议（端口/字段）     | 设备 ICD（ARINC429 Label 级细节）  |
 | 落盘位置    | generated/v{id}/bundle.json  | generated_device/v{id}/bundle.json |
 | 消费方      | parser_service / compare / event | 各设备 parser（adc/brake/…）   |
 
@@ -17,7 +17,7 @@
     if dbundle:
         label_def = dbundle.label(0o164)  # → DeviceLabel 或 None
 
-注意：port→labels 的路由信息归属 TSN 网络配置（``BundlePort.arinc_labels``），
+注意：port→labels 的路由信息归属 TSN 网络协议（``BundlePort.arinc_labels``），
 不在设备 bundle 中体现；parser 应通过 TSN ``runtime_bundle.arinc_label_ints(port)``
 查询端口路由。
 """

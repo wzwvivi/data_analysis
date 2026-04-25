@@ -795,11 +795,18 @@ function WorkbenchDetail({ sortieId }) {
     }
   }, [sortieId])
 
-  const loadEventsSummary = useCallback(async (tid) => {
-    if (!tid) { setEventsSummary(null); return }
+  /**
+   * 专项分析总结按架次自动聚合：
+   * 只要进入了一个架次就拉取一次，**不**依赖具体解析任务 —— 凡是用平台共享数据
+   * （即架次绑定的 SharedTsnFile）做过的飞管 / 飞控 / 自动飞行 / TSN 异常检查，
+   * 都会自动出现在底部的总结卡片里。本地直传的 standalone 分析不绑定架次，
+   * 不会出现在这里。
+   */
+  const loadEventsSummary = useCallback(async () => {
+    if (!sortieId) { setEventsSummary(null); return }
     setEventsLoading(true)
     try {
-      const res = await workbenchApi.getEventsSummary(sortieId, tid)
+      const res = await workbenchApi.getEventsSummary(sortieId)
       setEventsSummary(res.data || null)
     } catch {
       setEventsSummary(null)
@@ -810,8 +817,11 @@ function WorkbenchDetail({ sortieId }) {
 
   useEffect(() => {
     loadOverview(taskId)
-    loadEventsSummary(taskId)
-  }, [taskId, loadOverview, loadEventsSummary])
+  }, [taskId, loadOverview])
+
+  useEffect(() => {
+    loadEventsSummary()
+  }, [loadEventsSummary])
 
   useEffect(() => {
     setAlign(loadAlignment(sortieId))
@@ -2843,7 +2853,6 @@ function WorkbenchDetail({ sortieId }) {
         <WorkbenchEventsCard
           summary={eventsSummary}
           loading={eventsLoading}
-          taskId={taskId}
           onOpenEvent={openParseTableAtEvent}
         />
       </div>
@@ -3048,10 +3057,103 @@ function statusTag(status) {
   return <Tag>{status || '—'}</Tag>
 }
 
-function WorkbenchEventsCard({ summary, loading, taskId, onOpenEvent }) {
+/**
+ * 模块卡内的事件明细折叠面板。
+ *
+ * 优先使用 timeline_events（完整时间线），兼容旧 top_events。默认收起，标题里
+ * 写明"完整时间线 (N 条)"，点开后才渲染表格，避免长卡片把领导关心的 summary
+ * 文字挤下去。
+ */
+function ModuleTimelineCollapse({ module: m, onOpenEvent }) {
+  const events = (m.timeline_events && m.timeline_events.length ? m.timeline_events : m.top_events) || []
+  if (events.length === 0) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        message="本模块没有可展开的事件明细"
+        style={{ marginTop: 8 }}
+      />
+    )
+  }
+  // compare 模块的"事件"是端口问题、auto_flight 是触地/稳态片段，列名做差异化。
+  const isCompare = m.module === 'compare'
+  const isAutoFlight = m.module === 'auto_flight'
+  const portColTitle = isCompare ? '端口' : '端口'
+  const titleColTitle = isCompare ? '问题端口/详情' : isAutoFlight ? '事件' : '事件'
+
+  const columns = [
+    {
+      title: '时间',
+      dataIndex: 'time_str',
+      width: 130,
+      render: (v, r) => v || (r.ts != null ? Number(r.ts).toFixed(2) : '—'),
+    },
+    {
+      title: portColTitle,
+      dataIndex: 'port',
+      width: 80,
+      render: (v) => (v == null ? '—' : v),
+    },
+    {
+      title: titleColTitle,
+      dataIndex: 'title',
+      ellipsis: true,
+      render: (v, r) => (
+        <span>
+          <span>{v}</span>
+          {r.description ? (
+            <Text type="secondary" style={{ marginLeft: 8 }}>
+              · {r.description}
+            </Text>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      title: '操作',
+      width: 110,
+      render: (_, r) => (
+        <Button
+          size="small"
+          type="link"
+          icon={<DatabaseOutlined />}
+          disabled={r.parse_ts == null}
+          onClick={() => onOpenEvent(r)}
+        >
+          定位数据
+        </Button>
+      ),
+    },
+  ]
+
+  return (
+    <Collapse
+      ghost
+      size="small"
+      style={{ marginTop: 4 }}
+      items={[
+        {
+          key: 'timeline',
+          label: <span>完整时间线 ({events.length} 条)</span>,
+          children: (
+            <Table
+              size="small"
+              pagination={events.length > 20 ? { pageSize: 20, simple: true } : false}
+              rowKey={(_, i) => `${m.module}-${i}`}
+              dataSource={events}
+              columns={columns}
+            />
+          ),
+        },
+      ]}
+    />
+  )
+}
+
+function WorkbenchEventsCard({ summary, loading, onOpenEvent }) {
   const navigate = useNavigate()
 
-  if (!taskId) return null
   if (loading) {
     return (
       <Card size="small" style={{ marginTop: 16 }}>
@@ -3060,13 +3162,40 @@ function WorkbenchEventsCard({ summary, loading, taskId, onOpenEvent }) {
     )
   }
   const modules = summary?.modules || []
+  const linkedFileCount = summary?.linked_file_count ?? 0
+  const linkedParseTaskCount = (summary?.linked_parse_task_ids || []).length
+  const anyRun = modules.some((m) => m.status && m.status !== 'not_run')
 
   return (
     <Card
       size="small"
-      title="专项分析总结（按解析任务聚合）"
+      title={(
+        <Space size="middle" wrap>
+          <span>专项分析总结（按架次自动聚合）</span>
+          <Tag color="blue">关联共享文件 {linkedFileCount}</Tag>
+          <Tag color="geekblue">关联解析任务 {linkedParseTaskCount}</Tag>
+        </Space>
+      )}
       style={{ marginTop: 16 }}
     >
+      {linkedFileCount === 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="该架次尚未绑定任何平台共享数据文件"
+          description="架次归属仅通过『平台共享数据』建立。请先在共享平台为该架次添加文件，或以共享数据为输入运行专项分析。"
+        />
+      )}
+      {linkedFileCount > 0 && !anyRun && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="该架次的共享数据尚未运行任何专项分析"
+          description="可在下方各模块卡片点击「前往运行」，使用本架次的共享数据创建分析；分析完成后这里会自动出现总结。"
+        />
+      )}
       <Row gutter={[16, 16]}>
         {modules.map((m) => (
           <Col xs={24} md={12} xl={12} key={m.module}>
@@ -3074,9 +3203,15 @@ function WorkbenchEventsCard({ summary, loading, taskId, onOpenEvent }) {
               size="small"
               type="inner"
               title={(
-                <Space>
+                <Space wrap>
                   <span>{m.name}</span>
                   {statusTag(m.status)}
+                  {m.link_source === 'parse_task' && (
+                    <Tag color="purple">来源：解析任务</Tag>
+                  )}
+                  {m.link_source === 'shared_pcap' && (
+                    <Tag color="cyan">来源：平台共享数据</Tag>
+                  )}
                 </Space>
               )}
               extra={(
@@ -3098,54 +3233,35 @@ function WorkbenchEventsCard({ summary, loading, taskId, onOpenEvent }) {
               )}
             >
               {m.status === 'not_run' ? (
-                <Empty description="尚未运行该模块分析" />
+                <Empty description="该架次的共享数据尚未运行此模块" />
               ) : (
                 <>
-                  <Space wrap size="middle" style={{ marginBottom: 8 }}>
-                    {Object.entries(m.counts || {}).map(([k, v]) => (
-                      <Tag key={k} color="blue">{k}: {v}</Tag>
-                    ))}
-                    {m.overall_result && (
-                      <Tag color={m.overall_result === 'pass' ? 'success' : m.overall_result === 'warning' ? 'warning' : 'error'}>
-                        综合: {m.overall_result}
-                      </Tag>
-                    )}
-                  </Space>
-                  {(m.top_events || []).length === 0 ? (
-                    <Empty description="暂无 top 事件" />
-                  ) : (
-                    <Table
-                      size="small"
-                      pagination={false}
-                      rowKey={(_, i) => `${m.module}-${i}`}
-                      dataSource={m.top_events}
-                      columns={[
-                        {
-                          title: '时间',
-                          dataIndex: 'time_str',
-                          width: 120,
-                          render: (v, r) => v || (r.ts != null ? Number(r.ts).toFixed(2) : '—'),
-                        },
-                        { title: '端口', dataIndex: 'port', width: 80, render: (v) => v ?? '—' },
-                        { title: '事件', dataIndex: 'title', ellipsis: true },
-                        {
-                          title: '操作',
-                          width: 110,
-                          render: (_, r) => (
-                            <Button
-                              size="small"
-                              type="link"
-                              icon={<DatabaseOutlined />}
-                              disabled={r.parse_ts == null}
-                              onClick={() => onOpenEvent(r)}
-                            >
-                              定位数据
-                            </Button>
-                          ),
-                        },
-                      ]}
-                    />
+                  {m.summary_text && (
+                    <Text strong style={{ display: 'block', marginBottom: 6 }}>
+                      {m.summary_text}
+                    </Text>
                   )}
+                  {m.timeline_narrative && (
+                    <Typography.Paragraph
+                      type="secondary"
+                      style={{ marginBottom: 10, whiteSpace: 'pre-wrap' }}
+                    >
+                      {m.timeline_narrative}
+                    </Typography.Paragraph>
+                  )}
+                  {(m.summary_tags || []).length > 0 && (
+                    <Space wrap size={[8, 8]} style={{ marginBottom: 8 }}>
+                      {(m.summary_tags || []).map((t, i) => (
+                        <Tag key={`st-${m.module}-${i}`} color={t.color}>{t.label}</Tag>
+                      ))}
+                    </Space>
+                  )}
+                  {m.linked_pcap_filename && (
+                    <div style={{ marginBottom: 10 }}>
+                      <Tag color="default">共享文件：{m.linked_pcap_filename}</Tag>
+                    </div>
+                  )}
+                  <ModuleTimelineCollapse module={m} onOpenEvent={onOpenEvent} />
                 </>
               )}
             </Card>

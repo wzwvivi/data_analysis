@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """设备协议（ARINC429 / CAN / RS422 ...）通用模型
 
-与 TSN 网络配置（protocols / protocol_versions / ports / fields）区分；设备协议
+与 TSN 网络配置管理所对应的 protocols / protocol_versions / ports / fields 区分；设备协议
 以 protocol_family 区分具体家族，每个家族的内部结构差异封装在 spec_json 里，由
 family handler 负责 validate/diff/normalize。
 

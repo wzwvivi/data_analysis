@@ -7,7 +7,7 @@
 - port_overrides 的 key 统一成 int（port_number）
 - sign_style / bcd_pattern / discrete_bits / discrete_bit_groups 等新字段一并携带
 
-**职责划分**：UDP 端口 → labels 的"网络拓扑"信息由 TSN 网络配置版本化
+**职责划分**：UDP 端口 → labels 的"网络拓扑"信息由 TSN 网络协议版本化
 （``services/bundle/schema.py::BundlePort.arinc_labels``），**不**属于设备 ICD。
 本模块不承载 port_routing（旧 bundle.json 里可能残留的 port_routing 键在
 反序列化时会被静默丢弃）。

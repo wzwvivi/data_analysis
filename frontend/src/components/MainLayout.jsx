@@ -108,7 +108,6 @@ function MainLayout() {
     const networkChildren = []
     if (hasPageAccess('upload')) networkChildren.push({ key: '/upload', icon: <CloudUploadOutlined />, label: '上传解析' })
     if (hasPageAccess('tasks')) networkChildren.push({ key: '/tasks', icon: <UnorderedListOutlined />, label: '任务列表' })
-    if (hasPageAccess('network-config')) networkChildren.push({ key: '/network-config', icon: <SafetyCertificateOutlined />, label: 'TSN 网络配置' })
 
     const specializedChildren = []
     if (hasPageAccess('fms-event-analysis') || hasPageAccess('event-analysis')) specializedChildren.push({ key: '/fms-event-analysis', icon: <FileSearchOutlined />, label: '飞管事件分析' })
@@ -124,7 +123,12 @@ function MainLayout() {
       })
     }
 
-    // 设备协议管理：放在"网络数据分析"分组底部，仅对有权限的用户（默认管理员）显示
+    // TSN 网络配置管理：紧接在「专项分析」子菜单之后、设备协议管理之前
+    if (hasPageAccess('network-config')) {
+      networkChildren.push({ key: '/network-config', icon: <SafetyCertificateOutlined />, label: 'TSN 网络配置管理' })
+    }
+
+    // 设备协议管理：仅对有权限的用户（默认管理员）显示
     if (hasPageAccess('device-protocol')) {
       networkChildren.push({
         key: '/device-protocol',
@@ -237,16 +241,14 @@ function MainLayout() {
       push('网络数据分析', null); push('任务中心', null)
     } else if (/^\/tasks\/[^/]+\/analysis$/.test(path)) {
       push('网络数据分析', null); push('任务中心', '/tasks'); push('结果分析', null)
-    } else if (/^\/tasks\/[^/]+\/event-analysis$/.test(path)) {
-      push('网络数据分析', null); push('任务中心', '/tasks'); push('专项分析', null)
     } else if (/^\/tasks\/[^/]+$/.test(path)) {
       push('网络数据分析', null); push('任务中心', '/tasks'); push('结果分析', null)
     } else if (path.startsWith('/network-config/drafts')) {
-      push('网络数据分析', null); push('TSN 网络配置', '/network-config'); push('草稿编辑', null)
+      push('网络数据分析', null); push('TSN 网络配置管理', '/network-config'); push('草稿编辑', null)
     } else if (path.startsWith('/network-config/change-requests')) {
-      push('网络数据分析', null); push('TSN 网络配置', '/network-config'); push('变更请求', null)
+      push('网络数据分析', null); push('TSN 网络配置管理', '/network-config'); push('变更请求', null)
     } else if (path.startsWith('/network-config')) {
-      push('网络数据分析', null); push('TSN 网络配置', null)
+      push('网络数据分析', null); push('TSN 网络配置管理', null)
     } else if (path.startsWith('/device-protocol/drafts')) {
       push('网络数据分析', null); push('设备协议管理', '/device-protocol'); push('草稿编辑', null)
     } else if (path.startsWith('/device-protocol/change-requests')) {

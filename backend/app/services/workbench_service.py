@@ -16,22 +16,34 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import DATA_DIR
 from ..models import (
     AutoFlightAnalysisTask,
+    CompareGapRecord,
+    ComparePortResult,
+    ComparePortTimingResult,
     CompareTask,
     FccEventAnalysisTask,
+    FccEventCheckResult,
     FccEventTimelineEvent,
     FmsEventAnalysisTask,
+    FmsEventCheckResult,
     FmsEventTimelineEvent,
     ParseResult,
     ParseTask,
+    SharedSortie,
     SharedTsnFile,
     SteadyStateAnalysisResult,
     TouchdownAnalysisResult,
+)
+from .workbench_summaries import (
+    build_auto_flight_narrative,
+    build_compare_narrative,
+    build_fcc_narrative,
+    build_fms_narrative,
 )
 
 
@@ -796,36 +808,97 @@ async def build_overview(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]
 
 # ──────────────────────────── Events Summary ────────────────────────────
 
-async def _summarize_fms(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]:
+def _link_filter(model_task_cls, parse_task_ids: List[int], shared_file_paths: List[str]):
+    """构造「分析任务 ↔ 架次」关联过滤。
+
+    架次归属严格只走 *平台共享数据*：
+
+    - 解析任务路径：分析任务的 ``parse_task_id`` 命中本架次共享文件衍生出的解析任务；
+    - 共享 pcap 路径：分析任务的 ``pcap_file_path`` 直接等于本架次某个共享文件路径
+      （由 ``/standalone/from-shared`` 创建的 standalone 任务即落在这里）。
+
+    本地上传的 standalone 任务（``pcap_file_path`` 落在 ``uploads/...`` 目录）不会
+    被任何架次的共享路径集合命中，因此天然不归入任何架次，符合"本地上传不绑定架次"
+    的产品口径。
+
+    任一集合为空时只用另一个；都为空时返回 ``None`` 表示"不可能命中"。
+    """
+    clauses = []
+    if parse_task_ids:
+        clauses.append(model_task_cls.parse_task_id.in_(parse_task_ids))
+    if shared_file_paths and hasattr(model_task_cls, "pcap_file_path"):
+        clauses.append(model_task_cls.pcap_file_path.in_(shared_file_paths))
+    if not clauses:
+        return None
+    return or_(*clauses)
+
+
+def _serialize_event_row(e) -> Dict[str, Any]:
+    """把 FMS/FCC timeline 行序列化为前端可消费的字典。
+
+    保持和原 ``top_events`` 字段名兼容（``ts`` / ``parse_ts`` / ``port`` /
+    ``title`` / ``severity`` / ``time_str`` / ``device``），并附带 ``event_type``
+    便于前端按类型上色。
+    """
+    return {
+        "ts": _safe_float(e.timestamp),
+        "parse_ts": _safe_float(e.timestamp),
+        "port": e.port,
+        "title": e.event_name or e.event_type or "事件",
+        "severity": "info",
+        "time_str": e.time_str,
+        "device": e.device,
+        "event_type": e.event_type,
+        "description": getattr(e, "event_description", None),
+    }
+
+
+def _link_source(task, parse_task_ids: List[int]) -> str:
+    """识别该分析任务是经由解析任务关联，还是 standalone 直接选了共享数据。"""
+    pid = getattr(task, "parse_task_id", None)
+    if pid and parse_task_ids and pid in parse_task_ids:
+        return "parse_task"
+    if getattr(task, "pcap_file_path", None):
+        return "shared_pcap"
+    return "unknown"
+
+
+async def _summarize_fms(
+    db: AsyncSession,
+    parse_task_ids: List[int],
+    file_paths: List[str],
+) -> Dict[str, Any]:
+    cond = _link_filter(FmsEventAnalysisTask, parse_task_ids, file_paths)
+    if cond is None:
+        return {"module": "fms", "name": "飞管事件分析", "task_id": None, "status": "not_run"}
+
     task = (
         await db.execute(
             select(FmsEventAnalysisTask)
-            .where(FmsEventAnalysisTask.parse_task_id == parse_task_id)
+            .where(cond)
             .order_by(FmsEventAnalysisTask.id.desc())
         )
     ).scalars().first()
     if not task:
         return {"module": "fms", "name": "飞管事件分析", "task_id": None, "status": "not_run"}
 
-    top_events: List[Dict[str, Any]] = []
-    rows = (
+    timeline_rows = (
         await db.execute(
             select(FmsEventTimelineEvent)
             .where(FmsEventTimelineEvent.analysis_task_id == task.id)
             .order_by(FmsEventTimelineEvent.timestamp.asc())
-            .limit(5)
         )
     ).scalars().all()
-    for e in rows:
-        top_events.append({
-            "ts": _safe_float(e.timestamp),
-            "parse_ts": _safe_float(e.timestamp),
-            "port": e.port,
-            "title": e.event_name or e.event_type or "事件",
-            "severity": "info",
-            "time_str": e.time_str,
-            "device": e.device,
-        })
+    check_rows = (
+        await db.execute(
+            select(FmsEventCheckResult)
+            .where(FmsEventCheckResult.analysis_task_id == task.id)
+            .order_by(FmsEventCheckResult.sequence.asc())
+        )
+    ).scalars().all()
+
+    timeline_events = [_serialize_event_row(e) for e in timeline_rows]
+    narrative = build_fms_narrative(task, list(timeline_rows), list(check_rows))
 
     return {
         "module": "fms",
@@ -838,41 +911,58 @@ async def _summarize_fms(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]
             "pass": task.passed_checks or 0,
             "fail": task.failed_checks or 0,
         },
-        "top_events": top_events,
+        "top_events": timeline_events[:5],
+        "timeline_events": timeline_events,
+        "summary_text": narrative["summary_text"],
+        "timeline_narrative": narrative["timeline_narrative"],
+        "summary_tags": narrative["summary_tags"],
         "detail_route": f"/fms-event-analysis/task/{task.id}",
+        "linked_parse_task_id": task.parse_task_id,
+        "linked_pcap_filename": task.pcap_filename,
+        "link_source": _link_source(task, parse_task_ids),
     }
 
 
-async def _summarize_fcc(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]:
+async def _summarize_fcc(
+    db: AsyncSession,
+    parse_task_ids: List[int],
+    file_paths: List[str],
+) -> Dict[str, Any]:
+    cond = _link_filter(FccEventAnalysisTask, parse_task_ids, file_paths)
+    if cond is None:
+        return {"module": "fcc", "name": "飞控事件分析", "task_id": None, "status": "not_run"}
+
     task = (
         await db.execute(
             select(FccEventAnalysisTask)
-            .where(FccEventAnalysisTask.parse_task_id == parse_task_id)
+            .where(cond)
             .order_by(FccEventAnalysisTask.id.desc())
         )
     ).scalars().first()
     if not task:
         return {"module": "fcc", "name": "飞控事件分析", "task_id": None, "status": "not_run"}
 
-    rows = (
+    timeline_rows = (
         await db.execute(
             select(FccEventTimelineEvent)
             .where(FccEventTimelineEvent.analysis_task_id == task.id)
             .order_by(FccEventTimelineEvent.timestamp.asc())
-            .limit(5)
         )
     ).scalars().all()
-    top_events: List[Dict[str, Any]] = []
-    for e in rows:
-        top_events.append({
-            "ts": _safe_float(e.timestamp),
-            "parse_ts": _safe_float(e.timestamp),
-            "port": e.port,
-            "title": e.event_name or e.event_type or "事件",
-            "severity": "info",
-            "time_str": e.time_str,
-            "device": e.device,
-        })
+    check_rows = (
+        await db.execute(
+            select(FccEventCheckResult)
+            .where(FccEventCheckResult.analysis_task_id == task.id)
+            .order_by(FccEventCheckResult.sequence.asc())
+        )
+    ).scalars().all()
+
+    timeline_events = [_serialize_event_row(e) for e in timeline_rows]
+    narrative = build_fcc_narrative(task, list(timeline_rows), list(check_rows))
+
+    detected = sum(1 for c in check_rows if (c.overall_result or "") == "detected")
+    not_detected = sum(1 for c in check_rows if (c.overall_result or "") == "not_detected")
+    na = sum(1 for c in check_rows if (c.overall_result or "") == "na")
 
     return {
         "module": "fcc",
@@ -880,62 +970,86 @@ async def _summarize_fcc(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]
         "task_id": task.id,
         "status": task.status or "pending",
         "progress": task.progress or 0,
+        # FCC 用 detected/not_detected/na 三值；保留 total 让前端能对照
         "counts": {
-            "total": task.total_checks or 0,
-            "pass": task.passed_checks or 0,
-            "fail": task.failed_checks or 0,
+            "total": task.total_checks or len(check_rows),
+            "detected": detected,
+            "not_detected": not_detected,
+            "na": na,
         },
-        "top_events": top_events,
+        "top_events": timeline_events[:5],
+        "timeline_events": timeline_events,
+        "summary_text": narrative["summary_text"],
+        "timeline_narrative": narrative["timeline_narrative"],
+        "summary_tags": narrative["summary_tags"],
         "detail_route": f"/fcc-event-analysis/task/{task.id}",
+        "linked_parse_task_id": task.parse_task_id,
+        "linked_pcap_filename": task.pcap_filename,
+        "link_source": _link_source(task, parse_task_ids),
     }
 
 
-async def _summarize_auto_flight(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]:
+async def _summarize_auto_flight(
+    db: AsyncSession,
+    parse_task_ids: List[int],
+    file_paths: List[str],
+) -> Dict[str, Any]:
+    cond = _link_filter(AutoFlightAnalysisTask, parse_task_ids, file_paths)
+    if cond is None:
+        return {"module": "auto_flight", "name": "自动飞行性能分析", "task_id": None, "status": "not_run"}
+
     task = (
         await db.execute(
             select(AutoFlightAnalysisTask)
-            .where(AutoFlightAnalysisTask.parse_task_id == parse_task_id)
+            .where(cond)
             .order_by(AutoFlightAnalysisTask.id.desc())
         )
     ).scalars().first()
     if not task:
         return {"module": "auto_flight", "name": "自动飞行性能分析", "task_id": None, "status": "not_run"}
 
-    top_events: List[Dict[str, Any]] = []
-    touch = (
+    touch_rows = (
         await db.execute(
             select(TouchdownAnalysisResult)
             .where(TouchdownAnalysisResult.analysis_task_id == task.id)
-            .order_by(TouchdownAnalysisResult.touchdown_ts.asc())
-            .limit(3)
+            .order_by(TouchdownAnalysisResult.sequence.asc())
         )
     ).scalars().all()
-    for t in touch:
-        top_events.append({
+    steady_rows = (
+        await db.execute(
+            select(SteadyStateAnalysisResult)
+            .where(SteadyStateAnalysisResult.analysis_task_id == task.id)
+            .order_by(SteadyStateAnalysisResult.sequence.asc())
+        )
+    ).scalars().all()
+
+    timeline_events: List[Dict[str, Any]] = []
+    for t in touch_rows:
+        timeline_events.append({
             "ts": _safe_float(t.touchdown_ts),
             "parse_ts": _safe_float(t.touchdown_ts),
             "port": None,
             "title": f"触地 #{t.sequence} · {t.rating or 'normal'}",
             "severity": "warning" if (t.rating or "") not in ("normal", "") else "info",
             "time_str": t.touchdown_time,
+            "event_type": "touchdown",
+            "description": t.summary,
         })
-    steady = (
-        await db.execute(
-            select(SteadyStateAnalysisResult)
-            .where(SteadyStateAnalysisResult.analysis_task_id == task.id)
-            .order_by(SteadyStateAnalysisResult.start_ts.asc())
-            .limit(2)
-        )
-    ).scalars().all()
-    for s in steady:
-        top_events.append({
+    for s in steady_rows:
+        timeline_events.append({
             "ts": _safe_float(s.start_ts),
             "parse_ts": _safe_float(s.start_ts),
             "port": None,
             "title": f"稳态 #{s.sequence} {s.mode_label or ''} · {s.rating or 'normal'}",
             "severity": "warning" if (s.rating or "") not in ("normal", "") else "info",
             "time_str": s.start_time,
+            "event_type": "steady",
+            "description": s.summary,
         })
+    timeline_events.sort(key=lambda x: x.get("ts") or 0.0)
+    top_events = timeline_events[:5]
+
+    narrative = build_auto_flight_narrative(task, list(touch_rows), list(steady_rows))
 
     return {
         "module": "auto_flight",
@@ -948,25 +1062,108 @@ async def _summarize_auto_flight(db: AsyncSession, parse_task_id: int) -> Dict[s
             "steady": task.steady_count or 0,
         },
         "top_events": top_events,
+        "timeline_events": timeline_events,
+        "summary_text": narrative["summary_text"],
+        "timeline_narrative": narrative["timeline_narrative"],
+        "summary_tags": narrative["summary_tags"],
         "detail_route": f"/auto-flight-analysis/task/{task.id}",
+        "linked_parse_task_id": task.parse_task_id,
+        "linked_pcap_filename": task.pcap_filename,
+        "link_source": _link_source(task, parse_task_ids),
     }
 
 
-async def _summarize_compare(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]:
-    """比对任务不直接挂 parse_task，用 file_path 匹配兜底。"""
-    pt = (await db.execute(select(ParseTask).where(ParseTask.id == parse_task_id))).scalar_one_or_none()
-    if not pt or not pt.file_path:
+async def _summarize_compare(
+    db: AsyncSession,
+    file_paths: List[str],
+) -> Dict[str, Any]:
+    """比对任务通过 file_path_1 / file_path_2 与架次文件路径匹配。"""
+    if not file_paths:
         return {"module": "compare", "name": "TSN 异常检查（双交换机比对）", "task_id": None, "status": "not_run"}
 
     task = (
         await db.execute(
             select(CompareTask)
-            .where((CompareTask.file_path_1 == pt.file_path) | (CompareTask.file_path_2 == pt.file_path))
+            .where(or_(
+                CompareTask.file_path_1.in_(file_paths),
+                CompareTask.file_path_2.in_(file_paths),
+            ))
             .order_by(CompareTask.id.desc())
         )
     ).scalars().first()
     if not task:
         return {"module": "compare", "name": "TSN 异常检查（双交换机比对）", "task_id": None, "status": "not_run"}
+
+    port_rows = (
+        await db.execute(
+            select(ComparePortResult)
+            .where(ComparePortResult.compare_task_id == task.id)
+        )
+    ).scalars().all()
+    timing_rows = (
+        await db.execute(
+            select(ComparePortTimingResult)
+            .where(ComparePortTimingResult.compare_task_id == task.id)
+        )
+    ).scalars().all()
+    # 丢包段按端口/侧聚合，避免拉数千行明细到内存
+    gap_count_rows = (
+        await db.execute(
+            select(
+                CompareGapRecord.port_number,
+                CompareGapRecord.switch_index,
+                func.count(CompareGapRecord.id).label("gap_count"),
+                func.sum(CompareGapRecord.estimated_missing_packets).label("missing_pkts"),
+            )
+            .where(CompareGapRecord.compare_task_id == task.id)
+            .group_by(CompareGapRecord.port_number, CompareGapRecord.switch_index)
+        )
+    ).all()
+
+    narrative = build_compare_narrative(
+        task,
+        list(port_rows),
+        list(timing_rows),
+        [
+            {
+                "port_number": r[0],
+                "switch_index": r[1],
+                "gap_count": int(r[2] or 0),
+                "missing_pkts": int(r[3] or 0),
+            }
+            for r in gap_count_rows
+        ],
+    )
+
+    # compare 没有时间线，把"问题端口"作为 timeline_events 给前端折叠展示
+    problem_events: List[Dict[str, Any]] = []
+    for p in port_rows:
+        if (p.result or "").lower() in ("warning", "fail"):
+            problem_events.append({
+                "ts": None,
+                "parse_ts": None,
+                "port": p.port_number,
+                "title": f"端口 {p.port_number} · {p.message_name or p.source_device or ''}",
+                "severity": "error" if (p.result or "").lower() == "fail" else "warning",
+                "time_str": None,
+                "event_type": "port_issue",
+                "description": p.detail,
+            })
+    for t in timing_rows:
+        if (t.result or "").lower() in ("warning", "fail"):
+            problem_events.append({
+                "ts": None,
+                "parse_ts": None,
+                "port": t.port_number,
+                "title": (
+                    f"端口 {t.port_number} 交换机{t.switch_index} 周期"
+                    f"{'失败' if (t.result or '').lower() == 'fail' else '告警'}"
+                ),
+                "severity": "error" if (t.result or "").lower() == "fail" else "warning",
+                "time_str": None,
+                "event_type": "timing_issue",
+                "description": t.detail,
+            })
 
     return {
         "module": "compare",
@@ -980,21 +1177,80 @@ async def _summarize_compare(db: AsyncSession, parse_task_id: int) -> Dict[str, 
             "timing_fail": task.timing_fail_count or 0,
             "timing_warning": task.timing_warning_count or 0,
         },
-        "top_events": [],
+        "top_events": problem_events[:5],
+        "timeline_events": problem_events,
         "overall_result": task.overall_result,
+        "summary_text": narrative["summary_text"],
+        "timeline_narrative": narrative["timeline_narrative"],
+        "summary_tags": narrative["summary_tags"],
         "detail_route": f"/compare/{task.id}",
     }
 
 
-async def build_events_summary(db: AsyncSession, parse_task_id: int) -> Dict[str, Any]:
-    """聚合该解析任务上的四类事件分析。"""
-    fms = await _summarize_fms(db, parse_task_id)
-    fcc = await _summarize_fcc(db, parse_task_id)
-    af = await _summarize_auto_flight(db, parse_task_id)
-    cmp_ = await _summarize_compare(db, parse_task_id)
+async def _collect_sortie_links(
+    db: AsyncSession, sortie_id: int
+) -> Tuple[List[str], List[int]]:
+    """汇总该架次绑定的「平台共享数据」文件路径，以及由这些文件衍生出的解析任务 id。
+
+    架次只通过 ``SharedTsnFile.sortie_id`` 与共享数据建立归属，因此凡是
+    ``ParseTask.file_path`` / ``XxxTask.pcap_file_path`` 命中此处返回的 ``file_paths``
+    才被视为"属于本架次"。本地直传 pcap 的 standalone 任务不会被命中。
+    """
+    files = (
+        await db.execute(
+            select(SharedTsnFile.file_path).where(SharedTsnFile.sortie_id == sortie_id)
+        )
+    ).scalars().all()
+    file_paths = [p for p in files if p]
+    parse_task_ids: List[int] = []
+    if file_paths:
+        rows = (
+            await db.execute(
+                select(ParseTask.id).where(ParseTask.file_path.in_(file_paths))
+            )
+        ).scalars().all()
+        parse_task_ids = [int(x) for x in rows if x is not None]
+    return file_paths, parse_task_ids
+
+
+async def build_events_summary(
+    db: AsyncSession,
+    sortie_id: int,
+    parse_task_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """聚合一个架次相关的四类专项分析。
+
+    关联口径（**严格只通过平台共享数据建立归属**）：
+
+    1. 取出架次绑定的全部 ``SharedTsnFile.file_path``；
+    2. 解析任务侧：``ParseTask.file_path`` 命中上述路径的，归入该架次；
+       任一专项分析挂在这些 ``parse_task_id`` 上即视为属于该架次。
+    3. Standalone 共享侧：``XxxAnalysisTask.pcap_file_path`` 直接命中上述路径的，
+       同样归入该架次（即 ``/standalone/from-shared`` 那条路径）。
+
+    本地直接上传 pcap 的 standalone 任务（``pcap_file_path`` 在 ``uploads/...``
+    目录下），既不命中架次共享路径，也没有 parse_task 关联，因此不属于任何架次。
+
+    ``parse_task_id`` 仍可作为可选筛选项，用来把视图收窄到「仅看某个解析任务下发起
+    的分析」；不传则按整架次自动聚合。共享 pcap 兜底始终按整架次匹配，避免遗漏
+    standalone-from-shared 入口的分析。
+    """
+    file_paths, sortie_parse_task_ids = await _collect_sortie_links(db, sortie_id)
+    if parse_task_id is not None:
+        narrowed_parse_task_ids = [parse_task_id]
+    else:
+        narrowed_parse_task_ids = sortie_parse_task_ids
+
+    fms = await _summarize_fms(db, narrowed_parse_task_ids, file_paths)
+    fcc = await _summarize_fcc(db, narrowed_parse_task_ids, file_paths)
+    af = await _summarize_auto_flight(db, narrowed_parse_task_ids, file_paths)
+    cmp_ = await _summarize_compare(db, file_paths)
 
     return {
+        "sortie_id": sortie_id,
         "parse_task_id": parse_task_id,
+        "linked_parse_task_ids": sortie_parse_task_ids,
+        "linked_file_count": len(file_paths),
         "modules": [fms, fcc, af, cmp_],
     }
 

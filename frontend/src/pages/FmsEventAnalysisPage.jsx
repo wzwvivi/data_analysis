@@ -32,11 +32,11 @@ function FmsEventAnalysisPage() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
 
-  // MR4：网络配置版本选择（事件分析发起时锁定）
+  // MR4：TSN 网络协议版本选择（事件分析发起时锁定）
   const [availableVersions, setAvailableVersions] = useState([])
   const [selectedVersionId, setSelectedVersionId] = useState(null)
 
-  // 加载网络配置版本列表（仅 Available 状态）
+  // 加载 TSN 网络协议版本列表（仅 Available 状态）
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -128,11 +128,11 @@ function FmsEventAnalysisPage() {
     }
   }, [polling, analysisTask?.status, taskId, loadData])
   
-  // 运行事件分析（MR4：必须指定网络配置版本）
+  // 运行事件分析（MR4：必须指定 TSN 网络协议版本）
   const handleRunAnalysis = async () => {
     const vid = selectedVersionId || parseTask?.protocol_version_id
     if (!vid) {
-      message.warning('请先选择用于本次分析的网络配置版本')
+      message.warning('请先选择用于本次分析的 TSN 网络协议版本')
       return
     }
     setRunning(true)
@@ -395,11 +395,11 @@ function FmsEventAnalysisPage() {
           </Col>
         </Row>
 
-        {/* MR4：运行前选择网络配置版本。完成后不再展示，结果与所用版本均已落库可审计 */}
+        {/* MR4：运行前选择 TSN 网络协议版本。完成后不再展示，结果与所用版本均已落库可审计 */}
         {!isCompleted && (
           <Row style={{ marginTop: 16 }} align="middle" gutter={12}>
             <Col flex="0 0 auto">
-              <span style={{ color: '#a1a1aa' }}>网络配置版本</span>
+              <span style={{ color: '#a1a1aa' }}>TSN 网络协议版本</span>
             </Col>
             <Col flex="0 0 260px">
               <Select
@@ -445,7 +445,7 @@ function FmsEventAnalysisPage() {
           <Row style={{ marginTop: 12 }}>
             <Col span={24}>
               <span style={{ color: '#a1a1aa', fontSize: 12 }}>
-                本次分析基于网络配置版本：
+                本次分析基于 TSN 网络协议版本：
                 <Tag color="purple" style={{ marginLeft: 8 }}>
                   TSN {analysisTask.bundle_version_label
                     ? analysisTask.bundle_version_label

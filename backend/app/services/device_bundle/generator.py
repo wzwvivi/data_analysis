@@ -311,7 +311,7 @@ def _project_label(raw: Dict[str, Any]) -> Optional[DeviceLabel]:
     )
 
 
-# NOTE: port_routing（UDP 端口 → labels）归属 TSN 网络配置（BundlePort.arinc_labels），
+# NOTE: port_routing（UDP 端口 → labels）归属 TSN 网络协议（BundlePort.arinc_labels），
 # 不再由设备 bundle 承载。旧版 spec_json 里可能残留 port_routing 字段，但本模块不再
 # 向 DeviceBundle 投影；parser 运行期从 TSN runtime_bundle 读取。
 

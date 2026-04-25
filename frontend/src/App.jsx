@@ -6,7 +6,6 @@ import LoginPage from './pages/LoginPage'
 import UploadPage from './pages/UploadPage'
 import TaskListPage from './pages/TaskListPage'
 import ResultPage from './pages/ResultPage'
-import FmsEventAnalysisPage from './pages/FmsEventAnalysisPage'
 import StandaloneFmsEventPage from './pages/StandaloneFmsEventPage'
 import StandaloneFmsEventTaskPage from './pages/StandaloneFmsEventTaskPage'
 import FccEventAnalysisPage from './pages/FccEventAnalysisPage'
@@ -159,8 +158,6 @@ function AppRoutes() {
         <Route path="/tasks" element={<PermissionRoute requiredPage="tasks"><TaskListPage /></PermissionRoute>} />
         <Route path="/tasks/:taskId" element={<PermissionRoute requiredPage="tasks/:taskId"><ResultPage /></PermissionRoute>} />
         <Route path="/tasks/:taskId/analysis" element={<PermissionRoute requiredPage="tasks/:taskId/analysis"><TaskAnalysisLegacyRedirect /></PermissionRoute>} />
-        <Route path="/tasks/:taskId/event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
-        <Route path="/tasks/:taskId/fms-event-analysis" element={<PermissionRoute requiredPage="tasks/:taskId/event-analysis"><FmsEventAnalysisPage /></PermissionRoute>} />
         <Route path="/network-config" element={<PermissionRoute requiredPage="network-config"><NetworkConfigPage /></PermissionRoute>} />
         <Route path="/network-config/versions/:id" element={<PermissionRoute requiredPage="network-config"><VersionViewerPage /></PermissionRoute>} />
         <Route path="/network-config/drafts/:id" element={<PermissionRoute requiredPage="network-config"><DraftEditorPage /></PermissionRoute>} />

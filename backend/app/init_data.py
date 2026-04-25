@@ -194,7 +194,7 @@ async def init_parser_profiles(db: AsyncSession):
                 protocol_family="xpdr",
                 parser_key="jzxpdr113b_v20260113",
                 is_active=True,
-                description="根据JZXPDR113B S模式应答机接口控制文件20260113版本，解码ARINC 429标签，输出经纬度、地速、航向等飞行参数。端口由TSN网络配置动态指定。",
+                description="根据JZXPDR113B S模式应答机接口控制文件20260113版本，解码ARINC 429标签，输出经纬度、地速、航向等飞行参数。端口由 TSN 网络协议动态指定。",
                 supported_ports="",
                 output_fields='["timestamp","beijing_time","latitude","longitude","ground_speed","true_heading","track_angle","vertical_velocity","north_velocity","east_velocity","geometric_height","nav_integrity_raw","ssm_status"]',
             )
@@ -262,7 +262,7 @@ async def init_parser_profiles(db: AsyncSession):
                 protocol_family="irs",
                 parser_key="irs_v3",
                 is_active=True,
-                description="惯导通讯协议V3.0解析器。解码姿态角（航向/俯仰/滚动）、速度（东/北/天向）、位置（经纬度/高度）、角速度、加速度等参数。端口由TSN网络配置动态指定，解析时通过包头(0xEB 0x90)自动识别数据格式。",
+                description="惯导通讯协议V3.0解析器。解码姿态角（航向/俯仰/滚动）、速度（东/北/天向）、位置（经纬度/高度）、角速度、加速度等参数。端口由 TSN 网络协议动态指定，解析时通过包头(0xEB 0x90)自动识别数据格式。",
                 supported_ports="",
                 output_fields=_IRS_OUTPUT_FIELDS,
             )
@@ -319,7 +319,7 @@ async def init_parser_profiles(db: AsyncSession):
                 protocol_family="rtk",
                 parser_key="rtk_v1.4",
                 is_active=True,
-                description="RTK设备通信协议V1.4解析器。解码GPS/北斗定位数据，包括经纬度、海拔/椭球高度、地速、航迹角、天向/东向/北向速度、HDOP/VDOP、保护级(HPL/VPL)、UTC时间等参数。帧头0x55AA55AA，24组32bit数据，大端序。端口由TSN网络配置动态指定。",
+                description="RTK设备通信协议V1.4解析器。解码GPS/北斗定位数据，包括经纬度、海拔/椭球高度、地速、航迹角、天向/东向/北向速度、HDOP/VDOP、保护级(HPL/VPL)、UTC时间等参数。帧头0x55AA55AA，24组32bit数据，大端序。端口由 TSN 网络协议动态指定。",
                 supported_ports="",
                 output_fields=_RTK_OUTPUT_FIELDS,
             )
@@ -344,7 +344,7 @@ async def init_parser_profiles(db: AsyncSession):
                 protocol_family="atg",
                 parser_key="atg_cpe_v20260402",
                 is_active=True,
-                description="基于《CPE通信协议_标红必须-Label修改》实现，覆盖标红必选Label(132/175/254/255/261/324/325/150/260)。端口由TSN网络配置动态指定。",
+                description="基于《CPE通信协议_标红必须-Label修改》实现，覆盖标红必选Label(132/175/254/255/261/324/325/150/260)。端口由 TSN 网络协议动态指定。",
                 supported_ports="",
                 output_fields='["timestamp","true_track_angle_deg","ground_speed_kn","latitude_deg","longitude_deg","altitude_ft","pitch_angle_deg","roll_angle_deg","utc_time","date_text","utc_raw","date_raw","ssm_status"]',
             )
@@ -371,7 +371,7 @@ async def init_parser_profiles(db: AsyncSession):
                 protocol_family="fms",
                 parser_key="fms_fcc_v1.5",
                 is_active=True,
-                description="飞管与飞控、自动飞行交互数据协议V1.5。覆盖飞行状态、导航计算、时间计算、飞行任务、起降跑道、性能计算、航段总览/数据共11种消息类型。端口由TSN网络配置动态指定。",
+                description="飞管与飞控、自动飞行交互数据协议V1.5。覆盖飞行状态、导航计算、时间计算、飞行任务、起降跑道、性能计算、航段总览/数据共11种消息类型。端口由 TSN 网络协议动态指定。",
                 supported_ports="",
                 output_fields='["timestamp","source_port","fms_id","target_fcc","msg_type","msg_type_cn","fms_role","flight_scene","flight_phase","air_ground","sys_longitude_deg","sys_latitude_deg","sys_ground_speed_mps","sys_altitude_m","sys_heading_deg","sys_track_angle_deg","cruise_altitude_m","outside_temp_c","runway_validity","rwy_start_lon_deg","rwy_start_lat_deg","rwy_length_m","aircraft_weight_kg","leg_total_count","leg_index","leg_type","leg_type_cn","packet_size"]',
             )
@@ -678,7 +678,7 @@ async def init_parser_profiles(db: AsyncSession):
                 protocol_family="fcc",
                 parser_key="fcc_v13",
                 is_active=True,
-                description="飞控状态帧/飞控通道选择解析器。支持主飞控表决结果与IRS通道选择关键字段提取，端口由TSN网络配置动态指定。",
+                description="飞控状态帧/飞控通道选择解析器。支持主飞控表决结果与IRS通道选择关键字段提取，端口由 TSN 网络协议动态指定。",
                 supported_ports="",
                 output_fields='["timestamp","source_port","source_fcc","frame_type","fcc_vote_raw","fcc_vote_bits","main_fcc","irs_channel_code","irs_channel_name","raw_data","packet_size"]',
             )

@@ -164,7 +164,7 @@ class ATGCPEParser(Arinc429Mixin, BaseParser):
 
     _LABEL_DEFS = _LABEL_DEFS
     _FIELD_NAME_TO_LABEL = _FIELD_NAME_TO_LABEL
-    # 端口 → labels 路由由 TSN 网络配置承载。
+    # 端口 → labels 路由由 TSN 网络协议承载。
 
     LABEL_TRACK_ANGLE = _LABEL_MAP["132"]
     LABEL_GROUND_SPEED = _LABEL_MAP["175"]

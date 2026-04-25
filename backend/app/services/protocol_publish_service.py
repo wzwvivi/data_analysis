@@ -135,7 +135,7 @@ async def submit_draft(
     from .protocol_draft_service import ProtocolDraftService
     diff = await ProtocolDraftService(db).compute_diff(draft_id)
 
-    # 创建 CR（显式标记为 TSN 网络配置，供通用审批引擎区分）
+    # 创建 CR（显式标记为 TSN 网络协议 / tsn_network，供通用审批引擎区分）
     normalized_teams = normalize_notify_teams(notify_teams)
     cr = ProtocolChangeRequest(
         draft_id=draft.id,

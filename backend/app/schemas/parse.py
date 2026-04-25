@@ -10,7 +10,7 @@ class ParseTaskCreate(BaseModel):
     parser_profile_id: Optional[int] = None  # 单解析器(兼容旧接口)
     parser_profile_ids: Optional[List[int]] = None  # 多解析器ID列表(兼容旧接口)
     device_parser_map: Optional[Dict[str, int]] = None  # 设备到解析器映射: {device_name: parser_profile_id}
-    protocol_version_id: Optional[int] = None  # TSN网络配置版本ID
+    protocol_version_id: Optional[int] = None  # TSN 网络协议版本 ID
     selected_ports: Optional[List[int]] = None  # None表示解析所有端口
     selected_devices: Optional[List[str]] = None  # 选择的设备列表
 

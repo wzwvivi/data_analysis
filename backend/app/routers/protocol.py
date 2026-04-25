@@ -4,7 +4,7 @@
 本模块是「用户选版本」那一侧的只读入口：解析任务、事件分析页都通过
 `GET /api/protocols/versions` 拿候选版本。按 `ProtocolVersion.availability_status`
 过滤，默认仅暴露 `Available`，让 `PendingCode / Deprecated` 状态的版本对终端用户
-完全不可见。网络团队自己的工作台（草稿 / 审批 / 激活）走 `/api/network-config`，
+完全不可见。网络团队自己的 **TSN 网络配置管理**工作台（草稿 / 审批 / 激活）走 `/api/network-config`，
 不跟这里混用。
 """
 from typing import List
@@ -67,9 +67,9 @@ async def _ensure_version_user_visible(
     )
     pv = result.scalar_one_or_none()
     if pv is None:
-        raise HTTPException(status_code=404, detail="网络配置版本不存在")
+        raise HTTPException(status_code=404, detail="TSN 网络协议版本不存在")
     if pv.availability_status != AVAILABILITY_AVAILABLE:
-        raise HTTPException(status_code=404, detail="该网络配置版本当前不可用")
+        raise HTTPException(status_code=404, detail="该 TSN 网络协议版本当前不可用")
     return pv
 
 
@@ -118,10 +118,10 @@ async def create_protocol(
     _data: ProtocolCreate,
     _db: AsyncSession = Depends(get_db),
 ):
-    """创建协议（禁用：请走 `/api/network-config` 审批发布流程）"""
+    """创建协议（禁用：请走「TSN 网络配置管理」/ `/api/network-config` 审批发布流程）"""
     raise HTTPException(
         status_code=403,
-        detail="请通过网络团队配置管理（审批 → 发布 → 激活）创建新版本",
+        detail="请通过 TSN 网络配置管理（网络团队；审批 → 发布 → 激活）创建新版本",
     )
 
 

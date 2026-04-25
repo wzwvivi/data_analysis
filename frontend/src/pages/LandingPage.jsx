@@ -63,7 +63,7 @@ const CAPABILITIES = [
   {
     icon: <SafetyCertificateOutlined />,
     title: '配置与协议版本治理',
-    desc: '网络配置、设备协议全部版本化，支持草稿、审批、发布三态流转，解析口径永久可追溯。',
+    desc: 'TSN 网络配置管理、设备协议管理全部版本化，支持草稿、审批、发布三态流转，解析口径永久可追溯。',
   },
   {
     icon: <AimOutlined />,

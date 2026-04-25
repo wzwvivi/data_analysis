@@ -106,12 +106,21 @@ async def get_overview(
 @router.get("/sorties/{sortie_id}/events-summary")
 async def get_events_summary(
     sortie_id: int,
-    parse_task_id: int,
+    parse_task_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    """四类事件分析（FMS/FCC/自动飞行/TSN 异常检查）汇总。"""
+    """四类专项分析（FMS/FCC/自动飞行/TSN 异常检查）汇总。
+
+    架次归属严格通过「平台共享数据」建立：架次绑定的 ``SharedTsnFile.file_path``
+    既用于反查解析任务，也用于匹配 standalone-from-shared 创建的分析任务的
+    ``pcap_file_path``。本地直传的 standalone 分析不绑定架次。
+
+    - 不传 ``parse_task_id``：按整个架次自动聚合（默认）。
+    - 传 ``parse_task_id``：在解析任务维度收窄到该任务上挂的分析；共享 pcap 兜底
+      仍按整个架次匹配。
+    """
     sortie = (await db.execute(select(SharedSortie).where(SharedSortie.id == sortie_id))).scalar_one_or_none()
     if not sortie:
         raise HTTPException(status_code=404, detail="试验架次不存在")
-    return await wbs.build_events_summary(db, parse_task_id)
+    return await wbs.build_events_summary(db, sortie_id, parse_task_id)

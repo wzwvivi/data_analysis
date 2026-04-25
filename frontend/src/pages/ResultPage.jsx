@@ -12,7 +12,7 @@ import {
   BarChartOutlined, SwapOutlined, WarningOutlined,
   SettingOutlined, PushpinOutlined, AppstoreOutlined,
   PlusOutlined, DeleteOutlined, StopOutlined, EditOutlined,
-  ExperimentOutlined, RedoOutlined,
+  RedoOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import * as echarts from 'echarts'
@@ -2706,14 +2706,6 @@ function ResultPage() {
             </Space>
           </Space>
           <Space wrap>
-            {task.status === 'completed' && (
-              <Button
-                icon={<ExperimentOutlined />}
-                onClick={() => navigate(`/tasks/${task.id}/event-analysis`)}
-              >
-                专项分析
-              </Button>
-            )}
             {task.can_rerun && (
               <Button icon={<RedoOutlined />} onClick={handleRerunTask}>
                 重新解析
@@ -2743,7 +2735,7 @@ function ResultPage() {
           </Col>
           <Col xs={12} sm={6} md={4} lg={4}>
             <Statistic
-              title={<Space size={4}><ApiOutlined style={{ color: '#8b5cf6' }} /><span>网络配置</span></Space>}
+              title={<Space size={4}><ApiOutlined style={{ color: '#8b5cf6' }} /><span>TSN 网络</span></Space>}
               value={task.network_config_name ? `${task.network_config_name} ${task.network_config_version}` : '扫描模式'}
               valueStyle={{ fontSize: 13, color: task.network_config_name ? '#8b5cf6' : '#a1a1aa' }}
             />

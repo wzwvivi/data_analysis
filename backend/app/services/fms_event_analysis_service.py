@@ -240,7 +240,7 @@ class FmsEventAnalysisService:
                 runtime_bundle = await self._resolve_bundle(task_bvid, strict=task_bvid is not None)
             except self.BundleResolutionError as exc:
                 analysis_task.status = "failed"
-                analysis_task.error_message = f"网络配置版本加载失败：{exc}"
+                analysis_task.error_message = f"TSN 网络协议版本加载失败：{exc}"
                 await self.db.commit()
                 print(f"[EventAnalysis] {analysis_task.error_message}")
                 return False
@@ -515,7 +515,7 @@ class FmsEventAnalysisService:
                 )
             except self.BundleResolutionError as exc:
                 analysis_task.status = "failed"
-                analysis_task.error_message = f"网络配置版本加载失败：{exc}"
+                analysis_task.error_message = f"TSN 网络协议版本加载失败：{exc}"
                 await self.db.commit()
                 print(f"[EventAnalysis] 独立模式 {analysis_task.error_message}")
                 return False

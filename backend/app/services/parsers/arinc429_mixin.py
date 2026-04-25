@@ -14,7 +14,7 @@ parser（JZXPDR113B、ATG CPE）不继承本 Mixin 的通用 _decode_with_bundle
 
 **职责划分**：
 - 端口路由（port → arinc_labels）和字段偏移（field_offset / length）
-  由 TSN 网络配置承载；parse 阶段由 ParserService 注入 runtime_bundle。
+  由 TSN 网络协议承载；parse 阶段由 ParserService 注入 runtime_bundle。
 - Label 定义（bits / 编码 / 单位 / SSM 语义 / port override 等）由
   DeviceBundle 承载，通过 ``set_device_bundle`` 注入；parser 在运行期
   只读 bundle，不再保留硬编码 label defs 兜底。如果 bundle 未注入或
@@ -109,12 +109,12 @@ class Arinc429Mixin:
         self._current_port: Optional[int] = None
 
     # ------------------------------------------------------------------
-    # 端口 → 允许 label 列表（唯一来源：TSN 网络配置）
+    # 端口 → 允许 label 列表（唯一来源：TSN 网络协议）
     # ------------------------------------------------------------------
     def _get_port_labels(self, port: int) -> List[int]:
         """返回指定端口允许的八进制 label 列表（来自 TSN runtime_bundle）。
 
-        **职责划分**：port → labels 路由属于"网络拓扑"，由 TSN 网络配置版本化
+        **职责划分**：port → labels 路由属于"网络拓扑"，由 TSN 网络协议版本化
         （``BundlePort.arinc_labels``）。解析任务必须选定 TSN 版本，该版本已由
         管理员激活前审核，运行期始终可信，因此**不再保留硬编码 fallback**。
 

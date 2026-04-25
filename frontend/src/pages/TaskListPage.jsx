@@ -108,7 +108,7 @@ function TaskListPage() {
   }, [loadTasks])
 
   useEffect(() => {
-    // 只获取一次网络配置下拉
+    // 只获取一次 TSN 网络侧协议版本下拉（用于筛选列）
     protocolApi.listVersions().then((res) => {
       setVersions(res.data.items || [])
     }).catch(() => setVersions([]))
@@ -334,7 +334,7 @@ function TaskListPage() {
       ),
     },
     {
-      title: '网络配置',
+      title: 'TSN 网络',
       key: 'network_config',
       width: 180,
       render: (_, record) => (
@@ -533,7 +533,7 @@ function TaskListPage() {
               allowClear
               showSearch
               optionFilterProp="label"
-              placeholder="网络配置"
+              placeholder="TSN 网络 / 协议版本"
               style={{ width: '100%' }}
               value={filterVersion}
               onChange={(v) => { setFilterVersion(v); setPagination(p => ({ ...p, current: 1 })) }}

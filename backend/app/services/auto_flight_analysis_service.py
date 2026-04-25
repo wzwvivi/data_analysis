@@ -296,7 +296,7 @@ class AutoFlightAnalysisService:
             )
         except BundleResolutionError as exc:
             task.status = "failed"
-            task.error_message = f"网络配置版本加载失败：{exc}"
+            task.error_message = f"TSN 网络协议版本加载失败：{exc}"
             await self.db.commit()
             print(f"[AutoFlightAnalysis] {task.error_message}")
             return False

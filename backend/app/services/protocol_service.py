@@ -126,7 +126,7 @@ def resolve_port_family(port: int, db_family: Optional[str] = None) -> Optional[
     """端口 → 协议族。优先使用传入的 DB 值 (`PortDefinition.protocol_family`)，
     为空时回退到历史硬编码 `PORT_FAMILY_MAP`。
 
-    这样 TSN 网络配置里新增端口（给定 protocol_family）即可直接生效，
+    这样 TSN 网络协议里新增端口（给定 protocol_family）即可直接生效，
     无需改代码；存量端口在数据迁移里已按 MAP 回填，行为保持兼容。
     """
     if db_family:
@@ -307,7 +307,7 @@ class ProtocolService:
     
     async def get_devices_by_version(self, version_id: int) -> List[dict]:
         """
-        获取网络配置版本下的设备列表，按设备名聚合端口
+        获取 TSN 网络协议版本下的设备列表，按设备名聚合端口
         
         基于 source_device 聚合设备；并保留该设备出现过的数据方向（uplink/downlink/network）。
         

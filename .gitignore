@@ -20,7 +20,9 @@ backend-uploads/
 backend-runtime/data/exports/
 # results/*.parquet tracked for reproducibility; uploads remain local
 backend-runtime/uploads/
-# 主库文件可选择纳入版本库；WAL/SHM 仍为临时文件勿提交
+# 主库为本地/Docker 运行时数据，勿提交到 GitHub（避免体积与敏感数据）
+backend-runtime/data/*.db
+# WAL/SHM 仍为临时文件勿提交
 backend-runtime/data/*.db-journal
 backend-runtime/data/*.db-wal
 backend-runtime/data/*.db-shm

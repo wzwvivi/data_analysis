@@ -126,7 +126,7 @@ function UploadPage() {
       const res = await protocolApi.listVersions()
       setNetVersions(res.data.items || [])
     } catch (err) {
-      message.error('加载网络配置失败')
+      message.error('加载 TSN 网络侧配置失败')
     } finally {
       setLoading(false)
     }
@@ -524,7 +524,7 @@ function UploadPage() {
     return devices.filter(d => selectedDevices.includes(d.device_name))
   }, [devices, selectedDevices])
 
-  // 上传页引导步骤：数据 → 网络配置 → 设备 → 协议版本 → 提交
+  // 上传页引导步骤：数据 → TSN 网络侧配置 → 设备 → 协议版本 → 提交
   const hasData = (dataSource === 'local' && fileList.length > 0) || (dataSource === 'platform' && !!platformFileId)
   const uploadStep = !hasData
     ? 0
@@ -543,14 +543,14 @@ function UploadPage() {
       desc: '上传从 TSN 网络抓取的 .pcapng / .pcap / .cap 文件，或优先选择平台共享数据（近 20 天内有效，单文件上限 2 GB）。',
     },
     {
-      title: '2. 选择网络配置',
+      title: '2. 选择 TSN 网络侧配置',
       titleColor: '#a78bfa',
-      desc: '选择 TSN 网络配置版本，定义端口和字段偏移位置；这一步决定解析口径，如需新增版本请到「TSN 网络配置」发起审批。',
+      desc: '选择 TSN 网络侧协议/配置版本，定义端口和字段偏移位置；这一步决定解析口径，如需新增版本请到侧栏「TSN 网络配置管理」发起审批。',
     },
     {
       title: '3. 选择设备',
       titleColor: '#d4a843',
-      desc: '选择要解析的目标设备；系统会按网络配置给出可选设备，选择 ATG 时会自动带入 IRS / RTK / FCC 依赖设备。',
+      desc: '选择要解析的目标设备；系统会按上一步所选的 TSN 网络侧配置给出可选设备，选择 ATG 时会自动带入 IRS / RTK / FCC 依赖设备。',
     },
     {
       title: '4. 配置解析版本',
@@ -571,7 +571,7 @@ function UploadPage() {
           icon={<CloudUploadOutlined />}
           eyebrow="数据接入"
           title="上传 TSN 数据包"
-          subtitle="选择平台共享数据或本地 PCAP 抓包文件，依次指定网络配置、参与设备及各设备所需的协议版本，系统将据此创建解析任务。"
+          subtitle="选择平台共享数据或本地 PCAP 抓包文件，依次指定 TSN 网络侧配置（协议版本）、参与设备及各设备所需的协议版本，系统将据此创建解析任务。"
           tags={[
             { text: '支持 .pcapng / .pcap / .cap' },
             { text: '单文件上限 2 GB', tone: 'neutral' },
@@ -585,7 +585,7 @@ function UploadPage() {
           current={uploadStep}
           items={[
             { title: '选择数据', description: '平台共享 / 本地上传' },
-            { title: 'TSN 网络配置', description: '指定协议版本' },
+            { title: 'TSN 网络配置管理', description: '指定协议版本' },
             { title: '选择设备', description: '勾选需要解析的设备' },
             { title: '设备协议版本', description: '为每个设备绑定版本' },
             { title: '开始解析', description: '提交后跳转任务详情' },
@@ -661,19 +661,19 @@ function UploadPage() {
             )}
 
             <Form form={form} layout="vertical">
-              {/* 1. TSN网络配置 */}
+              {/* 1. 选择已发布的 TSN 网络侧配置版本（在「TSN 网络配置管理」中维护/发布） */}
               <Form.Item
                 label={
                   <Space>
                     <ApiOutlined style={{ color: '#8b5cf6' }} />
-                    <span style={{ fontWeight: 600, color: '#f4f4f5' }}>TSN网络配置</span>
+                    <span style={{ fontWeight: 600, color: '#f4f4f5' }}>TSN 网络侧配置</span>
                     <Tag style={{ background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.4)', color: '#a78bfa' }}>必选</Tag>
                   </Space>
                 }
                 required
               >
                 <Select
-                  placeholder="请选择TSN网络配置版本"
+                  placeholder="请选择 TSN 网络侧协议/配置版本"
                   onChange={handleVersionChange}
                   loading={loading}
                   style={{ width: '100%' }}
@@ -713,7 +713,7 @@ function UploadPage() {
                   message={
                     <Space direction="vertical" size={4}>
                       <div>
-                        <strong>网络配置：</strong>{selectedVersionInfo.protocol_name} - {selectedVersionInfo.version}
+                        <strong>已选 TSN 网络侧配置：</strong>{selectedVersionInfo.protocol_name} - {selectedVersionInfo.version}
                       </div>
                       <div style={{ color: '#a1a1aa', fontSize: 12 }}>
                         {selectedVersionInfo.port_count} 个端口定义
@@ -925,7 +925,7 @@ function UploadPage() {
           {netVersions.length === 0 && !loading && (
             <Card title="提示" size="small" style={{ marginTop: 16 }}>
               <div style={{ color: '#d4a843' }}>
-                <p style={{ marginBottom: 4 }}>暂无可用网络配置</p>
+                <p style={{ marginBottom: 4 }}>暂无可选 TSN 网络侧配置版本</p>
                 <p style={{ fontSize: 12, color: '#a1a1aa', marginBottom: 0 }}>
                   当前系统固定使用 TSN ICD v6.0.1，请联系管理员检查内置配置是否加载成功。
                 </p>

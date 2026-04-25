@@ -37,7 +37,7 @@ function StandaloneFmsEventPage() {
   const [platformId, setPlatformId] = useState(null)
   const [localFile, setLocalFile] = useState(null)
 
-  // MR4：网络配置版本（bundle）选择
+  // MR4：TSN 网络协议版本（bundle）选择
   const [availableVersions, setAvailableVersions] = useState([])
   const [bundleVersionId, setBundleVersionId] = useState(null)
 
@@ -102,7 +102,7 @@ function StandaloneFmsEventPage() {
       return
     }
     if (!bundleVersionId) {
-      message.warning('请选择网络配置版本')
+      message.warning('请选择 TSN 网络协议版本')
       return
     }
     const formData = new FormData()
@@ -132,7 +132,7 @@ function StandaloneFmsEventPage() {
       return
     }
     if (!bundleVersionId) {
-      message.warning('请选择网络配置版本')
+      message.warning('请选择 TSN 网络协议版本')
       return
     }
     const formData = new FormData()
@@ -246,7 +246,7 @@ function StandaloneFmsEventPage() {
               style={{ width: 200 }}
               options={[{ value: 'default_v1', label: '航后检查单 (default_v1)' }]}
             />
-            <span style={{ color: '#a1a1aa', marginLeft: 16 }}>网络配置版本</span>
+            <span style={{ color: '#a1a1aa', marginLeft: 16 }}>TSN 网络协议版本</span>
             <Select
               value={bundleVersionId}
               onChange={setBundleVersionId}
